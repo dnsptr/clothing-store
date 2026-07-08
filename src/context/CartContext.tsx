@@ -11,6 +11,7 @@ export interface CartItem {
 }
 
 interface CartContextType {
+  // Cart States
   cartItems: CartItem[];
   isCartOpen: boolean;
   addToCart: (item: CartItem) => void;
@@ -20,15 +21,27 @@ interface CartContextType {
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
   cartTotal: number;
+
+  // Shop / Navigation States (Phase 4)
+  gender: "women" | "men";
+  setGender: (gender: "women" | "men") => void;
+  isMenuOpen: boolean;
+  toggleMenu: () => void;
+  setIsMenuOpen: (isOpen: boolean) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
+  // Cart items
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartCount, setCartCount] = useState(0);
   const [cartTotal, setCartTotal] = useState(0);
+
+  // Shop Navigation
+  const [gender, setGender] = useState<"women" | "men">("women");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // Synchronize cart count and total price whenever cart items change
   useEffect(() => {
@@ -97,6 +110,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const toggleCart = () => {
     setIsCartOpen((prev) => !prev);
+    if (isMenuOpen) setIsMenuOpen(false); // Close left menu if cart is opened
+  };
+
+  const toggleMenu = () => {
+    setIsMenuOpen((prev) => !prev);
+    if (isCartOpen) setIsCartOpen(false); // Close cart if left menu is opened
   };
 
   return (
@@ -111,6 +130,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setIsCartOpen,
         cartCount,
         cartTotal,
+        gender,
+        setGender,
+        isMenuOpen,
+        toggleMenu,
+        setIsMenuOpen,
       }}
     >
       {children}

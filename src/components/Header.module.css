@@ -149,3 +149,54 @@
     color: inherit;
   }
 }
+
+/* Left Section Layout (Phase 4) */
+.leftSection {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+@media (max-width: 900px) {
+  .leftSection {
+    gap: 12px;
+  }
+}
+
+.genderToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .genderToggle {
+    display: none; /* Already rendered inside MenuDrawer on mobile */
+  }
+}
+
+.genderBtn {
+  opacity: 0.5;
+  transition: var(--transition-fast);
+  padding: 4px 0;
+}
+
+.genderBtn:hover {
+  opacity: 0.8;
+}
+
+.genderBtnActive {
+  opacity: 1;
+  font-weight: 600;
+  border-bottom: 1px solid currentColor;
+}
+
+.separator {
+  opacity: 0.3;
+}
+

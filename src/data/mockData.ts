@@ -5,6 +5,7 @@ export interface Product {
   category: string;
   images: string[];
   colors: { name: string; hex: string }[];
+  gender: "women" | "men" | "unisex";
   isNew?: boolean;
   isSoldOut?: boolean;
 }
@@ -23,14 +24,14 @@ export const MOCK_COLLECTIONS: Collection[] = [
     title: "Женская коллекция",
     subtitle: "Элегантный трикотаж, премиальный лен и шелк",
     image: "/images/collection-women.png",
-    link: "#",
+    link: "/catalog?gender=women",
   },
   {
     id: "men",
     title: "Мужская коллекция",
     subtitle: "Безупречный крой, тонкая шерсть и кашемир",
     image: "/images/collection-men.png",
-    link: "#",
+    link: "/catalog?gender=men",
   },
 ];
 
@@ -45,6 +46,7 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Песочный", hex: "#E1DBD3" },
       { name: "Угольный", hex: "#1C1B1A" },
     ],
+    gender: "women",
     isNew: true,
   },
   {
@@ -57,6 +59,7 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Молочный", hex: "#F3EFE9" },
       { name: "Тауп", hex: "#8E8276" },
     ],
+    gender: "women",
     isNew: true,
   },
   {
@@ -69,6 +72,7 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Светло-бежевый", hex: "#EDEAE4" },
       { name: "Горький шоколад", hex: "#302E2B" },
     ],
+    gender: "women",
   },
   {
     id: "4",
@@ -80,6 +84,30 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Шоколад", hex: "#50352A" },
       { name: "Черный", hex: "#1C1B1A" },
     ],
+    gender: "unisex",
     isSoldOut: false,
+  },
+  {
+    id: "5",
+    name: "Шерстяное пальто классического кроя",
+    price: 26000,
+    category: "Верхняя одежда",
+    images: ["/images/collection-men.png"],
+    colors: [
+      { name: "Угольный", hex: "#303030" },
+    ],
+    gender: "men",
+    isNew: true,
+  },
+  {
+    id: "6",
+    name: "Джемпер из ультратонкого кашемира",
+    price: 16800,
+    category: "Трикотаж",
+    images: ["/images/product-knitwear.png"],
+    colors: [
+      { name: "Тауп", hex: "#8E8276" },
+    ],
+    gender: "men",
   },
 ];

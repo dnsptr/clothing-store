@@ -1,0 +1,218 @@
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(1px);
+  z-index: 10000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.overlayOpen {
+  opacity: 1;
+  visibility: visible;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 380px;
+  height: 100vh;
+  background-color: var(--bg-card);
+  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.05);
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateX(-100%);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (max-width: 480px) {
+  .drawer {
+    width: 100%;
+  }
+}
+
+.drawerOpen {
+  transform: translateX(0);
+}
+
+/* Header Close Button */
+.headerClose {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 10005;
+  color: var(--text-secondary);
+  transition: var(--transition-fast);
+}
+
+.headerClose:hover {
+  color: var(--text-primary);
+  transform: rotate(90deg);
+}
+
+.closeIcon {
+  width: 24px;
+  height: 24px;
+}
+
+/* Gender Tabs Switcher */
+.genderTabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-light);
+  background-color: var(--bg-secondary);
+}
+
+.tabBtn {
+  flex: 1;
+  text-align: center;
+  padding: 18px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  transition: var(--transition-fast);
+  position: relative;
+}
+
+.tabBtnActive {
+  color: var(--text-primary);
+  background-color: var(--bg-card);
+}
+
+.tabBtnActive::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--text-primary);
+}
+
+/* Panels Slider Wrapper */
+.panelContainer {
+  flex: 1;
+  display: flex;
+  width: 200%; /* Double width for Level 0 + Level 1 side-by-side */
+  height: calc(100vh - 55px);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.slideSubPanel {
+  transform: translateX(-50%); /* Slide Level 1 into view */
+}
+
+/* Base Panel Styles */
+.panel {
+  width: 50%; /* Each panel takes half of double-width wrapper */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Level 0 Menu List */
+.menuList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.menuItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-light);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 300;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.menuItem:hover {
+  background-color: var(--bg-primary);
+  color: var(--accent);
+}
+
+.chevronIcon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-light);
+}
+
+/* Level 1 Sub-panel */
+.subPanelHeader {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.backBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  font-weight: 500;
+  align-self: flex-start;
+  transition: var(--transition-fast);
+}
+
+.backBtn:hover {
+  color: var(--text-primary);
+  transform: translateX(-4px);
+}
+
+.backIcon {
+  width: 14px;
+  height: 14px;
+}
+
+.subPanelTitle {
+  font-size: 26px;
+  font-weight: 300;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+}
+
+.subMenuList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.subMenuItem {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-light);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: var(--transition-fast);
+}
+
+.subMenuItem:hover {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  padding-left: 28px;
+}

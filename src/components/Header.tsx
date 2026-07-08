@@ -9,7 +9,7 @@ import styles from "./Header.module.css";
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
-  const { cartCount, toggleCart } = useCart();
+  const { cartCount, toggleCart, gender, setGender, toggleMenu } = useCart();
 
   const isHome = pathname === "/";
 
@@ -36,34 +36,52 @@ export default function Header() {
   return (
     <header className={`${styles.header} ${(!isHome || isScrolled) ? styles.scrolled : ""}`}>
       <div className={styles.container}>
-        {/* Left Side: Mobile Menu Button & Desktop Nav */}
-        <button className={styles.menuBtn} aria-label="Открыть меню">
-          <svg
-            className={styles.icon}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="1.5"
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
-        </button>
+        {/* Left Side: Burger Menu and Gender Switcher */}
+        <div className={styles.leftSection}>
+          <button className={styles.menuBtn} onClick={toggleMenu} aria-label="Открыть меню">
+            <svg
+              className={styles.icon}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
+          
+          <div className={styles.genderToggle}>
+            <button
+              className={`${styles.genderBtn} ${gender === "women" ? styles.genderBtnActive : ""}`}
+              onClick={() => setGender("women")}
+            >
+              Женское
+            </button>
+            <span className={styles.separator}>/</span>
+            <button
+              className={`${styles.genderBtn} ${gender === "men" ? styles.genderBtnActive : ""}`}
+              onClick={() => setGender("men")}
+            >
+              Мужское
+            </button>
+          </div>
+        </div>
 
         <nav className={styles.nav}>
-          <Link href="#" className={styles.navLink}>
+          <Link href={`/catalog?gender=${gender}`} className={styles.navLink}>
             Новинки
           </Link>
-          <Link href="#" className={styles.navLink}>
-            Женское
+          <Link href={`/catalog?gender=${gender}`} className={styles.navLink}>
+            Одежда
           </Link>
-          <Link href="#" className={styles.navLink}>
-            Мужское
+          <Link href={`/catalog?gender=${gender}&category=Аксессуары`} className={styles.navLink}>
+            Аксессуары
           </Link>
-          <Link href="#" className={styles.navLink}>
+          <Link href="/" className={styles.navLink}>
             О бренде
           </Link>
         </nav>
