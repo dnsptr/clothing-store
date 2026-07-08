@@ -17,6 +17,14 @@ export interface Collection {
   link: string;
 }
 
+export interface CollectionOutfit {
+  id: string;
+  title: string;
+  subtitle: string;
+  image: string;
+  productIds: string[];
+}
+
 export const MOCK_COLLECTIONS: Collection[] = [
   {
     id: "clothing",
@@ -170,5 +178,29 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Горький шоколад", hex: "#302E2B" },
       { name: "Черный", hex: "#1C1B1A" },
     ],
+  },
+];
+
+export const MOCK_OUTFITS: CollectionOutfit[] = [
+  {
+    id: "linen-look",
+    title: "Льняной силуэт",
+    subtitle: "Летний образ с тренчем и брюками",
+    image: "/products/1/1-1.jpg",
+    productIds: ["1", "3", "4"],
+  },
+  {
+    id: "cashmere-cozy",
+    title: "Теплый трикотаж",
+    subtitle: "Кашемировый джемпер и шерстяная юбка",
+    image: "/products/2/2-1.png",
+    productIds: ["2", "7", "9"],
+  },
+  {
+    id: "autumn-chic",
+    title: "Осенний шик",
+    subtitle: "Шерстяной жакет с шелковым топом",
+    image: "/products/5/5-1.png",
+    productIds: ["5", "6", "11"],
   },
 ];

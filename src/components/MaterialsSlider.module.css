@@ -1,0 +1,144 @@
+.section {
+  padding: 80px 0;
+  background-color: var(--bg-card);
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .section {
+    padding: 50px 0;
+  }
+}
+
+.titleSection {
+  margin-bottom: 32px;
+  text-align: center;
+}
+
+.subtitle {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.title {
+  font-size: 34px;
+  font-weight: 300;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  .title {
+    font-size: 26px;
+  }
+}
+
+/* Slider Track Wrapper */
+.sliderWrapper {
+  width: 100%;
+  position: relative;
+}
+
+.slider {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  cursor: grab;
+  user-select: none;
+  padding: 0 var(--container-padding, 24px);
+  /* Hide scrollbar */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.slider::-webkit-scrollbar {
+  display: none;
+}
+
+.sliderActive {
+  cursor: grabbing;
+  scroll-behavior: auto;
+}
+
+/* Card item */
+.card {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  text-decoration: none;
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  .card {
+    flex: 0 0 220px;
+  }
+}
+
+.imageWrapper {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  overflow: hidden;
+  background-color: var(--bg-secondary);
+  margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .imageWrapper {
+    height: 280px;
+  }
+}
+
+.image {
+  object-fit: cover;
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card:hover .image {
+  transform: scale(1.04);
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cardTitle {
+  font-size: 18px;
+  font-weight: 300;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.cardDesc {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 300;
+  line-height: 1.4;
+}
+
+.cardLink {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.card:hover .cardLink {
+  color: var(--text-primary);
+}

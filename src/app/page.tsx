@@ -1,7 +1,10 @@
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
-import Collections from "@/components/Collections";
-import ProductGrid from "@/components/ProductGrid";
+import RecommendationsSlider from "@/components/RecommendationsSlider";
+import CollectionsSlider from "@/components/CollectionsSlider";
+import PromoBanner from "@/components/PromoBanner";
+import MaterialsSlider from "@/components/MaterialsSlider";
+import StoresSlider from "@/components/StoresSlider";
 import Footer from "@/components/Footer";
 
 export default function Home() {
@@ -9,12 +12,25 @@ export default function Home() {
     <>
       <Header />
       <main>
+        {/* Fullscreen Hero Campaign */}
         <Hero />
-        <Collections />
-        <ProductGrid />
+
+        {/* Drag-to-scroll categories */}
+        <RecommendationsSlider />
+
+        {/* Drag-to-scroll collections (Образы) */}
+        <CollectionsSlider />
+
+        {/* Fullscreen seasonal Promo Banner */}
+        <PromoBanner />
+
+        {/* Drag-to-scroll materials philosophy */}
+        <MaterialsSlider />
+
+        {/* Drag-to-scroll retail stores */}
+        <StoresSlider />
       </main>
       <Footer />
     </>
   );
 }
-
