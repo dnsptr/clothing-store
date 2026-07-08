@@ -71,6 +71,7 @@
   top: calc(var(--header-height) + 20px);
   max-height: calc(100vh - var(--header-height) - 40px);
   overflow-y: auto;
+  padding-left: 6px; /* Prevent outline/shadow clipping */
   padding-right: 12px; /* For padding before scrollbar */
 }
 
