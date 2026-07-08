@@ -45,7 +45,7 @@
   scroll-behavior: smooth;
   cursor: grab;
   user-select: none;
-  padding-left: 8vw;
+  padding-left: 4vw;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -61,7 +61,7 @@
 
 /* Wide landscape store cards */
 .card {
-  flex: 0 0 50vw;
+  flex: 0 0 40vw;
   position: relative;
   height: 65vh;
   overflow: hidden;
@@ -94,12 +94,10 @@
 .overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    to top,
-    rgba(28, 26, 23, 0.72) 0%,
-    rgba(28, 26, 23, 0.1) 50%,
-    transparent 100%
-  );
+  background: linear-gradient(to top,
+      rgba(28, 26, 23, 0.72) 0%,
+      rgba(28, 26, 23, 0.1) 50%,
+      transparent 100%);
   z-index: 2;
 }
 
