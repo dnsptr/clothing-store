@@ -13,7 +13,6 @@ import productStyles from "../../components/ProductGrid.module.css";
 
 function CatalogContent() {
   const searchParams = useSearchParams();
-  const genderParam = searchParams.get("gender") || "women";
   const categoryParam = searchParams.get("category");
 
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
@@ -24,18 +23,14 @@ function CatalogContent() {
   // Filter and sort items whenever params or sort key change
   useEffect(() => {
     let result = MOCK_PRODUCTS.filter((product) => {
-      // 1. Filter by gender (item is unisex or matches current gender)
-      const matchesGender =
-        product.gender === "unisex" || product.gender === genderParam;
-      
-      // 2. Filter by category if parameter is present
+      // Filter by category if parameter is present
       const matchesCategory =
         !categoryParam || product.category === categoryParam;
 
-      return matchesGender && matchesCategory;
+      return matchesCategory;
     });
 
-    // 3. Apply sorting logic
+    // Apply sorting logic
     if (sortBy === "price-low-to-high") {
       result.sort((a, b) => a.price - b.price);
     } else if (sortBy === "price-high-to-low") {
@@ -43,7 +38,7 @@ function CatalogContent() {
     }
 
     setFilteredProducts(result);
-  }, [genderParam, categoryParam, sortBy]);
+  }, [categoryParam, sortBy]);
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
     setActiveColors((prev) => ({
@@ -58,7 +53,7 @@ function CatalogContent() {
 
   const getPageTitle = () => {
     if (categoryParam) return categoryParam;
-    return genderParam === "women" ? "Женская коллекция" : "Мужская коллекция";
+    return "Коллекция";
   };
 
   return (

@@ -5,7 +5,6 @@ export interface Product {
   category: string;
   images: string[];
   colors: { name: string; hex: string }[];
-  gender: "women" | "men" | "unisex";
   isNew?: boolean;
   isSoldOut?: boolean;
 }
@@ -20,18 +19,18 @@ export interface Collection {
 
 export const MOCK_COLLECTIONS: Collection[] = [
   {
-    id: "women",
-    title: "Женская коллекция",
+    id: "clothing",
+    title: "Одежда",
     subtitle: "Элегантный трикотаж, премиальный лен и шелк",
     image: "/images/collection-women.png",
-    link: "/catalog?gender=women",
+    link: "/catalog",
   },
   {
-    id: "men",
-    title: "Мужская коллекция",
-    subtitle: "Безупречный крой, тонкая шерсть и кашемир",
-    image: "/images/collection-men.png",
-    link: "/catalog?gender=men",
+    id: "accessories",
+    title: "Аксессуары",
+    subtitle: "Кожаные сумки и лаконичная обувь",
+    image: "/images/product-bag.png",
+    link: "/catalog?category=Аксессуары",
   },
 ];
 
@@ -46,7 +45,6 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Песочный", hex: "#E1DBD3" },
       { name: "Угольный", hex: "#1C1B1A" },
     ],
-    gender: "women",
     isNew: true,
   },
   {
@@ -59,7 +57,6 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Молочный", hex: "#F3EFE9" },
       { name: "Тауп", hex: "#8E8276" },
     ],
-    gender: "women",
     isNew: true,
   },
   {
@@ -72,7 +69,6 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Светло-бежевый", hex: "#EDEAE4" },
       { name: "Горький шоколад", hex: "#302E2B" },
     ],
-    gender: "women",
   },
   {
     id: "4",
@@ -84,30 +80,6 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Шоколад", hex: "#50352A" },
       { name: "Черный", hex: "#1C1B1A" },
     ],
-    gender: "unisex",
     isSoldOut: false,
-  },
-  {
-    id: "5",
-    name: "Шерстяное пальто классического кроя",
-    price: 26000,
-    category: "Верхняя одежда",
-    images: ["/images/collection-men.png"],
-    colors: [
-      { name: "Угольный", hex: "#303030" },
-    ],
-    gender: "men",
-    isNew: true,
-  },
-  {
-    id: "6",
-    name: "Джемпер из ультратонкого кашемира",
-    price: 16800,
-    category: "Трикотаж",
-    images: ["/images/product-knitwear.png"],
-    colors: [
-      { name: "Тауп", hex: "#8E8276" },
-    ],
-    gender: "men",
   },
 ];

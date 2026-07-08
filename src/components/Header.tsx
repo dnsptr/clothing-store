@@ -9,7 +9,7 @@ import styles from "./Header.module.css";
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
-  const { cartCount, toggleCart, gender, setGender, toggleMenu } = useCart();
+  const { cartCount, toggleCart, toggleMenu } = useCart();
 
   const isHome = pathname === "/";
 
@@ -36,7 +36,7 @@ export default function Header() {
   return (
     <header className={`${styles.header} ${(!isHome || isScrolled) ? styles.scrolled : ""}`}>
       <div className={styles.container}>
-        {/* Left Side: Burger Menu and Gender Switcher */}
+        {/* Left Side: Burger Menu */}
         <div className={styles.leftSection}>
           <button className={styles.menuBtn} onClick={toggleMenu} aria-label="Открыть меню">
             <svg
@@ -53,22 +53,6 @@ export default function Header() {
               />
             </svg>
           </button>
-          
-          <div className={styles.genderToggle}>
-            <button
-              className={`${styles.genderBtn} ${gender === "women" ? styles.genderBtnActive : ""}`}
-              onClick={() => setGender("women")}
-            >
-              Женское
-            </button>
-            <span className={styles.separator}>/</span>
-            <button
-              className={`${styles.genderBtn} ${gender === "men" ? styles.genderBtnActive : ""}`}
-              onClick={() => setGender("men")}
-            >
-              Мужское
-            </button>
-          </div>
         </div>
 
 

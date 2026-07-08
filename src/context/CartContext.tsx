@@ -23,8 +23,6 @@ interface CartContextType {
   cartTotal: number;
 
   // Shop / Navigation States (Phase 4)
-  gender: "women" | "men";
-  setGender: (gender: "women" | "men") => void;
   isMenuOpen: boolean;
   toggleMenu: () => void;
   setIsMenuOpen: (isOpen: boolean) => void;
@@ -40,7 +38,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartTotal, setCartTotal] = useState(0);
 
   // Shop Navigation
-  const [gender, setGender] = useState<"women" | "men">("women");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // Synchronize cart count and total price whenever cart items change
@@ -130,8 +127,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setIsCartOpen,
         cartCount,
         cartTotal,
-        gender,
-        setGender,
         isMenuOpen,
         toggleMenu,
         setIsMenuOpen,

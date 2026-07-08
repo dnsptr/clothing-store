@@ -14,13 +14,7 @@ interface CategoryItem {
 
 export default function MenuDrawer() {
   const router = useRouter();
-  const {
-    gender,
-    setGender,
-    isMenuOpen,
-    setIsMenuOpen,
-    toggleMenu,
-  } = useCart();
+  const { isMenuOpen, setIsMenuOpen, toggleMenu } = useCart();
 
   // Local state for tracking nested sub-menu sliding panels
   const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType>(null);
@@ -37,65 +31,40 @@ export default function MenuDrawer() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMenuOpen, setIsMenuOpen]);
 
-  // Reset menu depth when drawer closes or gender switches
+  // Reset menu depth when drawer closes
   useEffect(() => {
     if (!isMenuOpen) {
-      // Small timeout to prevent flickering during slide-out animation
       const timer = setTimeout(() => setActiveSubMenu(null), 300);
       return () => clearTimeout(timer);
     }
   }, [isMenuOpen]);
 
-  useEffect(() => {
-    setActiveSubMenu(null);
-  }, [gender]);
-
-  const handleGenderChange = (selectedGender: "women" | "men") => {
-    setGender(selectedGender);
-  };
-
   const handleNavigate = (categoryName?: string) => {
     setIsMenuOpen(false); // Close menu on navigation
     
     let url = "/catalog";
-    const params = new URLSearchParams();
-    
-    params.set("gender", gender);
     if (categoryName) {
+      const params = new URLSearchParams();
       params.set("category", categoryName);
+      url += `?${params.toString()}`;
     }
     
-    router.push(`${url}?${params.toString()}`);
+    router.push(url);
   };
 
-  // Define Category lists based on active gender context
-  const clothingCategories: CategoryItem[] =
-    gender === "women"
-      ? [
-          { name: "Все товары", queryParam: "" },
-          { name: "Пальто и тренчи", queryParam: "Пальто и тренчи" },
-          { name: "Трикотаж", queryParam: "Трикотаж" },
-          { name: "Брюки", queryParam: "Брюки" },
-        ]
-      : [
-          { name: "Все товары", queryParam: "" },
-          { name: "Верхняя одежда", queryParam: "Верхняя одежда" },
-          { name: "Трикотаж", queryParam: "Трикотаж" },
-          { name: "Брюки", queryParam: "Брюки" },
-        ];
+  // Define Category lists
+  const clothingCategories: CategoryItem[] = [
+    { name: "Все товары", queryParam: "" },
+    { name: "Пальто и тренчи", queryParam: "Пальто и тренчи" },
+    { name: "Трикотаж", queryParam: "Трикотаж" },
+    { name: "Брюки", queryParam: "Брюки" },
+  ];
 
-  const accessoriesCategories: CategoryItem[] =
-    gender === "women"
-      ? [
-          { name: "Все аксессуары", queryParam: "" },
-          { name: "Сумки", queryParam: "Аксессуары" }, // Map to accessories in mock db
-          { name: "Обувь", queryParam: "Обувь" },
-        ]
-      : [
-          { name: "Все аксессуары", queryParam: "" },
-          { name: "Ремни", queryParam: "Ремни" },
-          { name: "Обувь", queryParam: "Обувь" },
-        ];
+  const accessoriesCategories: CategoryItem[] = [
+    { name: "Все аксессуары", queryParam: "" },
+    { name: "Сумки", queryParam: "Аксессуары" },
+    { name: "Обувь", queryParam: "Обувь" },
+  ];
 
   return (
     <>
@@ -124,21 +93,8 @@ export default function MenuDrawer() {
           </svg>
         </button>
 
-        {/* Gender Switching Tabs */}
-        <div className={styles.genderTabs}>
-          <button
-            className={`${styles.tabBtn} ${gender === "women" ? styles.tabBtnActive : ""}`}
-            onClick={() => handleGenderChange("women")}
-          >
-            Женское
-          </button>
-          <button
-            className={`${styles.tabBtn} ${gender === "men" ? styles.tabBtnActive : ""}`}
-            onClick={() => handleGenderChange("men")}
-          >
-            Мужское
-          </button>
-        </div>
+        {/* Title Padding spacer */}
+        <div style={{ height: "55px", borderBottom: "1px solid var(--border-light)" }} />
 
         {/* Panels Slider */}
         <div
