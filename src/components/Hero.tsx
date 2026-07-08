@@ -1,27 +1,51 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import styles from "./Hero.module.css";
+import { useCart } from "../context/CartContext";
+import styles from "./Hero.image.module.css"; // We will rename the styles slightly or keep styles
+import origStyles from "./Hero.module.css";
 
 export default function Hero() {
+  const { gender } = useCart();
+
+  const heroData = {
+    women: {
+      image: "/images/hero.png",
+      title: "Летний сезон",
+      subtitle: "Новая кампания",
+      link: "/catalog?gender=women",
+    },
+    men: {
+      image: "/images/collection-men.png",
+      title: "Мужской сезон",
+      subtitle: "Безупречный крой",
+      link: "/catalog?gender=men",
+    },
+  };
+
+  const currentHero = heroData[gender];
+
   return (
-    <section className={styles.hero}>
+    <section className={origStyles.hero}>
       {/* Background Image */}
-      <div className={styles.imageWrapper}>
+      <div className={origStyles.imageWrapper}>
         <Image
-          src="/images/hero.png"
-          alt="Летняя коллекция одежды"
+          src={currentHero.image}
+          alt={currentHero.title}
           fill
           priority
-          className={styles.image}
+          className={origStyles.image}
+          key={gender} // Triggers React state transition for new image zoom
         />
-        <div className={styles.overlay} />
+        <div className={origStyles.overlay} />
       </div>
 
       {/* Floating Content */}
-      <div className={`${styles.content} animate-fade-in`}>
-        <span className={styles.subtitle}>Новая кампания</span>
-        <h1 className={styles.title}>Летний сезон</h1>
-        <Link href="#" className={styles.cta}>
+      <div className={`${origStyles.content} animate-fade-in`} key={`content-${gender}`}>
+        <span className={origStyles.subtitle}>{currentHero.subtitle}</span>
+        <h1 className={origStyles.title}>{currentHero.title}</h1>
+        <Link href={currentHero.link} className={origStyles.cta}>
           Смотреть коллекцию
         </Link>
       </div>

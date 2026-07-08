@@ -39,15 +39,7 @@
 }
 
 .nav {
-  display: flex;
-  align-items: center;
-  gap: 32px;
-}
-
-@media (max-width: 900px) {
-  .nav {
-    display: none; /* Hide on mobile/tablet, can implement drawer later */
-  }
+  display: none; /* Hidden on all viewports, catalog navigates via sliding left menu */
 }
 
 .navLink {
@@ -137,17 +129,11 @@
   color: var(--bg-primary);
 }
 
-/* Mobile Menu Trigger */
+/* Menu Trigger (Always Visible) */
 .menuBtn {
-  display: none;
-}
-
-@media (max-width: 900px) {
-  .menuBtn {
-    display: flex;
-    align-items: center;
-    color: inherit;
-  }
+  display: flex;
+  align-items: center;
+  color: inherit;
 }
 
 /* Left Section Layout (Phase 4) */
@@ -172,12 +158,6 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 500;
-}
-
-@media (max-width: 900px) {
-  .genderToggle {
-    display: none; /* Already rendered inside MenuDrawer on mobile */
-  }
 }
 
 .genderBtn {

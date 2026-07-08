@@ -71,20 +71,7 @@ export default function Header() {
           </div>
         </div>
 
-        <nav className={styles.nav}>
-          <Link href={`/catalog?gender=${gender}`} className={styles.navLink}>
-            Новинки
-          </Link>
-          <Link href={`/catalog?gender=${gender}`} className={styles.navLink}>
-            Одежда
-          </Link>
-          <Link href={`/catalog?gender=${gender}&category=Аксессуары`} className={styles.navLink}>
-            Аксессуары
-          </Link>
-          <Link href="/" className={styles.navLink}>
-            О бренде
-          </Link>
-        </nav>
+
 
         {/* Center: Brand Logo */}
         <div className={styles.logo}>

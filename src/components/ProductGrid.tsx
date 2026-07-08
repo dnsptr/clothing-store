@@ -4,10 +4,12 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { MOCK_PRODUCTS, Product } from "../data/mockData";
+import { useCart } from "../context/CartContext";
 import QuickViewModal from "./QuickViewModal";
 import styles from "./ProductGrid.module.css";
 
 export default function ProductGrid() {
+  const { gender } = useCart();
   // Store active color selections for each product by product ID
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
   // Track product selected for the Quick View modal
@@ -24,6 +26,11 @@ export default function ProductGrid() {
     return price.toLocaleString("ru-RU") + " ₽";
   };
 
+  // Filter products by active gender context
+  const displayedProducts = MOCK_PRODUCTS.filter(
+    (product) => product.gender === "unisex" || product.gender === gender
+  );
+
   return (
     <section className={styles.section}>
       <div className="container">
@@ -35,7 +42,7 @@ export default function ProductGrid() {
 
         {/* Product Grid */}
         <div className={styles.grid}>
-          {MOCK_PRODUCTS.map((product) => {
+          {displayedProducts.map((product) => {
             const activeIndex = activeColors[product.id] ?? 0;
             return (
               <div key={product.id} className={styles.card}>
