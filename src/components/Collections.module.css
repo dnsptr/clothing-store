@@ -1,0 +1,135 @@
+.collections {
+  padding: 100px 0;
+  background-color: var(--bg-primary);
+}
+
+@media (max-width: 768px) {
+  .collections {
+    padding: 60px 0;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.card {
+  position: relative;
+  height: 600px;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding: 40px;
+  overflow: hidden;
+  background-color: var(--bg-secondary);
+}
+
+@media (max-width: 1024px) {
+  .card {
+    height: 500px;
+  }
+}
+
+@media (max-width: 768px) {
+  .card {
+    height: 450px;
+    padding: 24px;
+  }
+}
+
+.imageWrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.image {
+  object-fit: cover;
+  object-position: center;
+  width: 100%;
+  height: 100%;
+  transition: transform 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.card:hover .image {
+  transform: scale(1.04);
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 50%,
+    rgba(0, 0, 0, 0.3) 100%
+  );
+  z-index: 2;
+}
+
+.content {
+  position: relative;
+  z-index: 3;
+  color: #ffffff;
+  max-width: 400px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 300;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+  .title {
+    font-size: 24px;
+  }
+}
+
+.subtitle {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 300;
+  margin-bottom: 20px;
+  opacity: 0.85;
+}
+
+.link {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  position: relative;
+  padding-bottom: 4px;
+}
+
+.link::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 30px;
+  height: 1px;
+  background-color: #ffffff;
+  transition: var(--transition-smooth);
+}
+
+.card:hover .link::after {
+  width: 100%;
+}

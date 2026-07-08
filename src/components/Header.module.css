@@ -1,0 +1,151 @@
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--header-height);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  transition: var(--transition-smooth);
+  background-color: transparent;
+  color: #ffffff; /* White text on hero banner by default */
+}
+
+.scrolled {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-light);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+}
+
+.container {
+  width: 100%;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@media (max-width: 768px) {
+  .header {
+    height: var(--header-height-mobile);
+  }
+  .container {
+    padding: 0 16px;
+  }
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+@media (max-width: 900px) {
+  .nav {
+    display: none; /* Hide on mobile/tablet, can implement drawer later */
+  }
+}
+
+.navLink {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 400;
+  position: relative;
+  padding: 8px 0;
+}
+
+.navLink::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background-color: currentColor;
+  transition: var(--transition-fast);
+}
+
+.navLink:hover::after {
+  width: 100%;
+}
+
+.logo {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+}
+
+.logoText {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  letter-spacing: 0.15em;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.actionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 4px;
+  transition: var(--transition-fast);
+}
+
+.actionBtn:hover {
+  opacity: 0.7;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+}
+
+.cartBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 10px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scrolled .cartBadge {
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+/* Mobile Menu Trigger */
+.menuBtn {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .menuBtn {
+    display: flex;
+    align-items: center;
+    color: inherit;
+  }
+}
