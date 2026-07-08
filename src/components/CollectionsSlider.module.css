@@ -59,7 +59,7 @@
 
 /* Card: tall, fixed width */
 .card {
-  flex: 0 0 40vw;
+  flex: 0 0 33vw;
   position: relative;
   display: block;
   text-decoration: none;
@@ -94,12 +94,10 @@
 .overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    to top,
-    rgba(28, 26, 23, 0.7) 0%,
-    rgba(28, 26, 23, 0.1) 50%,
-    transparent 100%
-  );
+  background: linear-gradient(to top,
+      rgba(28, 26, 23, 0.7) 0%,
+      rgba(28, 26, 23, 0.1) 50%,
+      transparent 100%);
   z-index: 2;
 }
 
