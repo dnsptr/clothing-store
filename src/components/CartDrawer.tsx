@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import Link from "next/link";
 import Image from "next/image";
 import { useCart } from "../context/CartContext";
 import styles from "./CartDrawer.module.css";
@@ -191,9 +192,11 @@ export default function CartDrawer() {
             </div>
             <button
               className={styles.checkoutBtn}
-              onClick={() => alert("Оформление заказа находится в разработке.")}
+              onClick={() => setIsCartOpen(false)}
             >
-              Оформить заказ
+              <Link href="/checkout" style={{ color: "inherit", textDecoration: "none", display: "block", width: "100%" }}>
+                Оформить заказ
+              </Link>
             </button>
           </div>
         )}

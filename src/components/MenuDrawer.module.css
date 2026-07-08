@@ -216,3 +216,29 @@
   color: var(--text-primary);
   padding-left: 28px;
 }
+
+/* Sale item — red accent */
+.menuItemSale span {
+  color: #b5373a;
+}
+
+/* Collection items — slightly muted, smaller */
+.menuItemCollection {
+  font-size: 15px;
+  opacity: 0.85;
+}
+
+/* "Смотреть все" — understated */
+.menuItemAll {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+/* Divider between sections */
+.menuDivider {
+  height: 1px;
+  background-color: var(--border-light);
+  margin: 8px 0;
+  list-style: none;
+}
