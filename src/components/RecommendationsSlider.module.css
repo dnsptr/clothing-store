@@ -45,6 +45,7 @@
   scroll-behavior: smooth;
   cursor: grab;
   user-select: none;
+  padding-left: 8vw;
   /* Hide scrollbar */
   -ms-overflow-style: none;
   scrollbar-width: none;
