@@ -95,7 +95,7 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
         {/* Left Side: Image */}
         <div className={styles.imageSection}>
           <Image
-            src={product.image}
+            src={product.images[0]}
             alt={product.name}
             fill
             sizes="(max-width: 768px) 100vw, 50vw"

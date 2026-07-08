@@ -2,14 +2,25 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import styles from "./Header.module.css";
 
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
+  const pathname = usePathname();
   const { cartCount, toggleCart } = useCart();
 
+  const isHome = pathname === "/";
+
   useEffect(() => {
+    if (!isHome) {
+      setIsScrolled(true);
+      return;
+    }
+
+    setIsScrolled(window.scrollY > 50);
+
     const handleScroll = () => {
       if (window.scrollY > 50) {
         setIsScrolled(true);
@@ -20,10 +31,10 @@ export default function Header() {
 
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [isHome]);
 
   return (
-    <header className={`${styles.header} ${isScrolled ? styles.scrolled : ""}`}>
+    <header className={`${styles.header} ${(!isHome || isScrolled) ? styles.scrolled : ""}`}>
       <div className={styles.container}>
         {/* Left Side: Mobile Menu Button & Desktop Nav */}
         <button className={styles.menuBtn} aria-label="Открыть меню">

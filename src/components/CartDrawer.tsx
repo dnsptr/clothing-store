@@ -100,7 +100,7 @@ export default function CartDrawer() {
                 {/* Product Thumbnail */}
                 <div className={styles.imageWrapper}>
                   <Image
-                    src={item.product.image}
+                    src={item.product.images[0]}
                     alt={item.product.name}
                     fill
                     sizes="80px"

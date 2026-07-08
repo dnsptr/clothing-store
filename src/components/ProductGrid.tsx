@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { MOCK_PRODUCTS, Product } from "../data/mockData";
 import QuickViewModal from "./QuickViewModal";
 import styles from "./ProductGrid.module.css";
@@ -70,7 +71,7 @@ export default function ProductGrid() {
                   </button>
 
                   <Image
-                    src={product.image}
+                    src={product.images[0]}
                     alt={product.name}
                     fill
                     sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
@@ -84,12 +85,10 @@ export default function ProductGrid() {
                 {/* Info Text */}
                 <div className={styles.info}>
                   <span className={styles.category}>{product.category}</span>
-                  <h3
-                    className={styles.name}
-                    title={product.name}
-                    onClick={() => setSelectedProduct(product)}
-                  >
-                    {product.name}
+                  <h3 className={styles.name} title={product.name}>
+                    <Link href={`/product/${product.id}`} style={{ display: "block" }}>
+                      {product.name}
+                    </Link>
                   </h3>
                   <span className={styles.price}>{formatPrice(product.price)}</span>
 

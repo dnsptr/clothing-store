@@ -3,8 +3,7 @@ export interface Product {
   name: string;
   price: number;
   category: string;
-  image: string;
-  hoverImage?: string;
+  images: string[];
   colors: { name: string; hex: string }[];
   isNew?: boolean;
   isSoldOut?: boolean;
@@ -41,7 +40,7 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Классический льняной тренч",
     price: 19800,
     category: "Пальто и тренчи",
-    image: "/images/product-trench.png",
+    images: ["/images/product-trench.png", "/images/product-trench-2.png"],
     colors: [
       { name: "Песочный", hex: "#E1DBD3" },
       { name: "Угольный", hex: "#1C1B1A" },
@@ -53,7 +52,7 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Джемпер крупной вязки из кашемира",
     price: 14500,
     category: "Трикотаж",
-    image: "/images/product-knitwear.png",
+    images: ["/images/product-knitwear.png", "/images/product-knitwear-2.png"],
     colors: [
       { name: "Молочный", hex: "#F3EFE9" },
       { name: "Тауп", hex: "#8E8276" },
@@ -65,7 +64,7 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Льняные брюки прямого кроя",
     price: 9800,
     category: "Брюки",
-    image: "/images/product-trousers.png",
+    images: ["/images/product-trousers.png", "/images/product-trousers-2.png"],
     colors: [
       { name: "Светло-бежевый", hex: "#EDEAE4" },
       { name: "Горький шоколад", hex: "#302E2B" },
@@ -76,7 +75,7 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Кожаная сумка-шопер на плечо",
     price: 22000,
     category: "Аксессуары",
-    image: "/images/product-bag.png",
+    images: ["/images/product-bag.png", "/images/product-bag-2.png"],
     colors: [
       { name: "Шоколад", hex: "#50352A" },
       { name: "Черный", hex: "#1C1B1A" },
