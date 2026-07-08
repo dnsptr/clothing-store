@@ -1,17 +1,11 @@
 .section {
-  padding: 80px 0;
-  background-color: var(--bg-card);
+  background-color: var(--bg-primary);
   overflow: hidden;
-}
-
-@media (max-width: 768px) {
-  .section {
-    padding: 50px 0;
-  }
+  border-top: 1px solid var(--border-light);
 }
 
 .titleSection {
-  margin-bottom: 32px;
+  padding: 60px 0 32px;
   text-align: center;
 }
 
@@ -39,21 +33,18 @@
   }
 }
 
-/* Slider Track Wrapper */
+/* Slider Track */
 .sliderWrapper {
   width: 100%;
-  position: relative;
 }
 
 .slider {
   display: flex;
-  gap: 16px;
+  gap: 0;
   overflow-x: auto;
   scroll-behavior: smooth;
   cursor: grab;
   user-select: none;
-  padding: 0 var(--container-padding, 24px);
-  /* Hide scrollbar */
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -67,78 +58,104 @@
   scroll-behavior: auto;
 }
 
-/* Card item */
+/* Card: portrait, narrow */
 .card {
-  flex: 0 0 280px;
-  display: flex;
-  flex-direction: column;
-  text-align: left;
+  flex: 0 0 28vw;
+  position: relative;
+  display: block;
   text-decoration: none;
-  color: var(--text-primary);
+  height: 80vh;
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  .card {
+    flex: 0 0 55vw;
+  }
 }
 
 @media (max-width: 768px) {
   .card {
-    flex: 0 0 220px;
+    flex: 0 0 80vw;
+    height: 65vh;
   }
 }
 
-.imageWrapper {
-  position: relative;
-  width: 100%;
-  height: 360px;
-  overflow: hidden;
-  background-color: var(--bg-secondary);
-  margin-bottom: 16px;
-}
-
-@media (max-width: 768px) {
-  .imageWrapper {
-    height: 280px;
-  }
-}
-
+/* Image fills card */
 .image {
   object-fit: cover;
-  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .card:hover .image {
   transform: scale(1.04);
 }
 
+/* Bottom gradient overlay */
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(28, 26, 23, 0.7) 0%,
+    rgba(28, 26, 23, 0.05) 45%,
+    transparent 100%
+  );
+  z-index: 2;
+}
+
+/* Text bottom-left on image */
 .info {
+  position: absolute;
+  bottom: 36px;
+  left: 28px;
+  z-index: 3;
+  color: #fff;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  max-width: 260px;
+}
+
+@media (max-width: 768px) {
+  .info {
+    bottom: 24px;
+    left: 20px;
+  }
 }
 
 .cardTitle {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 300;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: var(--text-primary);
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+
+@media (max-width: 768px) {
+  .cardTitle {
+    font-size: 20px;
+  }
 }
 
 .cardDesc {
   font-family: var(--font-sans);
   font-size: 12px;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.75);
   font-weight: 300;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .cardLink {
   font-family: var(--font-sans);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-  font-weight: 600;
-  margin-top: 4px;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 500;
+  transition: color 0.3s ease;
 }
 
 .card:hover .cardLink {
-  color: var(--text-primary);
+  color: #fff;
 }

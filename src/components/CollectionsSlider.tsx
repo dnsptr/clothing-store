@@ -21,13 +21,8 @@ export default function CollectionsSlider() {
     setDraggedDistance(0);
   };
 
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+  const handleMouseLeave = () => setIsDragging(false);
+  const handleMouseUp = () => setIsDragging(false);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !sliderRef.current) return;
@@ -39,10 +34,7 @@ export default function CollectionsSlider() {
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
-    // Prevent navigation if drag action was active
-    if (draggedDistance > 5) {
-      e.preventDefault();
-    }
+    if (draggedDistance > 5) e.preventDefault();
   };
 
   return (
@@ -69,16 +61,20 @@ export default function CollectionsSlider() {
               onClick={handleLinkClick}
               draggable={false}
             >
-              <div className={styles.imageWrapper}>
-                <Image
-                  src={outfit.image}
-                  alt={outfit.title}
-                  fill
-                  sizes="(max-width: 768px) 300px, 460px"
-                  className={styles.image}
-                  draggable={false}
-                />
-              </div>
+              {/* Full-height outfit image */}
+              <Image
+                src={outfit.image}
+                alt={outfit.title}
+                fill
+                sizes="(max-width: 768px) 88vw, (max-width: 1024px) 70vw, 40vw"
+                className={styles.image}
+                draggable={false}
+              />
+
+              {/* Dark gradient overlay */}
+              <div className={styles.overlay} />
+
+              {/* Text bottom-left on image */}
               <div className={styles.info}>
                 <h3 className={styles.cardTitle}>{outfit.title}</h3>
                 <p className={styles.cardSubtitle}>{outfit.subtitle}</p>

@@ -38,13 +38,8 @@ export default function StoresSlider() {
     setScrollLeftState(sliderRef.current.scrollLeft);
   };
 
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+  const handleMouseLeave = () => setIsDragging(false);
+  const handleMouseUp = () => setIsDragging(false);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !sliderRef.current) return;
@@ -72,16 +67,15 @@ export default function StoresSlider() {
         >
           {STORES.map((store, index) => (
             <div key={index} className={styles.card} draggable={false}>
-              <div className={styles.imageWrapper}>
-                <Image
-                  src={store.image}
-                  alt={store.name}
-                  fill
-                  sizes="(max-width: 768px) 280px, 380px"
-                  className={styles.image}
-                  draggable={false}
-                />
-              </div>
+              <Image
+                src={store.image}
+                alt={store.name}
+                fill
+                sizes="(max-width: 768px) 90vw, (max-width: 1024px) 75vw, 50vw"
+                className={styles.image}
+                draggable={false}
+              />
+              <div className={styles.overlay} />
               <div className={styles.info}>
                 <h3 className={styles.storeName}>{store.name}</h3>
                 <p className={styles.address}>{store.address}</p>

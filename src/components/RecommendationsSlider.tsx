@@ -48,13 +48,8 @@ export default function RecommendationsSlider() {
     setDraggedDistance(0);
   };
 
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+  const handleMouseLeave = () => setIsDragging(false);
+  const handleMouseUp = () => setIsDragging(false);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !sliderRef.current) return;
@@ -62,15 +57,11 @@ export default function RecommendationsSlider() {
     const x = e.pageX - sliderRef.current.offsetLeft;
     const distance = x - startX;
     setDraggedDistance(Math.abs(distance));
-    // Multiply by 1.25 for comfortable scroll responsiveness
     sliderRef.current.scrollLeft = scrollLeftState - distance * 1.25;
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
-    // If user dragged more than 5 pixels, prevent link trigger
-    if (draggedDistance > 5) {
-      e.preventDefault();
-    }
+    if (draggedDistance > 5) e.preventDefault();
   };
 
   return (
@@ -97,20 +88,24 @@ export default function RecommendationsSlider() {
               onClick={handleLinkClick}
               draggable={false}
             >
-              <div className={styles.imageWrapper}>
-                <Image
-                  src={item.image}
-                  alt={item.name}
-                  fill
-                  sizes="(max-width: 768px) 250px, 320px"
-                  className={styles.image}
-                  draggable={false}
-                  priority={index < 3}
-                />
-              </div>
+              {/* Full-height image */}
+              <Image
+                src={item.image}
+                alt={item.name}
+                fill
+                sizes="(max-width: 768px) 85vw, (max-width: 1024px) 60vw, 33vw"
+                className={styles.image}
+                draggable={false}
+                priority={index < 2}
+              />
+
+              {/* Dark gradient overlay */}
+              <div className={styles.overlay} />
+
+              {/* Text bottom-left on image */}
               <div className={styles.info}>
                 <h3 className={styles.cardTitle}>{item.name}</h3>
-                <span className={styles.cardLink}>Смотреть</span>
+                <span className={styles.cardLink}>Смотреть →</span>
               </div>
             </Link>
           ))}

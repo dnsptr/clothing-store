@@ -47,13 +47,8 @@ export default function MaterialsSlider() {
     setDraggedDistance(0);
   };
 
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+  const handleMouseLeave = () => setIsDragging(false);
+  const handleMouseUp = () => setIsDragging(false);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !sliderRef.current) return;
@@ -65,9 +60,7 @@ export default function MaterialsSlider() {
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
-    if (draggedDistance > 5) {
-      e.preventDefault();
-    }
+    if (draggedDistance > 5) e.preventDefault();
   };
 
   return (
@@ -94,20 +87,19 @@ export default function MaterialsSlider() {
               onClick={handleLinkClick}
               draggable={false}
             >
-              <div className={styles.imageWrapper}>
-                <Image
-                  src={item.image}
-                  alt={item.name}
-                  fill
-                  sizes="(max-width: 768px) 220px, 280px"
-                  className={styles.image}
-                  draggable={false}
-                />
-              </div>
+              <Image
+                src={item.image}
+                alt={item.name}
+                fill
+                sizes="(max-width: 768px) 80vw, (max-width: 1024px) 55vw, 28vw"
+                className={styles.image}
+                draggable={false}
+              />
+              <div className={styles.overlay} />
               <div className={styles.info}>
                 <h3 className={styles.cardTitle}>{item.name}</h3>
                 <p className={styles.cardDesc}>{item.desc}</p>
-                <span className={styles.cardLink}>Смотреть изделия</span>
+                <span className={styles.cardLink}>Смотреть изделия →</span>
               </div>
             </Link>
           ))}
