@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useCart } from "../context/CartContext";
 import styles from "./Header.module.css";
 
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
+  const { cartCount, toggleCart } = useCart();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -96,7 +98,7 @@ export default function Header() {
             </svg>
           </button>
 
-          <button className={styles.actionBtn} aria-label="Корзина">
+          <button className={styles.actionBtn} onClick={toggleCart} aria-label="Корзина">
             <svg
               className={styles.icon}
               fill="none"
@@ -110,7 +112,7 @@ export default function Header() {
                 d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
               />
             </svg>
-            <span className={styles.cartBadge}>0</span>
+            <span className={styles.cartBadge}>{cartCount}</span>
           </button>
         </div>
       </div>

@@ -3,11 +3,14 @@
 import { useState } from "react";
 import Image from "next/image";
 import { MOCK_PRODUCTS, Product } from "../data/mockData";
+import QuickViewModal from "./QuickViewModal";
 import styles from "./ProductGrid.module.css";
 
 export default function ProductGrid() {
   // Store active color selections for each product by product ID
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
+  // Track product selected for the Quick View modal
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
     setActiveColors((prev) => ({
@@ -36,11 +39,21 @@ export default function ProductGrid() {
             return (
               <div key={product.id} className={styles.card}>
                 {/* Image & Overlay Action */}
-                <div className={styles.imageContainer}>
+                <div
+                  className={styles.imageContainer}
+                  onClick={() => setSelectedProduct(product)}
+                >
                   {product.isNew && <span className={styles.badge}>New</span>}
                   
                   {/* Wishlist Button */}
-                  <button className={styles.wishlistBtn} aria-label="Добавить в избранное">
+                  <button
+                    className={styles.wishlistBtn}
+                    onClick={(e) => {
+                      e.stopPropagation(); // Avoid opening modal when heart is clicked
+                      alert("Добавлено в избранное");
+                    }}
+                    aria-label="Добавить в избранное"
+                  >
                     <svg
                       className={styles.wishlistIcon}
                       fill="none"
@@ -71,7 +84,11 @@ export default function ProductGrid() {
                 {/* Info Text */}
                 <div className={styles.info}>
                   <span className={styles.category}>{product.category}</span>
-                  <h3 className={styles.name} title={product.name}>
+                  <h3
+                    className={styles.name}
+                    title={product.name}
+                    onClick={() => setSelectedProduct(product)}
+                  >
                     {product.name}
                   </h3>
                   <span className={styles.price}>{formatPrice(product.price)}</span>
@@ -99,6 +116,12 @@ export default function ProductGrid() {
           })}
         </div>
       </div>
+
+      {/* Render the Quick View Modal */}
+      <QuickViewModal
+        product={selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+      />
     </section>
   );
 }
