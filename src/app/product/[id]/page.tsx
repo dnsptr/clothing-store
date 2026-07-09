@@ -29,8 +29,8 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
     <>
       <Header />
 
-      <div className={styles.pageWrapper}>
-        <div className="container">
+      <main className={styles.pageWrapper}>
+        <div className={styles.shell}>
           {/* Breadcrumbs */}
           <div className={styles.breadcrumbs}>
             <Link href="/">Главная</Link>
@@ -42,7 +42,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
 
           <ProductDetailClient product={product} />
         </div>
-      </div>
+      </main>
 
       <Footer />
     </>

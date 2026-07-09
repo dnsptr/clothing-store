@@ -3,8 +3,45 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { MOCK_OUTFITS } from "../data/mockData";
 import styles from "./CollectionsSlider.module.css";
+
+const STORIES = [
+  {
+    id: "linen-look",
+    title: "Льняной силуэт",
+    subtitle: "Летний образ с тренчем и брюками",
+    image: "/products/1/1-1.jpg",
+    href: "/collection/linen-look",
+  },
+  {
+    id: "cashmere-cozy",
+    title: "Теплый трикотаж",
+    subtitle: "Мягкие фактуры для прохладных дней",
+    image: "/products/2/2-1.png",
+    href: "/collection/cashmere-cozy",
+  },
+  {
+    id: "autumn-chic",
+    title: "Жакет и шелк",
+    subtitle: "Собранный образ для города",
+    image: "/products/5/5-1.png",
+    href: "/collection/autumn-chic",
+  },
+  {
+    id: "summer-dress",
+    title: "Платье миди",
+    subtitle: "Легкая линия и чистая графика",
+    image: "/products/8/8-1.png",
+    href: "/catalog?category=Трикотаж",
+  },
+  {
+    id: "accessory-edit",
+    title: "Акценты",
+    subtitle: "Сумки, обувь и лаконичные детали",
+    image: "/products/4/4-1.png",
+    href: "/catalog?category=Аксессуары",
+  },
+];
 
 export default function CollectionsSlider() {
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -30,7 +67,7 @@ export default function CollectionsSlider() {
     const x = e.pageX - sliderRef.current.offsetLeft;
     const distance = x - startX;
     setDraggedDistance(Math.abs(distance));
-    sliderRef.current.scrollLeft = scrollLeftState - distance * 1.25;
+    sliderRef.current.scrollLeft = scrollLeftState - distance * 1.15;
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
@@ -38,51 +75,42 @@ export default function CollectionsSlider() {
   };
 
   return (
-    <section className={styles.section}>
+    <section id="collections" className={styles.section}>
       <div className={styles.titleSection}>
-        <span className={styles.subtitle}>Кампания</span>
-        <h2 className={styles.title}>Готовые образы</h2>
+        <h2 className={styles.title}>Истории</h2>
       </div>
 
-      <div className={styles.sliderWrapper}>
-        <div
-          ref={sliderRef}
-          className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={handleMouseLeave}
-          onMouseUp={handleMouseUp}
-          onMouseMove={handleMouseMove}
-        >
-          {MOCK_OUTFITS.map((outfit) => (
-            <Link
-              key={outfit.id}
-              href={`/collection/${outfit.id}`}
-              className={styles.card}
-              onClick={handleLinkClick}
+      <div
+        ref={sliderRef}
+        className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
+        onMouseDown={handleMouseDown}
+        onMouseLeave={handleMouseLeave}
+        onMouseUp={handleMouseUp}
+        onMouseMove={handleMouseMove}
+      >
+        {STORIES.map((outfit) => (
+          <Link
+            key={outfit.id}
+            href={outfit.href}
+            className={styles.card}
+            onClick={handleLinkClick}
+            draggable={false}
+          >
+            <Image
+              src={outfit.image}
+              alt={outfit.title}
+              fill
+              sizes="(max-width: 768px) 86vw, 45vw"
+              className={styles.image}
               draggable={false}
-            >
-              {/* Full-height outfit image */}
-              <Image
-                src={outfit.image}
-                alt={outfit.title}
-                fill
-                sizes="(max-width: 768px) 88vw, (max-width: 1024px) 70vw, 40vw"
-                className={styles.image}
-                draggable={false}
-              />
-
-              {/* Dark gradient overlay */}
-              <div className={styles.overlay} />
-
-              {/* Text bottom-left on image */}
-              <div className={styles.info}>
-                <h3 className={styles.cardTitle}>{outfit.title}</h3>
-                <p className={styles.cardSubtitle}>{outfit.subtitle}</p>
-                <span className={styles.cardLink}>Собрать образ</span>
-              </div>
-            </Link>
-          ))}
-        </div>
+            />
+            <div className={styles.overlay} />
+            <div className={styles.info}>
+              <h3 className={styles.cardTitle}>{outfit.title}</h3>
+              <p className={styles.cardSubtitle}>{outfit.subtitle}</p>
+            </div>
+          </Link>
+        ))}
       </div>
     </section>
   );

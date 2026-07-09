@@ -11,22 +11,38 @@ interface QuickViewModalProps {
   onClose: () => void;
 }
 
+interface SelectionState {
+  productId: string;
+  selectedColorHex: string;
+  selectedSize: string;
+  error: string;
+}
+
 const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"];
 
 export default function QuickViewModal({ product, onClose }: QuickViewModalProps) {
   const { addToCart } = useCart();
-  const [selectedColor, setSelectedColor] = useState<{ name: string; hex: string } | null>(null);
-  const [selectedSize, setSelectedSize] = useState<string>("");
-  const [error, setError] = useState<string>("");
+  const [selection, setSelection] = useState<SelectionState | null>(null);
 
-  // Initialize selected color when product changes
-  useEffect(() => {
-    if (product && product.colors && product.colors.length > 0) {
-      setSelectedColor(product.colors[0]);
-      setSelectedSize("");
-      setError("");
-    }
-  }, [product]);
+  const activeSelection = product && selection?.productId === product.id ? selection : null;
+  const selectedColor =
+    product?.colors.find((color) => color.hex === activeSelection?.selectedColorHex) ??
+    product?.colors[0] ??
+    null;
+  const selectedSize = activeSelection?.selectedSize ?? "";
+  const error = activeSelection?.error ?? "";
+
+  const updateSelection = (updates: Partial<Omit<SelectionState, "productId">>) => {
+    if (!product) return;
+
+    setSelection({
+      productId: product.id,
+      selectedColorHex: activeSelection?.selectedColorHex ?? selectedColor?.hex ?? "",
+      selectedSize,
+      error,
+      ...updates,
+    });
+  };
 
   // Close modal on ESC key
   useEffect(() => {
@@ -44,13 +60,13 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
 
   const handleAddToCart = () => {
     if (!selectedSize) {
-      setError("Пожалуйста, выберите размер");
+      updateSelection({ error: "Пожалуйста, выберите размер" });
       return;
     }
 
     if (!selectedColor) return;
 
-    setError("");
+    updateSelection({ error: "" });
     addToCart({
       product,
       selectedSize,
@@ -133,7 +149,7 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
                         selectedColor?.hex === color.hex ? styles.colorDotActive : ""
                       }`}
                       style={{ backgroundColor: color.hex }}
-                      onClick={() => setSelectedColor(color)}
+                      onClick={() => updateSelection({ selectedColorHex: color.hex })}
                       aria-label={`Выбрать цвет ${color.name}`}
                     />
                   ))}
@@ -152,8 +168,7 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
                       selectedSize === size ? styles.sizeBtnActive : ""
                     }`}
                     onClick={() => {
-                      setSelectedSize(size);
-                      setError(""); // Clear error when size is selected
+                      updateSelection({ selectedSize: size, error: "" });
                     }}
                   >
                     {size}

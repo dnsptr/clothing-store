@@ -1,105 +1,116 @@
 .hero {
   position: relative;
-  width: 100%;
-  height: 100vh;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 80px;
+  height: var(--campaign-height);
+  min-height: 620px;
   overflow: hidden;
-  background-color: var(--bg-secondary);
-}
-
-.imageWrapper {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
+  background: var(--bg-secondary);
+  color: var(--text-inverse);
 }
 
 .image {
   object-fit: cover;
-  object-position: center;
-  width: 100%;
-  height: 100%;
-  transform: scale(1.03); /* Subtle zoom for premium feel */
-  animation: zoomOut 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  object-position: 50% 40%;
+  transform: scale(1.01);
 }
 
-.overlay {
+.gradient {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.2) 0%,
-    rgba(0, 0, 0, 0.1) 50%,
-    rgba(0, 0, 0, 0.3) 100%
-  );
-  z-index: 2;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.08) 24%, rgba(0, 0, 0, 0.06)),
+    linear-gradient(to top, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0.1) 45%, transparent 68%);
 }
 
 .content {
-  position: relative;
-  z-index: 3;
+  position: absolute;
+  right: var(--page-gutter);
+  bottom: 66px;
+  left: var(--page-gutter);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto;
+  padding-bottom: 0;
   text-align: center;
-  color: #ffffff;
-  max-width: 600px;
-  padding: 0 24px;
 }
 
-.subtitle {
-  font-family: var(--font-sans);
-  font-size: 12px;
+.eyebrow {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11.3px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0;
   text-transform: uppercase;
-  letter-spacing: 0.2em;
-  margin-bottom: 12px;
-  opacity: 0.9;
-  font-weight: 500;
 }
 
 .title {
-  font-size: 48px;
-  font-weight: 300;
-  margin-bottom: 24px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-@media (max-width: 768px) {
-  .title {
-    font-size: 32px;
-  }
-}
-
-.cta {
-  display: inline-block;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 14px 36px;
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  max-width: min(720px, calc(100vw - 32px));
+  margin-top: 0;
   color: #ffffff;
-  transition: var(--transition-smooth);
-  backdrop-filter: blur(2px);
+  font-size: clamp(42px, 3.34vw, 64px);
+  line-height: 1.31;
+  letter-spacing: 0;
 }
 
-.cta:hover {
-  background-color: #ffffff;
-  color: var(--text-primary);
-  border-color: #ffffff;
+.link {
+  margin-top: 26px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.78);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 18px;
 }
 
-@keyframes zoomOut {
-  from {
-    transform: scale(1.06);
+.link:hover {
+  border-bottom-color: #ffffff;
+  opacity: 0.74;
+}
+
+.progress {
+  position: absolute;
+  bottom: 81px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  width: 112px;
+  height: 1px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.progress span {
+  flex: 1;
+  height: 1px;
+}
+
+.progressActive {
+  background: #ffffff;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    height: 100svh;
+    min-height: 620px;
   }
-  to {
-    transform: scale(1);
+
+  .image {
+    object-position: 48% 28%;
+  }
+
+  .content {
+    bottom: 70px;
+  }
+
+  .title {
+    max-width: 340px;
+    font-size: clamp(40px, 12vw, 58px);
+  }
+
+  .progress {
+    bottom: 86px;
+    width: 96px;
   }
 }

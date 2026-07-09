@@ -7,29 +7,22 @@ import styles from "./RecommendationsSlider.module.css";
 
 const RECOMMENDATIONS = [
   {
-    name: "Пальто и тренчи",
-    image: "/products/1/1-1.jpg",
-    link: "/catalog?category=Пальто и тренчи",
+    name: "Костюмы",
+    eyebrow: "Рекомендации",
+    image: "/images/collection-women.png",
+    link: "/catalog",
   },
   {
-    name: "Трикотаж",
-    image: "/products/2/2-1.png",
+    name: "Платья",
+    eyebrow: "Рекомендации",
+    image: "/products/8/8-1.png",
     link: "/catalog?category=Трикотаж",
   },
   {
-    name: "Брюки и юбки",
-    image: "/products/3/3-1.png",
-    link: "/catalog?category=Брюки",
-  },
-  {
-    name: "Обувь",
-    image: "/products/9/9-1.png",
-    link: "/catalog?category=Обувь",
-  },
-  {
-    name: "Аксессуары",
-    image: "/products/4/4-1.png",
-    link: "/catalog?category=Аксессуары",
+    name: "Трикотаж",
+    eyebrow: "Рекомендации",
+    image: "/products/2/2-1.png",
+    link: "/catalog?category=Трикотаж",
   },
 ];
 
@@ -57,7 +50,7 @@ export default function RecommendationsSlider() {
     const x = e.pageX - sliderRef.current.offsetLeft;
     const distance = x - startX;
     setDraggedDistance(Math.abs(distance));
-    sliderRef.current.scrollLeft = scrollLeftState - distance * 1.25;
+    sliderRef.current.scrollLeft = scrollLeftState - distance * 1.15;
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
@@ -65,51 +58,39 @@ export default function RecommendationsSlider() {
   };
 
   return (
-    <section className={styles.section}>
-      <div className={styles.titleSection}>
-        <span className={styles.subtitle}>Рекомендации</span>
-        <h2 className={styles.title}>Купить по категориям</h2>
-      </div>
-
-      <div className={styles.sliderWrapper}>
-        <div
-          ref={sliderRef}
-          className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={handleMouseLeave}
-          onMouseUp={handleMouseUp}
-          onMouseMove={handleMouseMove}
-        >
-          {RECOMMENDATIONS.map((item, index) => (
-            <Link
-              key={index}
-              href={item.link}
-              className={styles.card}
-              onClick={handleLinkClick}
+    <section className={styles.section} aria-label="Рекомендации">
+      <div
+        ref={sliderRef}
+        className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
+        onMouseDown={handleMouseDown}
+        onMouseLeave={handleMouseLeave}
+        onMouseUp={handleMouseUp}
+        onMouseMove={handleMouseMove}
+      >
+        {RECOMMENDATIONS.map((item) => (
+          <Link
+            key={item.name}
+            href={item.link}
+            className={styles.card}
+            draggable={false}
+            onClick={handleLinkClick}
+          >
+            <Image
+              src={item.image}
+              alt={item.name}
+              fill
+              sizes="(max-width: 768px) 82vw, 25vw"
+              className={styles.image}
               draggable={false}
-            >
-              {/* Full-height image */}
-              <Image
-                src={item.image}
-                alt={item.name}
-                fill
-                sizes="(max-width: 768px) 85vw, (max-width: 1024px) 60vw, 33vw"
-                className={styles.image}
-                draggable={false}
-                priority={index < 2}
-              />
-
-              {/* Dark gradient overlay */}
-              <div className={styles.overlay} />
-
-              {/* Text bottom-left on image */}
-              <div className={styles.info}>
-                <h3 className={styles.cardTitle}>{item.name}</h3>
-                <span className={styles.cardLink}>Смотреть →</span>
-              </div>
-            </Link>
-          ))}
-        </div>
+            />
+            <div className={styles.overlay} />
+            <div className={styles.info}>
+              <span className={styles.eyebrow}>{item.eyebrow}</span>
+              <h2 className={styles.title}>{item.name}</h2>
+              <span className={styles.link}>Смотреть</span>
+            </div>
+          </Link>
+        ))}
       </div>
     </section>
   );

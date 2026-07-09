@@ -8,6 +8,28 @@ import styles from "./MenuDrawer.module.css";
 
 type SubMenuType = "sale" | "clothing" | "shoes" | "bags" | "materials" | null;
 
+function Chevron() {
+  return (
+    <svg className={styles.chevronIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function BackHeader({ label, onBack }: { label: string; onBack: () => void }) {
+  return (
+    <div className={styles.subPanelHeader}>
+      <button className={styles.backBtn} onClick={onBack}>
+        <svg className={styles.backIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 19l-7-7 7-7" />
+        </svg>
+        <span>Назад</span>
+      </button>
+      <h3 className={styles.subPanelTitle}>{label}</h3>
+    </div>
+  );
+}
+
 export default function MenuDrawer() {
   const router = useRouter();
   const { isMenuOpen, setIsMenuOpen, toggleMenu } = useCart();
@@ -66,26 +88,6 @@ export default function MenuDrawer() {
     { name: "Мягкий кашемир", cat: "Трикотаж" },
     { name: "Тонкая шерсть", cat: "Пальто и тренчи" },
   ];
-
-  // Chevron arrow icon
-  const Chevron = () => (
-    <svg className={styles.chevronIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-
-  // Back header in sub-panel
-  const BackHeader = ({ label }: { label: string }) => (
-    <div className={styles.subPanelHeader}>
-      <button className={styles.backBtn} onClick={() => setActiveSubMenu(null)}>
-        <svg className={styles.backIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 19l-7-7 7-7" />
-        </svg>
-        <span>Назад</span>
-      </button>
-      <h3 className={styles.subPanelTitle}>{label}</h3>
-    </div>
-  );
 
   return (
     <>
@@ -176,7 +178,7 @@ export default function MenuDrawer() {
 
             {activeSubMenu === "sale" && (
               <>
-                <BackHeader label="Sale" />
+                <BackHeader label="Sale" onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
                   {saleItems.map((item) => (
                     <li
@@ -193,7 +195,7 @@ export default function MenuDrawer() {
 
             {activeSubMenu === "clothing" && (
               <>
-                <BackHeader label="Одежда" />
+                <BackHeader label="Одежда" onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
                   {clothingItems.map((item) => (
                     <li
@@ -210,7 +212,7 @@ export default function MenuDrawer() {
 
             {activeSubMenu === "shoes" && (
               <>
-                <BackHeader label="Обувь" />
+                <BackHeader label="Обувь" onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
                   {shoesItems.map((item) => (
                     <li
@@ -227,7 +229,7 @@ export default function MenuDrawer() {
 
             {activeSubMenu === "materials" && (
               <>
-                <BackHeader label="Материалы" />
+                <BackHeader label="Материалы" onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
                   {materialsItems.map((item) => (
                     <li
