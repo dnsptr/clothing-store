@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { Product } from "../data/mockData";
 
 export interface CartItem {
@@ -34,19 +34,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Cart items
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [cartCount, setCartCount] = useState(0);
-  const [cartTotal, setCartTotal] = useState(0);
+  const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
+  const cartTotal = cartItems.reduce(
+    (acc, item) => acc + item.product.price * item.quantity,
+    0
+  );
 
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-  // Synchronize cart count and total price whenever cart items change
-  useEffect(() => {
-    const count = cartItems.reduce((acc, item) => acc + item.quantity, 0);
-    const total = cartItems.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
-    setCartCount(count);
-    setCartTotal(total);
-  }, [cartItems]);
 
   const addToCart = (newItem: CartItem) => {
     setCartItems((prevItems) => {
@@ -69,8 +64,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return [...prevItems, newItem];
     });
     
-    // Automatically open the cart drawer when adding a product
-    setIsCartOpen(true);
   };
 
   const removeFromCart = (productId: string, size: string, colorHex: string) => {

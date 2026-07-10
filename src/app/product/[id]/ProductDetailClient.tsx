@@ -3,28 +3,61 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Product } from "../../../data/mockData";
+import { MOCK_PRODUCTS, Product } from "../../../data/mockData";
 import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
 import styles from "./product.module.css";
 
 const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"];
 
+const PRODUCT_PANELS = [
+  {
+    id: "stores",
+    title: "Наличие в магазинах",
+    content: "Проверьте наличие в магазинах Москвы и других городов. Мы подготовим изделие к примерке.",
+  },
+  {
+    id: "measurements",
+    title: "Обмеры изделия",
+    content: "Длина по спинке: 74 см. Длина рукава: 62 см. Измерения выполнены для размера S.",
+  },
+  {
+    id: "care",
+    title: "Состав и уход",
+    content: "100% натуральный материал. Бережная стирка при температуре до 30°C, не отбеливать, сушить в расправленном виде.",
+  },
+];
+
+function BookmarkIcon({ active }: { active: boolean }) {
+  return (
+    <svg fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg className={`${styles.chevron} ${expanded ? styles.chevronOpen : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" d="m9 5 7 7-7 7" />
+    </svg>
+  );
+}
+
+function formatPrice(price: number) {
+  return `${price.toLocaleString("ru-RU")} ₽`;
+}
+
 export default function ProductDetailClient({ product }: { product: Product }) {
   const { addToCart } = useCart();
-  const [selectedColor, setSelectedColor] = useState<{ name: string; hex: string } | null>(
-    product.colors.length > 0 ? product.colors[0] : null
-  );
-  const [selectedSize, setSelectedSize] = useState<string>("");
+  const [selectedColor, setSelectedColor] = useState(product.colors[0] ?? null);
+  const [selectedSize, setSelectedSize] = useState("");
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [error, setError] = useState("");
-  
-  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({
-    description: true,
-    composition: false,
-    model: false,
-    shipping: false,
-  });
+  const [savedPhotoIndexes, setSavedPhotoIndexes] = useState<number[]>([]);
+  const [openPanels, setOpenPanels] = useState<Record<string, boolean>>({});
+
+  const lookProducts = MOCK_PRODUCTS.filter((item) => item.id !== product.id).slice(0, 2);
 
   const handleAddToCart = () => {
     if (!selectedSize) {
@@ -32,243 +65,182 @@ export default function ProductDetailClient({ product }: { product: Product }) {
       return;
     }
 
-    if (!selectedColor) return;
+    if (!selectedColor) {
+      return;
+    }
 
     setError("");
-    addToCart({
-      product,
-      selectedSize,
-      selectedColor,
-      quantity: 1,
-    });
+    addToCart({ product, selectedSize, selectedColor, quantity: 1 });
   };
 
-  const toggleAccordion = (section: string) => {
-    setOpenAccordions((prev) => ({
-      ...prev,
-      [section]: !prev[section],
-    }));
+  const toggleSavedPhoto = (index: number) => {
+    setSavedPhotoIndexes((previous) =>
+      previous.includes(index) ? previous.filter((item) => item !== index) : [...previous, index]
+    );
   };
 
-  const formatPrice = (price: number) => {
-    return price.toLocaleString("ru-RU") + " ₽";
+  const togglePanel = (id: string) => {
+    setOpenPanels((previous) => ({ ...previous, [id]: !previous[id] }));
   };
 
   return (
     <>
-      {/* Main Layout Grid */}
-      <div className={styles.grid}>
-        {/* Left Column: Image Gallery Stack */}
-        <div className={styles.gallery}>
-          {product.images.map((imgUrl, index) => (
-            <div key={index} className={styles.imageWrapper}>
-              <Image
-                src={imgUrl}
-                alt={`${product.name} - Ракурс ${index + 1}`}
-                fill
-                sizes="(max-width: 768px) 100vw, 55vw"
-                className={styles.image}
-                priority={index === 0}
-              />
-            </div>
-          ))}
+      <div className={styles.productGrid}>
+        <div className={styles.gallery} aria-label="Фотографии изделия">
+          {product.images.map((imageUrl, index) => {
+            const isSaved = savedPhotoIndexes.includes(index);
+
+            return (
+              <figure className={styles.imageWrapper} key={imageUrl}>
+                <Image
+                  src={imageUrl}
+                  alt={`${product.name}, ракурс ${index + 1}`}
+                  fill
+                  sizes="(max-width: 767px) 100vw, (max-width: 1100px) 58vw, 560px"
+                  className={styles.image}
+                  priority={index < 2}
+                />
+                <button
+                  type="button"
+                  className={`${styles.photoBookmark} ${isSaved ? styles.photoBookmarkActive : ""}`}
+                  onClick={() => toggleSavedPhoto(index)}
+                  aria-label={isSaved ? "Убрать фото из избранного" : "Сохранить фото в избранное"}
+                  aria-pressed={isSaved}
+                >
+                  <BookmarkIcon active={isSaved} />
+                </button>
+              </figure>
+            );
+          })}
         </div>
 
-        {/* Right Column: Sticky Options Sidebar */}
-        <div className={styles.sidebar}>
+        <aside className={styles.sidebar} aria-label="Информация об изделии">
           <div className={styles.details}>
-            {/* Header Information */}
-            <div className={styles.header}>
-              <span className={styles.category}>{product.category}</span>
+            <div className={styles.productHeader}>
+              <p className={styles.category}>{product.category}</p>
               <h1 className={styles.title}>{product.name}</h1>
-              <span className={styles.price}>{formatPrice(product.price)}</span>
+              <p className={styles.price}>{formatPrice(product.price)}</p>
             </div>
 
-            {/* Color Selector */}
-            {product.colors && product.colors.length > 0 && (
-              <div>
-                <h3 className={styles.optionTitle}>Цвет: {selectedColor?.name}</h3>
-                <div className={styles.colorList}>
-                  {product.colors.map((color) => (
+            <section className={styles.optionSection} aria-labelledby="color-title">
+              <h2 className={styles.optionTitle} id="color-title">
+                Цвет: {selectedColor?.name}
+              </h2>
+              <div className={styles.colorList}>
+                {product.colors.map((color) => {
+                  const isSelected = selectedColor?.hex === color.hex;
+
+                  return (
                     <button
+                      type="button"
                       key={color.name}
-                      className={`${styles.colorDot} ${
-                        selectedColor?.hex === color.hex ? styles.colorDotActive : ""
-                      }`}
+                      className={`${styles.colorDot} ${isSelected ? styles.colorDotActive : ""}`}
                       style={{ backgroundColor: color.hex }}
                       onClick={() => setSelectedColor(color)}
                       aria-label={`Выбрать цвет ${color.name}`}
+                      aria-pressed={isSelected}
                     />
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            )}
+            </section>
 
-            {/* Size Selector */}
-            <div>
+            <section className={styles.optionSection} aria-labelledby="size-title">
               <div className={styles.sizeSectionHeader}>
-                <h3 className={styles.optionTitle}>Размер</h3>
-                <button
-                  className={styles.sizeGuideLink}
-                  onClick={() => setIsSizeGuideOpen(true)}
-                >
+                <h2 className={styles.optionTitle} id="size-title">
+                  Размер
+                </h2>
+                <button type="button" className={styles.sizeGuideLink} onClick={() => setIsSizeGuideOpen(true)}>
                   Таблица размеров
                 </button>
               </div>
-              <div className={styles.sizeList}>
-                {AVAILABLE_SIZES.map((size) => (
-                  <button
-                    key={size}
-                    className={`${styles.sizeBtn} ${
-                      selectedSize === size ? styles.sizeBtnActive : ""
-                    }`}
-                    onClick={() => {
-                      setSelectedSize(size);
-                      setError("");
-                    }}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-              {error && <span className={styles.error}>{error}</span>}
-            </div>
+              <div className={styles.sizeList} role="group" aria-label="Выбор размера">
+                {AVAILABLE_SIZES.map((size) => {
+                  const isSelected = selectedSize === size;
 
-            {/* Main Action Button */}
-            <button className={styles.addToCartBtn} onClick={handleAddToCart}>
+                  return (
+                    <button
+                      type="button"
+                      key={size}
+                      className={`${styles.sizeBtn} ${isSelected ? styles.sizeBtnActive : ""}`}
+                      onClick={() => {
+                        setSelectedSize(size);
+                        setError("");
+                      }}
+                      aria-pressed={isSelected}
+                    >
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
+              {error && <p className={styles.error}>{error}</p>}
+            </section>
+
+            <button type="button" className={styles.addToCartBtn} onClick={handleAddToCart}>
               Добавить в корзину
             </button>
 
-            {/* Accordions Block */}
+            <div className={styles.productFacts}>
+              <p>Артикул: 137833</p>
+              <p>Параметры модели: 180/86/62/92</p>
+              <p>На модели размер: S</p>
+            </div>
+
+            <div className={styles.description}>
+              <p>1. Мягкий материал из 100% хлопка - тактильно приятный, с выразительной фактурой.</p>
+              <p>2. Легко впишется в повседневный гардероб благодаря продуманному силуэту.</p>
+              <button type="button" className={styles.moreButton}>
+                ...ЕЩЁ
+              </button>
+            </div>
+
             <div className={styles.accordions}>
-              {/* Accordion 1: Description */}
-              <div className={styles.accordion}>
-                <button
-                  className={styles.accordionHeader}
-                  onClick={() => toggleAccordion("description")}
-                >
-                  <span>Описание и силуэт</span>
-                  <span className={styles.accordionIcon}>
-                    {openAccordions.description ? "−" : "+"}
-                  </span>
-                </button>
-                <div
-                  className={`${styles.accordionContent} ${
-                    openAccordions.description ? styles.accordionContentOpen : ""
-                  }`}
-                >
-                  <div className={styles.accordionInner}>
-                    Изделие выполнено из премиального материала с заботой о комфорте. Отличается лаконичным силуэтом, который легко вписывается в базовый гардероб. Свободный крой оставляет свободу движениям и формирует расслабленные образы.
-                    <br />
-                    <br />
-                    • Свободный силуэт
-                    <br />
-                    • Качественная обработка внутренних швов
-                    <br />• Износостойкий и экологичный материал
-                  </div>
-                </div>
-              </div>
+              {PRODUCT_PANELS.map((panel) => {
+                const isOpen = Boolean(openPanels[panel.id]);
 
-              {/* Accordion 2: Materials & Care */}
-              <div className={styles.accordion}>
-                <button
-                  className={styles.accordionHeader}
-                  onClick={() => toggleAccordion("composition")}
-                >
-                  <span>Состав и уход</span>
-                  <span className={styles.accordionIcon}>
-                    {openAccordions.composition ? "−" : "+"}
-                  </span>
-                </button>
-                <div
-                  className={`${styles.accordionContent} ${
-                    openAccordions.composition ? styles.accordionContentOpen : ""
-                  }`}
-                >
-                  <div className={styles.accordionInner}>
-                    <strong>Состав:</strong> 100% натуральный материал премиум-качества.
-                    <br />
-                    <br />
-                    <strong>Уход:</strong>
-                    <br />
-                    • Ручная или машинная стирка на деликатном режиме при температуре не выше 30°C
-                    <br />
-                    • Не отбеливать и не использовать агрессивные моющие средства
-                    <br />
-                    • Сушить в расправленном виде на горизонтальной поверхности
-                    <br />• Гладить при умеренной температуре с изнаночной стороны
+                return (
+                  <div className={styles.accordion} key={panel.id}>
+                    <button
+                      type="button"
+                      className={styles.accordionHeader}
+                      onClick={() => togglePanel(panel.id)}
+                      aria-expanded={isOpen}
+                    >
+                      <span>{panel.title}</span>
+                      <ChevronIcon expanded={isOpen} />
+                    </button>
+                    <div className={`${styles.accordionContent} ${isOpen ? styles.accordionContentOpen : ""}`}>
+                      <p className={styles.accordionInner}>{panel.content}</p>
+                    </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Accordion 3: Model Parameters */}
-              <div className={styles.accordion}>
-                <button
-                  className={styles.accordionHeader}
-                  onClick={() => toggleAccordion("model")}
-                >
-                  <span>Параметры модели</span>
-                  <span className={styles.accordionIcon}>
-                    {openAccordions.model ? "−" : "+"}
-                  </span>
-                </button>
-                <div
-                  className={`${styles.accordionContent} ${
-                    openAccordions.model ? styles.accordionContentOpen : ""
-                  }`}
-                >
-                  <div className={styles.accordionInner}>
-                    Рост модели на фото: 178 см.
-                    <br />
-                    На модели надет размер: S.
-                    <br />
-                    Параметры модели: обхват груди — 84 см, обхват талии — 60 см, обхват бедер — 89 см.
-                  </div>
-                </div>
-              </div>
-
-              {/* Accordion 4: Shipping & Returns */}
-              <div className={styles.accordion}>
-                <button
-                  className={styles.accordionHeader}
-                  onClick={() => toggleAccordion("shipping")}
-                >
-                  <span>Доставка и возврат</span>
-                  <span className={styles.accordionIcon}>
-                    {openAccordions.shipping ? "−" : "+"}
-                  </span>
-                </button>
-                <div
-                  className={`${styles.accordionContent} ${
-                    openAccordions.shipping ? styles.accordionContentOpen : ""
-                  }`}
-                >
-                  <div className={styles.accordionInner}>
-                    <strong>Доставка:</strong>
-                    <br />
-                    • Бесплатная доставка курьером по всей России при заказе от 15 000 ₽.
-                    <br />
-                    • Доставка курьером до двери с возможностью примерки.
-                    <br />
-                    • Сроки доставки: Москва — 1-2 рабочих дня, другие крупные города — 2-4 рабочих дня, регионы РФ — до 7 рабочих дней.
-                    <br />
-                    <br />
-                    <strong>Возврат:</strong>
-                    <br />
-                    • Вы можете легко вернуть товар в течение 14 календарных дней после получения, если он сохранил товарный вид и ярлыки.
-                  </div>
-                </div>
-              </div>
+                );
+              })}
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
-      {/* Sizing Guide Overlay */}
-      <SizeGuideModal
-        isOpen={isSizeGuideOpen}
-        onClose={() => setIsSizeGuideOpen(false)}
-      />
+      <section className={styles.outfit} aria-labelledby="outfit-title">
+        <h2 className={styles.outfitTitle} id="outfit-title">
+          Весь образ на фото
+        </h2>
+        <div className={styles.outfitGrid}>
+          {lookProducts.map((item) => (
+            <article className={styles.outfitCard} key={item.id}>
+              <Link href={`/product/${item.id}`} className={styles.outfitImageLink} aria-label={item.name}>
+                <Image src={item.images[0]} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
+              </Link>
+              <Link href={`/product/${item.id}`} className={styles.outfitName}>
+                {item.name}
+              </Link>
+              <p className={styles.outfitPrice}>{formatPrice(item.price)}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <SizeGuideModal isOpen={isSizeGuideOpen} onClose={() => setIsSizeGuideOpen(false)} />
     </>
   );
 }

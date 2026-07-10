@@ -1,35 +1,38 @@
-/* Design System Variables */
 :root {
-  /* Fonts */
-  --font-serif: var(--font-cormorant), Georgia, serif;
-  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: var(--font-cormorant), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-inter), Arial, Helvetica, sans-serif;
 
-  /* Color Palette (12STOREEZ Inspired - Warm Neutrals) */
-  --bg-primary: #FAF9F6;      /* Off-white / Soft Porcelain */
-  --bg-secondary: #F4F2EE;    /* Soft Sand / Light Linen */
-  --bg-card: #FFFFFF;         /* Pure White for clean borders */
-  
-  --text-primary: #1C1A17;    /* Rich Charcoal (Never pure black for premium feel) */
-  --text-secondary: #706B65;  /* Warm Muted Grey / Muted Taupe */
-  --text-light: #A5A099;      /* Delicate Light Grey */
-  
-  --border-color: #E6E2DC;    /* Thin Warm Border */
-  --border-light: #F0EDE8;    /* Extremely subtle border */
-  
-  --accent: #8E8276;          /* Muted Gold/Taupe Accent */
-  --accent-hover: #6E6359;
-  
-  /* Layout */
-  --header-height: 70px;
-  --header-height-mobile: 60px;
-  --max-width: 1440px;
-  
-  /* Transitions */
-  --transition-smooth: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --bg-primary: #ffffff;
+  --bg-secondary: #f3f1ec;
+  --bg-soft: #f8f7f4;
+  --bg-dark: #1d1714;
+
+  --text-primary: #4f3e35;
+  --text-secondary: rgba(79, 62, 53, 0.62);
+  --text-muted: rgba(79, 62, 53, 0.46);
+  --text-inverse: #ffffff;
+
+  --border-color: rgba(79, 62, 53, 0.18);
+  --border-light: rgba(79, 62, 53, 0.1);
+
+  --accent: #6b4d3f;
+  --accent-hover: #4f3e35;
+  --accent-danger: #8f2e27;
+
+  --header-height: 64px;
+  --header-height-mobile: 56px;
+  --site-chrome-height: var(--header-height);
+  --site-chrome-height-mobile: var(--header-height-mobile);
+  --max-width: 1920px;
+  --page-gutter: 12px;
+  --wide-gutter: clamp(24px, 7.2917vw, 140px);
+  --campaign-height: max(620px, min(100svh, calc(100vw * 913 / 1920)));
+  --section-y: 64px;
+
+  --transition-smooth: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
   --transition-fast: all 0.2s ease;
 }
 
-/* Base Styles */
 * {
   box-sizing: border-box;
   padding: 0;
@@ -37,8 +40,8 @@
 }
 
 html {
+  min-height: 100%;
   scroll-behavior: smooth;
-  height: 100%;
 }
 
 body {
@@ -46,20 +49,25 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.6;
-  letter-spacing: -0.01em;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  letter-spacing: 0.054em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
-/* Typography */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--font-serif);
   font-weight: 400;
-  letter-spacing: 0.02em;
-  line-height: 1.2;
+  line-height: 1.08;
+  letter-spacing: 0;
 }
 
 a {
@@ -69,21 +77,31 @@ a {
 }
 
 img {
+  display: block;
   max-width: 100%;
   height: auto;
-  display: block;
+}
+
+button,
+input {
+  font: inherit;
 }
 
 button {
+  border: 0;
   background: none;
-  border: none;
-  font: inherit;
-  cursor: pointer;
   color: inherit;
-  outline: none;
+  cursor: pointer;
 }
 
-/* Custom Scrollbar */
+input {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(79, 62, 53, 0.16);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -93,36 +111,34 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
+  border-radius: 999px;
+  background: rgba(79, 62, 53, 0.22);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
-}
-
-/* Global Layout Container */
 .container {
+  width: 100%;
   max-width: var(--max-width);
-  margin-left: auto;
   margin-right: auto;
-  padding-left: 24px;
-  padding-right: 24px;
+  margin-left: auto;
+  padding-right: var(--page-gutter);
+  padding-left: var(--page-gutter);
 }
 
 @media (max-width: 768px) {
-  .container {
-    padding-left: 16px;
-    padding-right: 16px;
+  :root {
+    --page-gutter: 8px;
+    --wide-gutter: 16px;
+    --campaign-height: 100svh;
+    --section-y: 48px;
   }
 }
 
-/* Utility Animations */
 @keyframes fadeIn {
   from {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -132,4 +148,3 @@ button {
 .animate-fade-in {
   animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import styles from "./checkout.module.css";
@@ -11,7 +10,6 @@ import styles from "./checkout.module.css";
 const formatPrice = (p: number) => p.toLocaleString("ru-RU") + " ₽";
 
 export default function CheckoutClient() {
-  const router = useRouter();
   const { cartItems, cartTotal, addToCart, updateQuantity, removeFromCart } = useCart();
 
   const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");

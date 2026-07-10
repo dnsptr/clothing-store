@@ -2,20 +2,21 @@
   background-color: var(--bg-primary);
   min-height: 100vh;
   padding-bottom: 100px;
+  padding-top: var(--site-chrome-height);
 }
 
 /* ── Page Header ── */
 .pageHeader {
   border-bottom: 1px solid var(--border-light);
-  padding: 24px 0;
+  padding: 20px 0;
   text-align: center;
 }
 
 .pageTitle {
+  font-family: var(--font-serif);
   font-size: 28px;
-  font-weight: 300;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 400;
+  line-height: 32px;
   color: var(--text-primary);
 }
 
@@ -39,6 +40,12 @@
   .layout {
     grid-template-columns: 1fr;
     gap: 40px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding-top: var(--site-chrome-height-mobile);
   }
 }
 
@@ -249,8 +256,8 @@
 
 /* Order summary */
 .summaryBox {
-  background-color: var(--bg-card);
-  padding: 28px;
+  background-color: var(--bg-soft);
+  padding: 24px;
 }
 
 .summaryRow {

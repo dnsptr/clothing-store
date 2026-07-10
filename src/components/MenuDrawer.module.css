@@ -4,8 +4,7 @@
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(1px);
+  background-color: rgba(0, 0, 0, 0.28);
   z-index: 10000;
   opacity: 0;
   visibility: hidden;
@@ -21,16 +20,16 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 380px;
+  width: 392px;
   height: 100vh;
   background-color: var(--bg-card);
-  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.05);
+  box-shadow: none;
   z-index: 10001;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transform: translateX(-100%);
-  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (max-width: 480px) {
@@ -46,8 +45,8 @@
 /* Header Close Button */
 .headerClose {
   position: absolute;
-  top: 14px;
-  right: 16px;
+  top: 8px;
+  right: 8px;
   z-index: 10005;
   color: var(--text-secondary);
   transition: var(--transition-fast);
@@ -55,12 +54,11 @@
 
 .headerClose:hover {
   color: var(--text-primary);
-  transform: rotate(90deg);
 }
 
 .closeIcon {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
 }
 
 /* Gender Tabs Switcher */
@@ -105,7 +103,7 @@
   display: flex;
   width: 200%; /* Double width for Level 0 + Level 1 side-by-side */
   height: calc(100vh - 55px);
-  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .slideSubPanel {
@@ -132,32 +130,32 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
+  padding: 18px 24px;
   border-bottom: 1px solid var(--border-light);
   font-family: var(--font-sans);
-  font-size: 15px;
-  font-weight: 300;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
   color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.044em;
   cursor: pointer;
   transition: var(--transition-fast);
 }
 
 .menuItem:hover {
-  background-color: var(--bg-primary);
+  background-color: var(--bg-soft);
   color: var(--accent);
 }
 
 .chevronIcon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--text-light);
 }
 
 /* Level 1 Sub-panel */
 .subPanelHeader {
-  padding: 20px 24px;
+  padding: 20px 24px 18px;
   border-bottom: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
@@ -189,10 +187,11 @@
 }
 
 .subPanelTitle {
-  font-size: 26px;
-  font-weight: 300;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 32px;
+  letter-spacing: 0.01em;
   color: var(--text-primary);
 }
 
@@ -203,35 +202,36 @@
 }
 
 .subMenuItem {
-  padding: 16px 24px;
+  padding: 15px 24px;
   border-bottom: 1px solid var(--border-light);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 18px;
   color: var(--text-secondary);
   transition: var(--transition-fast);
 }
 
 .subMenuItem:hover {
-  background-color: var(--bg-primary);
+  background-color: var(--bg-soft);
   color: var(--text-primary);
   padding-left: 28px;
 }
 
 /* Sale item — red accent */
 .menuItemSale span {
-  color: #b5373a;
+  color: var(--accent-danger);
 }
 
 /* Collection items — slightly muted, smaller */
 .menuItemCollection {
-  font-size: 15px;
+  font-size: 13px;
   opacity: 0.85;
 }
 
 /* "Смотреть все" — understated */
 .menuItemAll {
-  font-size: 13px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.1em;
   color: var(--text-secondary);
 }
 

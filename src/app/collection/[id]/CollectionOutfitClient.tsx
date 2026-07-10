@@ -4,12 +4,10 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Product } from "../../../data/mockData";
-import QuickViewModal from "../../../components/QuickViewModal";
 import styles from "./collection.module.css";
 import cardStyles from "../../../components/ProductGrid.module.css";
 
 export default function CollectionOutfitClient({ products }: { products: Product[] }) {
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
@@ -31,10 +29,7 @@ export default function CollectionOutfitClient({ products }: { products: Product
           return (
             <div key={product.id} className={cardStyles.card}>
               {/* Product Card Image */}
-              <div
-                className={cardStyles.imageContainer}
-                onClick={() => setSelectedProduct(product)}
-              >
+              <div className={cardStyles.imageContainer}>
                 {product.isNew && <span className={cardStyles.badge}>New</span>}
                 
                 {/* Wishlist Button */}
@@ -61,17 +56,20 @@ export default function CollectionOutfitClient({ products }: { products: Product
                   </svg>
                 </button>
 
-                <Image
-                  src={product.images[0]}
-                  alt={product.name}
-                  fill
-                  sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 330px"
-                  className={cardStyles.image}
-                  draggable={false}
-                />
-
-                {/* Hover Action */}
-                <div className={cardStyles.quickAdd}>Быстрый просмотр</div>
+                <Link
+                  href={`/product/${product.id}`}
+                  className={cardStyles.imageButton}
+                  aria-label={`Открыть страницу товара: ${product.name}`}
+                >
+                  <Image
+                    src={product.images[0]}
+                    alt={product.name}
+                    fill
+                    sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 330px"
+                    className={cardStyles.image}
+                    draggable={false}
+                  />
+                </Link>
               </div>
 
               {/* Product Card Details */}
@@ -106,12 +104,6 @@ export default function CollectionOutfitClient({ products }: { products: Product
           );
         })}
       </div>
-
-      {/* Choice details modal */}
-      <QuickViewModal
-        product={selectedProduct}
-        onClose={() => setSelectedProduct(null)}
-      />
     </>
   );
 }

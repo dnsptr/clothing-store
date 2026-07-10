@@ -7,28 +7,22 @@ import styles from "./MaterialsSlider.module.css";
 
 const MATERIALS = [
   {
-    name: "Натуральный лен",
-    desc: "Прохлада и легкость натурального льна в летние дни.",
+    name: "Лен",
+    eyebrow: "Рекомендации",
     image: "/products/3/3-1.png",
     link: "/catalog?category=Брюки",
   },
   {
-    name: "Премиальный шелк",
-    desc: "Струящийся натуральный шелк с деликатным блеском.",
+    name: "Шелк",
+    eyebrow: "Рекомендации",
     image: "/products/6/6-1.png",
     link: "/catalog?category=Трикотаж",
   },
   {
-    name: "Мягкий кашемир",
-    desc: "Нежнейшая кашемировая пряжа для уютных трикотажных сетов.",
+    name: "Кашемир",
+    eyebrow: "Рекомендации",
     image: "/products/2/2-1.png",
     link: "/catalog?category=Трикотаж",
-  },
-  {
-    name: "Тонкая шерсть",
-    desc: "Плотные шерстяные ткани для классических жакетов и пальто.",
-    image: "/products/5/5-1.png",
-    link: "/catalog?category=Пальто и тренчи",
   },
 ];
 
@@ -56,7 +50,7 @@ export default function MaterialsSlider() {
     const x = e.pageX - sliderRef.current.offsetLeft;
     const distance = x - startX;
     setDraggedDistance(Math.abs(distance));
-    sliderRef.current.scrollLeft = scrollLeftState - distance * 1.25;
+    sliderRef.current.scrollLeft = scrollLeftState - distance * 1.15;
   };
 
   const handleLinkClick = (e: React.MouseEvent) => {
@@ -64,46 +58,38 @@ export default function MaterialsSlider() {
   };
 
   return (
-    <section className={styles.section}>
-      <div className={styles.titleSection}>
-        <span className={styles.subtitle}>Философия</span>
-        <h2 className={styles.title}>Выбрать по материалам</h2>
-      </div>
-
-      <div className={styles.sliderWrapper}>
-        <div
-          ref={sliderRef}
-          className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={handleMouseLeave}
-          onMouseUp={handleMouseUp}
-          onMouseMove={handleMouseMove}
-        >
-          {MATERIALS.map((item, index) => (
-            <Link
-              key={index}
-              href={item.link}
-              className={styles.card}
-              onClick={handleLinkClick}
+    <section id="materials" className={styles.section} aria-label="Рекомендации по материалам">
+      <div
+        ref={sliderRef}
+        className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
+        onMouseDown={handleMouseDown}
+        onMouseLeave={handleMouseLeave}
+        onMouseUp={handleMouseUp}
+        onMouseMove={handleMouseMove}
+      >
+        {MATERIALS.map((item) => (
+          <Link
+            key={item.name}
+            href={item.link}
+            className={styles.card}
+            onClick={handleLinkClick}
+            draggable={false}
+          >
+            <Image
+              src={item.image}
+              alt={item.name}
+              fill
+              sizes="(max-width: 768px) 84vw, 46vw"
+              className={styles.image}
               draggable={false}
-            >
-              <Image
-                src={item.image}
-                alt={item.name}
-                fill
-                sizes="(max-width: 768px) 80vw, (max-width: 1024px) 55vw, 28vw"
-                className={styles.image}
-                draggable={false}
-              />
-              <div className={styles.overlay} />
-              <div className={styles.info}>
-                <h3 className={styles.cardTitle}>{item.name}</h3>
-                <p className={styles.cardDesc}>{item.desc}</p>
-                <span className={styles.cardLink}>Смотреть изделия →</span>
-              </div>
-            </Link>
-          ))}
-        </div>
+            />
+            <div className={styles.overlay} />
+            <div className={styles.info}>
+              <span className={styles.eyebrow}>{item.eyebrow}</span>
+              <h3 className={styles.cardTitle}>{item.name}</h3>
+            </div>
+          </Link>
+        ))}
       </div>
     </section>
   );
