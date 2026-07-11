@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { MOCK_OUTFITS } from "../data/mockData";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import {
   CATALOG_SECTIONS,
   CLOTHING_CATEGORIES,
@@ -43,14 +44,7 @@ export default function MenuDrawer() {
   const { isMenuOpen, setIsMenuOpen, toggleMenu } = useCart();
   const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType>(null);
   useBodyScrollLock(isMenuOpen);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isMenuOpen) setIsMenuOpen(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isMenuOpen, setIsMenuOpen]);
+  useOverlayDismiss(isMenuOpen, () => setIsMenuOpen(false));
 
   useEffect(() => {
     if (!isMenuOpen) {

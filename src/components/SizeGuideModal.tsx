@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import styles from "./SizeGuideModal.module.css";
 
 interface SizeGuideModalProps {
@@ -11,18 +11,7 @@ interface SizeGuideModalProps {
 
 export default function SizeGuideModal({ isOpen, onClose }: SizeGuideModalProps) {
   useBodyScrollLock(isOpen);
-
-  // Close size guide modal on ESC key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  useOverlayDismiss(isOpen, onClose);
 
   if (!isOpen) return null;
 

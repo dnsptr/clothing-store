@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import { Product } from "../data/mockData";
 import { useCart } from "../context/CartContext";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { formatPrice } from "../lib/format";
 import { AVAILABLE_SIZES } from "../lib/shop";
 import styles from "./QuickViewModal.module.css";
@@ -25,6 +26,7 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
   const { addToCart } = useCart();
   const [selection, setSelection] = useState<SelectionState | null>(null);
   useBodyScrollLock(Boolean(product));
+  useOverlayDismiss(Boolean(product), onClose);
 
   const activeSelection = product && selection?.productId === product.id ? selection : null;
   const selectedColor =
@@ -45,18 +47,6 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
       ...updates,
     });
   };
-
-  // Close modal on ESC key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && product) {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [product, onClose]);
 
   if (!product) return null;
 

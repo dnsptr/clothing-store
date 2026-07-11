@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useCart } from "../context/CartContext";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { formatPrice } from "../lib/format";
 import styles from "./CartDrawer.module.css";
 
@@ -22,18 +23,7 @@ export default function CartDrawer() {
 
   const drawerRef = useRef<HTMLDivElement>(null);
   useBodyScrollLock(isCartOpen);
-
-  // Close drawer on Escape key press
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isCartOpen) {
-        setIsCartOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCartOpen, setIsCartOpen]);
+  useOverlayDismiss(isCartOpen, () => setIsCartOpen(false));
 
   return (
     <>
