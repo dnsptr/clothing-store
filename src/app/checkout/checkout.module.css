@@ -224,6 +224,26 @@
   color: var(--text-secondary);
 }
 
+.recommendSizes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.recommendSize {
+  height: 28px;
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.recommendSizeActive {
+  border-color: var(--text-primary);
+}
+
 .addBtn {
   margin-top: 8px;
   font-family: var(--font-sans);

@@ -58,7 +58,7 @@ function LocationIcon() {
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
-  const { cartCount, toggleMenu } = useCart();
+  const { cartCount, favoriteCount, toggleMenu } = useCart();
 
   const isHome = pathname === "/";
   const isSolid = !isHome || isScrolled;
@@ -121,9 +121,10 @@ export default function Header() {
           <button className={styles.iconButton} aria-label="Поиск">
             <SearchIcon />
           </button>
-          <button className={styles.iconButton} aria-label="Избранное">
+          <Link href="/favorites" className={styles.iconButton} aria-label="Избранное">
             <BookmarkIcon />
-          </button>
+            {favoriteCount > 0 && <span className={styles.cartBadge}>{favoriteCount}</span>}
+          </Link>
           <Link href="/cart" className={styles.iconButton} aria-label="Корзина">
             <BagIcon />
             {cartCount > 0 && <span className={styles.cartBadge}>{cartCount}</span>}

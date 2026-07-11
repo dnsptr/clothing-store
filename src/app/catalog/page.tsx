@@ -6,15 +6,16 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
+import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import { formatPrice } from "../../lib/format";
 import styles from "./catalog.module.css";
 
 const FILTERS = ["Размер одежды", "Размер обуви", "Цвет", "Цена"];
 
-function BookmarkIcon() {
+function BookmarkIcon({ active }: { active: boolean }) {
   return (
-    <svg className={styles.bookmarkIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className={styles.bookmarkIcon} fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
     </svg>
   );
@@ -26,6 +27,7 @@ function CatalogContent() {
 
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
   const [sortBy, setSortBy] = useState("default");
+  const { isFavorite, toggleFavorite } = useCart();
 
   const filteredProducts = MOCK_PRODUCTS.filter(
     (product) => !categoryParam || product.category === categoryParam
@@ -105,13 +107,20 @@ function CatalogContent() {
             <div className={styles.grid}>
               {filteredProducts.map((product) => {
                 const activeIndex = activeColors[product.id] ?? 0;
+                const isSaved = isFavorite(product.id);
 
                 return (
                   <article key={product.id} className={styles.card}>
                     <div className={styles.preview}>
                       {product.isNew && <span className={styles.badge}>New</span>}
-                      <button className={styles.wishlist} type="button" aria-label="Добавить в избранное">
-                        <BookmarkIcon />
+                      <button
+                        className={styles.wishlist}
+                        type="button"
+                        onClick={() => toggleFavorite(product.id)}
+                        aria-pressed={isSaved}
+                        aria-label="Добавить в избранное"
+                      >
+                        <BookmarkIcon active={isSaved} />
                       </button>
                       <Link
                         className={styles.imageButton}

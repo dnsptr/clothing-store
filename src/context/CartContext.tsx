@@ -21,6 +21,11 @@ interface CartContextType {
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
   cartTotal: number;
+  favoriteProductIds: string[];
+  favoriteCount: number;
+  toggleFavorite: (productId: string) => void;
+  removeFavorite: (productId: string) => void;
+  isFavorite: (productId: string) => boolean;
 
   // Shop / Navigation States (Phase 4)
   isMenuOpen: boolean;
@@ -30,6 +35,7 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = "clothing-store-cart";
+const FAVORITES_STORAGE_KEY = "clothing-store-favorites";
 
 function isCartItem(value: unknown): value is CartItem {
   if (!value || typeof value !== "object") return false;
@@ -49,11 +55,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCartHydrated, setIsCartHydrated] = useState(false);
+  const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>([]);
+  const [isFavoritesHydrated, setIsFavoritesHydrated] = useState(false);
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const cartTotal = cartItems.reduce(
     (acc, item) => acc + item.product.price * item.quantity,
     0
   );
+  const favoriteCount = favoriteProductIds.length;
 
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -89,6 +98,40 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems));
   }, [cartItems, isCartHydrated]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    try {
+      const savedFavorites = window.localStorage.getItem(FAVORITES_STORAGE_KEY);
+      const parsedFavorites: unknown = savedFavorites ? JSON.parse(savedFavorites) : [];
+      const nextFavorites = Array.isArray(parsedFavorites)
+        ? parsedFavorites.filter((id): id is string => typeof id === "string")
+        : [];
+
+      window.setTimeout(() => {
+        if (!isMounted) return;
+        setFavoriteProductIds([...new Set(nextFavorites)]);
+        setIsFavoritesHydrated(true);
+      }, 0);
+    } catch {
+      window.localStorage.removeItem(FAVORITES_STORAGE_KEY);
+      window.setTimeout(() => {
+        if (!isMounted) return;
+        setIsFavoritesHydrated(true);
+      }, 0);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isFavoritesHydrated) return;
+
+    window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favoriteProductIds));
+  }, [favoriteProductIds, isFavoritesHydrated]);
 
   const addToCart = (newItem: CartItem) => {
     setCartItems((prevItems) => {
@@ -148,6 +191,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  const toggleFavorite = (productId: string) => {
+    setFavoriteProductIds((previous) =>
+      previous.includes(productId)
+        ? previous.filter((id) => id !== productId)
+        : [...previous, productId]
+    );
+  };
+
+  const removeFavorite = (productId: string) => {
+    setFavoriteProductIds((previous) => previous.filter((id) => id !== productId));
+  };
+
+  const isFavorite = (productId: string) => favoriteProductIds.includes(productId);
+
   const toggleCart = () => {
     setIsCartOpen((prev) => !prev);
     if (isMenuOpen) setIsMenuOpen(false); // Close left menu if cart is opened
@@ -170,6 +227,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setIsCartOpen,
         cartCount,
         cartTotal,
+        favoriteProductIds,
+        favoriteCount,
+        toggleFavorite,
+        removeFavorite,
+        isFavorite,
         isMenuOpen,
         toggleMenu,
         setIsMenuOpen,

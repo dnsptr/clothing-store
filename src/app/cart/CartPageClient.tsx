@@ -1,11 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import { formatPrice } from "../../lib/format";
-import { DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
+import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./cart.module.css";
 
 function BookmarkIcon() {
@@ -26,6 +27,7 @@ function RemoveIcon() {
 
 export default function CartPageClient() {
   const { cartItems, cartTotal, addToCart, removeFromCart, updateQuantity } = useCart();
+  const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
   const delivery = cartTotal >= DELIVERY.cartFreeThreshold ? 0 : DELIVERY.cartPrice;
   const recommendations = MOCK_PRODUCTS
     .filter((product) => !cartItems.some((item) => item.product.id === product.id))
@@ -107,7 +109,10 @@ export default function CartPageClient() {
               <section className={styles.recommendations} aria-label="Дополните заказ">
                 <h2>Дополните заказ</h2>
                 <div className={styles.recommendGrid}>
-                  {recommendations.map((product) => (
+                  {recommendations.map((product) => {
+                    const selectedSize = recommendationSizes[product.id] ?? DEFAULT_RECOMMENDATION_SIZE;
+
+                    return (
                     <article className={styles.recommendCard} key={product.id}>
                       <div className={styles.recommendImageWrap}>
                         <Link href={`/product/${product.id}`} className={styles.recommendImageLink} aria-label={product.name}>
@@ -124,19 +129,40 @@ export default function CartPageClient() {
                           className={styles.recommendAdd}
                           onClick={() => addToCart({
                             product,
-                            selectedSize: DEFAULT_RECOMMENDATION_SIZE,
+                            selectedSize,
                             selectedColor: product.colors[0],
                             quantity: 1,
                           })}
-                          aria-label={`Добавить ${product.name} в корзину`}
+                          aria-label={`Добавить ${product.name}, размер ${selectedSize}, в корзину`}
                         >
                           <BookmarkIcon />
                         </button>
                       </div>
                       <Link href={`/product/${product.id}`} className={styles.recommendName}>{product.name}</Link>
                       <p className={styles.recommendPrice}>{formatPrice(product.price)}</p>
+                      <div className={styles.recommendSizes} aria-label={`Размер для ${product.name}`}>
+                        {AVAILABLE_SIZES.map((size) => (
+                          <button
+                            key={size}
+                            type="button"
+                            className={`${styles.recommendSize} ${
+                              selectedSize === size ? styles.recommendSizeActive : ""
+                            }`}
+                            onClick={() =>
+                              setRecommendationSizes((previous) => ({
+                                ...previous,
+                                [product.id]: size,
+                              }))
+                            }
+                            aria-pressed={selectedSize === size}
+                          >
+                            {size}
+                          </button>
+                        ))}
+                      </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             )}

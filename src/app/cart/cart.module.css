@@ -335,6 +335,26 @@
   letter-spacing: 0;
 }
 
+.recommendSizes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 7px;
+}
+
+.recommendSize {
+  height: 24px;
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 0;
+}
+
+.recommendSizeActive {
+  border-color: var(--text-primary);
+}
+
 .emptyState {
   display: flex;
   min-height: 610px;

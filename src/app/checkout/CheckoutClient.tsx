@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import { formatPrice } from "../../lib/format";
-import { DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
+import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./checkout.module.css";
 
 export default function CheckoutClient() {
@@ -25,6 +25,7 @@ export default function CheckoutClient() {
     comment: "",
   });
   const [submitted, setSubmitted] = useState(false);
+  const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
 
   // Recommend products not already in cart
   const cartIds = cartItems.map((i) => i.product.id);
@@ -139,7 +140,10 @@ export default function CheckoutClient() {
             <div className={styles.recommendSection}>
               <p className={styles.sectionTitle}>Дополните заказ</p>
               <div className={styles.recommendGrid}>
-                {recommendations.map((product) => (
+                {recommendations.map((product) => {
+                  const selectedSize = recommendationSizes[product.id] ?? DEFAULT_RECOMMENDATION_SIZE;
+
+                  return (
                   <div key={product.id} className={styles.recommendCard}>
                     <Link href={`/product/${product.id}`}>
                       <div className={styles.recommendImage}>
@@ -154,12 +158,32 @@ export default function CheckoutClient() {
                     </Link>
                     <span className={styles.recommendName}>{product.name}</span>
                     <span className={styles.recommendPrice}>{formatPrice(product.price)}</span>
+                    <div className={styles.recommendSizes} aria-label={`Размер для ${product.name}`}>
+                      {AVAILABLE_SIZES.map((size) => (
+                        <button
+                          key={size}
+                          type="button"
+                          className={`${styles.recommendSize} ${
+                            selectedSize === size ? styles.recommendSizeActive : ""
+                          }`}
+                          onClick={() =>
+                            setRecommendationSizes((previous) => ({
+                              ...previous,
+                              [product.id]: size,
+                            }))
+                          }
+                          aria-pressed={selectedSize === size}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
                     <button
                       className={styles.addBtn}
                       onClick={() =>
                         addToCart({
                           product,
-                          selectedSize: DEFAULT_RECOMMENDATION_SIZE,
+                          selectedSize,
                           selectedColor: product.colors[0],
                           quantity: 1,
                         })
@@ -168,7 +192,8 @@ export default function CheckoutClient() {
                       Добавить
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

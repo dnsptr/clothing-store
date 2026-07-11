@@ -3,27 +3,20 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useCart } from "../context/CartContext";
 import { MOCK_PRODUCTS } from "../data/mockData";
 import { formatPrice as formatCurrency } from "../lib/format";
 import styles from "./ProductGrid.module.css";
 
 export default function ProductGrid() {
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
-  const [savedProductIds, setSavedProductIds] = useState<string[]>([]);
+  const { isFavorite, toggleFavorite } = useCart();
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
     setActiveColors((prev) => ({
       ...prev,
       [productId]: colorIndex,
     }));
-  };
-
-  const handleSavedToggle = (productId: string) => {
-    setSavedProductIds((previous) =>
-      previous.includes(productId)
-        ? previous.filter((id) => id !== productId)
-        : [...previous, productId]
-    );
   };
 
   return (
@@ -42,7 +35,7 @@ export default function ProductGrid() {
         <div className={styles.grid}>
           {MOCK_PRODUCTS.slice(0, 4).map((product) => {
             const activeIndex = activeColors[product.id] ?? 0;
-            const isSaved = savedProductIds.includes(product.id);
+            const isSaved = isFavorite(product.id);
 
             return (
               <article key={product.id} className={styles.card}>
@@ -51,7 +44,7 @@ export default function ProductGrid() {
 
                   <button
                     className={styles.wishlistBtn}
-                    onClick={() => handleSavedToggle(product.id)}
+                    onClick={() => toggleFavorite(product.id)}
                     aria-pressed={isSaved}
                     aria-label="Добавить в избранное"
                   >
