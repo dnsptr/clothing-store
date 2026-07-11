@@ -8,19 +8,19 @@ import styles from "./MaterialsSlider.module.css";
 const MATERIALS = [
   {
     name: "Лен",
-    eyebrow: "Рекомендации",
+    eyebrow: "Материалы в деталях",
     image: "/products/3/3-1.png",
     link: "/catalog?category=Брюки",
   },
   {
     name: "Шелк",
-    eyebrow: "Рекомендации",
+    eyebrow: "Материалы в деталях",
     image: "/products/6/6-1.png",
     link: "/catalog?category=Трикотаж",
   },
   {
     name: "Кашемир",
-    eyebrow: "Рекомендации",
+    eyebrow: "Материалы в деталях",
     image: "/products/2/2-1.png",
     link: "/catalog?category=Трикотаж",
   },
