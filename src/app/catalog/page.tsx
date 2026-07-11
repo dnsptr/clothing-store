@@ -8,10 +8,15 @@ import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
+import {
+  CATALOG_PRIMARY_NAV,
+  CLOTHING_SECTION_CATEGORIES,
+  MATERIALS,
+  getCatalogTitle,
+  getMaterialBySlug,
+} from "../../lib/catalog";
 import { formatPrice } from "../../lib/format";
 import styles from "./catalog.module.css";
-
-const FILTERS = ["Размер одежды", "Размер обуви", "Цвет", "Цена"];
 
 function BookmarkIcon({ active }: { active: boolean }) {
   return (
@@ -24,20 +29,45 @@ function BookmarkIcon({ active }: { active: boolean }) {
 function CatalogContent() {
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
+  const sectionParam = searchParams.get("section");
+  const materialParam = searchParams.get("material");
 
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
   const [sortBy, setSortBy] = useState("default");
   const { isFavorite, toggleFavorite } = useCart();
 
-  const filteredProducts = MOCK_PRODUCTS.filter(
-    (product) => !categoryParam || product.category === categoryParam
-  ).sort((a, b) => {
+  const material = materialParam ? getMaterialBySlug(materialParam) : undefined;
+  const filteredProducts = MOCK_PRODUCTS.filter((product) => {
+    if (categoryParam) return product.category === categoryParam;
+    if (material) return material.productIds.includes(product.id);
+    if (sectionParam === "new") return Boolean(product.isNew);
+    if (sectionParam === "clothing") return CLOTHING_SECTION_CATEGORIES.includes(product.category);
+    if (sectionParam === "shoes") return product.category === "Обувь";
+    if (sectionParam === "accessories") return product.category === "Аксессуары";
+    if (sectionParam === "sale") return true;
+    return true;
+  }).sort((a, b) => {
     if (sortBy === "price-low-to-high") return a.price - b.price;
     if (sortBy === "price-high-to-low") return b.price - a.price;
     return 0;
   });
 
-  const title = categoryParam || "Женщинам";
+  const title = getCatalogTitle({
+    category: categoryParam,
+    material: materialParam,
+    section: sectionParam,
+  });
+
+  const isCatalogLinkActive = (href: string) => {
+    const [, queryString] = href.split("?");
+    const params = new URLSearchParams(queryString);
+
+    if (params.has("section")) return params.get("section") === sectionParam;
+    if (params.has("material")) return params.get("material") === materialParam;
+    if (params.has("category")) return params.get("category") === categoryParam;
+
+    return !categoryParam && !sectionParam && !materialParam;
+  };
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
     setActiveColors((prev) => ({
@@ -66,12 +96,28 @@ function CatalogContent() {
         <div className={styles.filtersBand}>
           <div className={styles.shell}>
             <div className={styles.filtersRow}>
-              <div className={styles.filters} aria-label="Фильтры каталога">
-                {FILTERS.map((filter) => (
-                  <button key={filter} className={styles.filterButton} type="button">
-                    <span>{filter}</span>
-                    <span className={styles.chevron} aria-hidden="true" />
-                  </button>
+              <div className={styles.filters} aria-label="Разделы каталога">
+                {CATALOG_PRIMARY_NAV.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`${styles.filterButton} ${
+                      isCatalogLinkActive(item.href) ? styles.filterButtonActive : ""
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+                {MATERIALS.map((item) => (
+                  <Link
+                    key={item.slug}
+                    href={item.href}
+                    className={`${styles.filterButton} ${
+                      isCatalogLinkActive(item.href) ? styles.filterButtonActive : ""
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
                 ))}
               </div>
 

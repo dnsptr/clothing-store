@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
+import { CATALOG_SECTIONS } from "../lib/catalog";
 import styles from "./Header.module.css";
 
 function MenuIcon() {
@@ -86,7 +87,7 @@ export default function Header() {
           </button>
 
           <nav className={styles.genderNav} aria-label="Раздел каталога">
-            <Link href="/catalog" className={styles.genderActive}>
+            <Link href={CATALOG_SECTIONS.clothing.href} className={styles.genderActive}>
               Женщинам
             </Link>
           </nav>

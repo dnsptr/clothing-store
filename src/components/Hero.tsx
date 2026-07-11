@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { CATALOG_SECTIONS } from "../lib/catalog";
 import styles from "./Hero.module.css";
 
 const HERO_SLIDE = {
@@ -7,7 +8,7 @@ const HERO_SLIDE = {
   alt: "Женский образ для офиса",
   eyebrow: "Актуальное",
   title: "Образы для офиса",
-  href: "/catalog",
+  href: CATALOG_SECTIONS.clothing.href,
 };
 
 export default function Hero() {

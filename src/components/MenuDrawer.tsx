@@ -4,9 +4,16 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { MOCK_OUTFITS } from "../data/mockData";
+import {
+  CATALOG_SECTIONS,
+  CLOTHING_CATEGORIES,
+  MATERIALS,
+  SALE_CATEGORIES,
+  SHOES_CATEGORIES,
+} from "../lib/catalog";
 import styles from "./MenuDrawer.module.css";
 
-type SubMenuType = "sale" | "clothing" | "shoes" | "bags" | "materials" | null;
+type SubMenuType = "sale" | "clothing" | "shoes" | "materials" | null;
 
 function Chevron() {
   return (
@@ -55,49 +62,13 @@ export default function MenuDrawer() {
     router.push(path);
   };
 
-  const goCategory = (cat?: string) => {
-    go(cat ? `/catalog?category=${encodeURIComponent(cat)}` : "/catalog");
-  };
-
-  // Sub-menu data
-  const saleItems = [
-    { name: "До 30%", cat: "" },
-    { name: "До 50%", cat: "" },
-    { name: "Трикотаж", cat: "Трикотаж" },
-    { name: "Аксессуары", cat: "Аксессуары" },
-    { name: "Все акции", cat: "" },
-  ];
-
-  const clothingItems = [
-    { name: "Все товары", cat: "" },
-    { name: "Пальто и тренчи", cat: "Пальто и тренчи" },
-    { name: "Трикотаж", cat: "Трикотаж" },
-    { name: "Брюки", cat: "Брюки" },
-    { name: "Юбки и платья", cat: "Брюки" },
-  ];
-
-  const shoesItems = [
-    { name: "Вся обувь", cat: "Обувь" },
-    { name: "Лоферы", cat: "Обувь" },
-    { name: "Босоножки", cat: "Обувь" },
-  ];
-
-  const materialsItems = [
-    { name: "Натуральный лен", cat: "Брюки" },
-    { name: "Премиальный шелк", cat: "Трикотаж" },
-    { name: "Мягкий кашемир", cat: "Трикотаж" },
-    { name: "Тонкая шерсть", cat: "Пальто и тренчи" },
-  ];
-
   return (
     <>
-      {/* Backdrop */}
       <div
         className={`${styles.overlay} ${isMenuOpen ? styles.overlayOpen : ""}`}
         onClick={toggleMenu}
       />
 
-      {/* Drawer */}
       <div className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""}`}>
         <button className={styles.headerClose} onClick={toggleMenu} aria-label="Закрыть меню">
           <svg className={styles.closeIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -107,54 +78,43 @@ export default function MenuDrawer() {
 
         <div style={{ height: "55px", borderBottom: "1px solid var(--border-light)" }} />
 
-        {/* Sliding panels */}
         <div
           className={`${styles.panelContainer} ${
             activeSubMenu !== null ? styles.slideSubPanel : ""
           }`}
         >
-          {/* ── LEVEL 0: Main ── */}
           <div className={styles.panel}>
             <ul className={styles.menuList}>
-
-              {/* Новинки */}
-              <li className={styles.menuItem} onClick={() => goCategory()}>
-                <span>Новинки</span>
+              <li className={styles.menuItem} onClick={() => go(CATALOG_SECTIONS.new.href)}>
+                <span>{CATALOG_SECTIONS.new.label}</span>
               </li>
 
-              {/* Sale → sub */}
               <li className={`${styles.menuItem} ${styles.menuItemSale}`} onClick={() => setActiveSubMenu("sale")}>
                 <span>Sale</span>
                 <Chevron />
               </li>
 
-              {/* Одежда → sub */}
               <li className={styles.menuItem} onClick={() => setActiveSubMenu("clothing")}>
-                <span>Одежда</span>
+                <span>{CATALOG_SECTIONS.clothing.label}</span>
                 <Chevron />
               </li>
 
-              {/* Обувь → sub */}
               <li className={styles.menuItem} onClick={() => setActiveSubMenu("shoes")}>
-                <span>Обувь</span>
+                <span>{CATALOG_SECTIONS.shoes.label}</span>
                 <Chevron />
               </li>
 
-              {/* Сумки и аксессуары → direct */}
-              <li className={styles.menuItem} onClick={() => goCategory("Аксессуары")}>
-                <span>Сумки и аксессуары</span>
+              <li className={styles.menuItem} onClick={() => go(CATALOG_SECTIONS.accessories.href)}>
+                <span>{CATALOG_SECTIONS.accessories.label}</span>
               </li>
 
-              {/* Материалы → sub */}
               <li className={styles.menuItem} onClick={() => setActiveSubMenu("materials")}>
                 <span>Материалы</span>
                 <Chevron />
               </li>
 
-              {/* Divider */}
               <li className={styles.menuDivider} />
 
-              {/* Outfit collections — direct links */}
               {MOCK_OUTFITS.map((outfit) => (
                 <li
                   key={outfit.id}
@@ -165,28 +125,20 @@ export default function MenuDrawer() {
                 </li>
               ))}
 
-              {/* Смотреть все */}
-              <li className={`${styles.menuItem} ${styles.menuItemAll}`} onClick={() => goCategory()}>
+              <li className={`${styles.menuItem} ${styles.menuItemAll}`} onClick={() => go("/catalog")}>
                 <span>Смотреть все</span>
               </li>
-
             </ul>
           </div>
 
-          {/* ── LEVEL 1: Sub-panel ── */}
           <div className={styles.panel}>
-
             {activeSubMenu === "sale" && (
               <>
                 <BackHeader label="Sale" onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
-                  {saleItems.map((item) => (
-                    <li
-                      key={item.name}
-                      className={styles.subMenuItem}
-                      onClick={() => goCategory(item.cat)}
-                    >
-                      {item.name}
+                  {SALE_CATEGORIES.map((item) => (
+                    <li key={item.href + item.label} className={styles.subMenuItem} onClick={() => go(item.href)}>
+                      {item.label}
                     </li>
                   ))}
                 </ul>
@@ -195,15 +147,11 @@ export default function MenuDrawer() {
 
             {activeSubMenu === "clothing" && (
               <>
-                <BackHeader label="Одежда" onBack={() => setActiveSubMenu(null)} />
+                <BackHeader label={CATALOG_SECTIONS.clothing.label} onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
-                  {clothingItems.map((item) => (
-                    <li
-                      key={item.name}
-                      className={styles.subMenuItem}
-                      onClick={() => goCategory(item.cat)}
-                    >
-                      {item.name}
+                  {CLOTHING_CATEGORIES.map((item) => (
+                    <li key={item.href + item.label} className={styles.subMenuItem} onClick={() => go(item.href)}>
+                      {item.label}
                     </li>
                   ))}
                 </ul>
@@ -212,15 +160,11 @@ export default function MenuDrawer() {
 
             {activeSubMenu === "shoes" && (
               <>
-                <BackHeader label="Обувь" onBack={() => setActiveSubMenu(null)} />
+                <BackHeader label={CATALOG_SECTIONS.shoes.label} onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
-                  {shoesItems.map((item) => (
-                    <li
-                      key={item.name}
-                      className={styles.subMenuItem}
-                      onClick={() => goCategory(item.cat)}
-                    >
-                      {item.name}
+                  {SHOES_CATEGORIES.map((item) => (
+                    <li key={item.href + item.label} className={styles.subMenuItem} onClick={() => go(item.href)}>
+                      {item.label}
                     </li>
                   ))}
                 </ul>
@@ -231,19 +175,14 @@ export default function MenuDrawer() {
               <>
                 <BackHeader label="Материалы" onBack={() => setActiveSubMenu(null)} />
                 <ul className={styles.subMenuList}>
-                  {materialsItems.map((item) => (
-                    <li
-                      key={item.name}
-                      className={styles.subMenuItem}
-                      onClick={() => goCategory(item.cat)}
-                    >
-                      {item.name}
+                  {MATERIALS.map((item) => (
+                    <li key={item.slug} className={styles.subMenuItem} onClick={() => go(item.href)}>
+                      {item.label}
                     </li>
                   ))}
                 </ul>
               </>
             )}
-
           </div>
         </div>
       </div>

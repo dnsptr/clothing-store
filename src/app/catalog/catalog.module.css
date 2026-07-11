@@ -86,6 +86,7 @@
 .filterButton {
   gap: 10px;
   padding: 0 12px;
+  border-bottom: 1px solid transparent;
   white-space: nowrap;
 }
 
@@ -93,12 +94,9 @@
   padding-left: 0;
 }
 
-.chevron {
-  width: 6px;
-  height: 6px;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
+.filterButton:hover,
+.filterButtonActive {
+  border-bottom-color: currentColor;
 }
 
 .sortControl {

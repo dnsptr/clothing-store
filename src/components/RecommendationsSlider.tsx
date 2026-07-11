@@ -3,28 +3,8 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { HOME_RECOMMENDATIONS } from "../lib/catalog";
 import styles from "./RecommendationsSlider.module.css";
-
-const RECOMMENDATIONS = [
-  {
-    name: "Костюмы",
-    eyebrow: "Рекомендации",
-    image: "/images/collection-women.png",
-    link: "/catalog",
-  },
-  {
-    name: "Платья",
-    eyebrow: "Рекомендации",
-    image: "/products/8/8-1.png",
-    link: "/catalog?category=Трикотаж",
-  },
-  {
-    name: "Трикотаж",
-    eyebrow: "Рекомендации",
-    image: "/products/2/2-1.png",
-    link: "/catalog?category=Трикотаж",
-  },
-];
 
 export default function RecommendationsSlider() {
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -58,7 +38,7 @@ export default function RecommendationsSlider() {
   };
 
   return (
-    <section className={styles.section} aria-label="Рекомендации">
+    <section className={styles.section} aria-label="Разделы каталога">
       <div
         ref={sliderRef}
         className={`${styles.slider} ${isDragging ? styles.sliderActive : ""}`}
@@ -67,17 +47,17 @@ export default function RecommendationsSlider() {
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
       >
-        {RECOMMENDATIONS.map((item) => (
+        {HOME_RECOMMENDATIONS.map((item) => (
           <Link
-            key={item.name}
-            href={item.link}
+            key={item.href}
+            href={item.href}
             className={styles.card}
             draggable={false}
             onClick={handleLinkClick}
           >
             <Image
               src={item.image}
-              alt={item.name}
+              alt={item.label}
               fill
               sizes="(max-width: 768px) 82vw, 25vw"
               className={styles.image}
@@ -86,7 +66,7 @@ export default function RecommendationsSlider() {
             <div className={styles.overlay} />
             <div className={styles.info}>
               <span className={styles.eyebrow}>{item.eyebrow}</span>
-              <h2 className={styles.title}>{item.name}</h2>
+              <h2 className={styles.title}>{item.label}</h2>
               <span className={styles.link}>Смотреть</span>
             </div>
           </Link>

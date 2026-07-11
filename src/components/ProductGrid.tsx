@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../context/CartContext";
 import { MOCK_PRODUCTS } from "../data/mockData";
+import { CATALOG_SECTIONS } from "../lib/catalog";
 import { formatPrice as formatCurrency } from "../lib/format";
 import styles from "./ProductGrid.module.css";
 
@@ -27,7 +28,7 @@ export default function ProductGrid() {
             <span className={styles.subtitle}>Подборка сезона</span>
             <h2 className={styles.title}>Новинки</h2>
           </div>
-          <Link href="/catalog" className={styles.allLink}>
+          <Link href={CATALOG_SECTIONS.new.href} className={styles.allLink}>
             Смотреть все
           </Link>
         </div>

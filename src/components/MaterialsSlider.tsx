@@ -3,28 +3,8 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { MATERIALS } from "../lib/catalog";
 import styles from "./MaterialsSlider.module.css";
-
-const MATERIALS = [
-  {
-    name: "Лен",
-    eyebrow: "Материалы в деталях",
-    image: "/products/3/3-1.png",
-    link: "/catalog?category=Брюки",
-  },
-  {
-    name: "Шелк",
-    eyebrow: "Материалы в деталях",
-    image: "/products/6/6-1.png",
-    link: "/catalog?category=Трикотаж",
-  },
-  {
-    name: "Кашемир",
-    eyebrow: "Материалы в деталях",
-    image: "/products/2/2-1.png",
-    link: "/catalog?category=Трикотаж",
-  },
-];
 
 export default function MaterialsSlider() {
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -69,15 +49,15 @@ export default function MaterialsSlider() {
       >
         {MATERIALS.map((item) => (
           <Link
-            key={item.name}
-            href={item.link}
+            key={item.slug}
+            href={item.href}
             className={styles.card}
             onClick={handleLinkClick}
             draggable={false}
           >
             <Image
               src={item.image}
-              alt={item.name}
+              alt={item.label}
               fill
               sizes="(max-width: 768px) 84vw, 46vw"
               className={styles.image}
@@ -86,7 +66,7 @@ export default function MaterialsSlider() {
             <div className={styles.overlay} />
             <div className={styles.info}>
               <span className={styles.eyebrow}>{item.eyebrow}</span>
-              <h3 className={styles.cardTitle}>{item.name}</h3>
+              <h3 className={styles.cardTitle}>{item.label}</h3>
             </div>
           </Link>
         ))}

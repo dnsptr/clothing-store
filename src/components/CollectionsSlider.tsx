@@ -3,45 +3,8 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { MOCK_OUTFITS } from "../data/mockData";
 import styles from "./CollectionsSlider.module.css";
-
-const STORIES = [
-  {
-    id: "linen-look",
-    title: "Льняной силуэт",
-    subtitle: "Летний образ с тренчем и брюками",
-    image: "/products/1/1-1.jpg",
-    href: "/collection/linen-look",
-  },
-  {
-    id: "cashmere-cozy",
-    title: "Теплый трикотаж",
-    subtitle: "Мягкие фактуры для прохладных дней",
-    image: "/products/2/2-1.png",
-    href: "/collection/cashmere-cozy",
-  },
-  {
-    id: "autumn-chic",
-    title: "Жакет и шелк",
-    subtitle: "Собранный образ для города",
-    image: "/products/5/5-1.png",
-    href: "/collection/autumn-chic",
-  },
-  {
-    id: "summer-dress",
-    title: "Платье миди",
-    subtitle: "Легкая линия и чистая графика",
-    image: "/products/8/8-1.png",
-    href: "/catalog?category=Трикотаж",
-  },
-  {
-    id: "accessory-edit",
-    title: "Акценты",
-    subtitle: "Сумки, обувь и лаконичные детали",
-    image: "/products/4/4-1.png",
-    href: "/catalog?category=Аксессуары",
-  },
-];
 
 export default function CollectionsSlider() {
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -88,10 +51,10 @@ export default function CollectionsSlider() {
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
       >
-        {STORIES.map((outfit) => (
+        {MOCK_OUTFITS.map((outfit) => (
           <Link
             key={outfit.id}
-            href={outfit.href}
+            href={`/collection/${outfit.id}`}
             className={styles.card}
             onClick={handleLinkClick}
             draggable={false}
