@@ -1,12 +1,11 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
-import { useCart } from "../../context/CartContext";
+import ProductCard from "../../components/ProductCard";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import {
   CATALOG_PRIMARY_NAV,
@@ -15,16 +14,7 @@ import {
   getCatalogTitle,
   getMaterialBySlug,
 } from "../../lib/catalog";
-import { formatPrice } from "../../lib/format";
 import styles from "./catalog.module.css";
-
-function BookmarkIcon({ active }: { active: boolean }) {
-  return (
-    <svg className={styles.bookmarkIcon} fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
-    </svg>
-  );
-}
 
 function CatalogContent() {
   const searchParams = useSearchParams();
@@ -32,9 +22,7 @@ function CatalogContent() {
   const sectionParam = searchParams.get("section");
   const materialParam = searchParams.get("material");
 
-  const [activeColors, setActiveColors] = useState<Record<string, number>>({});
   const [sortBy, setSortBy] = useState("default");
-  const { isFavorite, toggleFavorite } = useCart();
 
   const material = materialParam ? getMaterialBySlug(materialParam) : undefined;
   const filteredProducts = MOCK_PRODUCTS.filter((product) => {
@@ -67,13 +55,6 @@ function CatalogContent() {
     if (params.has("category")) return params.get("category") === categoryParam;
 
     return !categoryParam && !sectionParam && !materialParam;
-  };
-
-  const handleColorSelect = (productId: string, colorIndex: number) => {
-    setActiveColors((prev) => ({
-      ...prev,
-      [productId]: colorIndex,
-    }));
   };
 
   return (
@@ -151,65 +132,9 @@ function CatalogContent() {
             </div>
           ) : (
             <div className={styles.grid}>
-              {filteredProducts.map((product) => {
-                const activeIndex = activeColors[product.id] ?? 0;
-                const isSaved = isFavorite(product.id);
-
-                return (
-                  <article key={product.id} className={styles.card}>
-                    <div className={styles.preview}>
-                      {product.isNew && <span className={styles.badge}>New</span>}
-                      <button
-                        className={styles.wishlist}
-                        type="button"
-                        onClick={() => toggleFavorite(product.id)}
-                        aria-pressed={isSaved}
-                        aria-label="Добавить в избранное"
-                      >
-                        <BookmarkIcon active={isSaved} />
-                      </button>
-                      <Link
-                        className={styles.imageButton}
-                        href={`/product/${product.id}`}
-                        aria-label={`Открыть страницу товара: ${product.name}`}
-                      >
-                        <Image
-                          src={product.images[0]}
-                          alt={product.name}
-                          fill
-                          sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
-                          className={styles.image}
-                        />
-                      </Link>
-                    </div>
-
-                    <div className={styles.cardInfo}>
-                      <h2 className={styles.productName} title={product.name}>
-                        <Link href={`/product/${product.id}`}>{product.name}</Link>
-                      </h2>
-                      <span className={styles.price}>{formatPrice(product.price)}</span>
-
-                      {product.colors.length > 0 && (
-                        <div className={styles.colors}>
-                          {product.colors.map((color, index) => (
-                            <button
-                              key={color.name}
-                              className={`${styles.colorDot} ${
-                                activeIndex === index ? styles.colorDotActive : ""
-                              }`}
-                              style={{ backgroundColor: color.hex }}
-                              title={color.name}
-                              type="button"
-                              onClick={() => handleColorSelect(product.id, index)}
-                              aria-label={`Выбрать цвет ${color.name}`}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
+              {filteredProducts.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
             </div>
           )}
         </section>
