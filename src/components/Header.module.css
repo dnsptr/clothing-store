@@ -167,14 +167,16 @@
   height: 15px;
   padding: 0 4px;
   border-radius: 999px;
-  background: currentColor;
-  color: var(--text-primary);
+  background: var(--text-primary);
+  color: var(--bg-primary);
   font-size: 9px;
   line-height: 1;
   letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .scrolled .cartBadge {
+  background: var(--text-primary);
   color: var(--bg-primary);
 }
 
