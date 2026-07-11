@@ -131,7 +131,7 @@ export default function Footer() {
           <Link href="/info/english" className={styles.locale}>
             English version
           </Link>
-          <div className={styles.copy}>12 STOREEZ, {new Date().getFullYear()}</div>
+          <div className={styles.copy}>MARIO MIKKE, {new Date().getFullYear()}</div>
         </div>
       </div>
     </footer>

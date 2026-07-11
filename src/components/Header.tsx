@@ -93,9 +93,9 @@ export default function Header() {
           </nav>
         </div>
 
-        <Link href="/" className={styles.logo} aria-label="12 STOREEZ">
+        <Link href="/" className={styles.logo} aria-label="Mario Mikke">
           <Image
-            src="/12storeez-logo.svg"
+            src="/mario-mikke-logo.svg"
             alt=""
             aria-hidden="true"
             width={193}
@@ -104,7 +104,7 @@ export default function Header() {
             priority
           />
           <Image
-            src="/12storeez-logo-dark.svg"
+            src="/mario-mikke-logo-dark.svg"
             alt=""
             aria-hidden="true"
             width={193}

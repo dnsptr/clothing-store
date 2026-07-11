@@ -17,8 +17,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "12STOREEZ Inspired | Premium Clothing Store",
-  description: "Minimalist and elegant online clothing store, powered by Next.js",
+  title: "Mario Mikke | Premium Clothing Store",
+  description: "Minimalist and elegant online clothing store by Mario Mikke",
 };
 
 export default function RootLayout({
