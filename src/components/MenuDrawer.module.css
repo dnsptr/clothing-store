@@ -22,7 +22,7 @@
   left: 0;
   width: 392px;
   height: 100vh;
-  background-color: var(--bg-card);
+  background-color: var(--bg-primary);
   box-shadow: none;
   z-index: 10001;
   display: flex;
@@ -84,7 +84,7 @@
 
 .tabBtnActive {
   color: var(--text-primary);
-  background-color: var(--bg-card);
+  background-color: var(--bg-primary);
 }
 
 .tabBtnActive::after {
