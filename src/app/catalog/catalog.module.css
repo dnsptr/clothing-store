@@ -72,8 +72,16 @@
   gap: 8px;
 }
 
+.facetControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .filterButton,
-.sortControl {
+.sortControl,
+.facetSelect {
   display: inline-flex;
   align-items: center;
   height: 42px;
@@ -123,6 +131,14 @@
   font-size: 14.5px;
   line-height: 24px;
   letter-spacing: 0;
+  cursor: pointer;
+}
+
+.facetSelect {
+  min-width: 104px;
+  border: 0;
+  outline: 0;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -208,6 +224,17 @@
   }
 
   .filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .facetControls {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .facetControls::-webkit-scrollbar {
     display: none;
   }
 }

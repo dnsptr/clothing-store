@@ -5,6 +5,7 @@ export interface Product {
   category: string;
   categorySlug: string;
   materialSlugs: string[];
+  availableSizes: string[];
   images: string[];
   colors: { name: string; hex: string }[];
   isNew?: boolean;
@@ -52,6 +53,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Пальто и тренчи",
     categorySlug: "outerwear",
     materialSlugs: ["linen"],
+    availableSizes: ["XS", "S", "M", "L"],
     images: ["/products/1/1-1.jpg", "/products/1/1-2.jpg", "/products/1/1-3.jpg"],
     colors: [
       { name: "Песочный", hex: "#E1DBD3" },
@@ -66,6 +68,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Трикотаж",
     categorySlug: "knitwear",
     materialSlugs: ["cashmere"],
+    availableSizes: ["S", "M", "L"],
     images: ["/products/2/2-1.png", "/products/2/2-2.png", "/products/2/2-3.png"],
     colors: [
       { name: "Молочный", hex: "#F3EFE9" },
@@ -80,6 +83,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Брюки",
     categorySlug: "trousers",
     materialSlugs: ["linen"],
+    availableSizes: ["XS", "S", "M"],
     images: ["/products/3/3-1.png", "/products/3/3-2.png", "/products/3/3-3.png"],
     colors: [
       { name: "Светло-бежевый", hex: "#EDEAE4" },
@@ -93,6 +97,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Аксессуары",
     categorySlug: "accessories",
     materialSlugs: ["leather"],
+    availableSizes: [],
     images: ["/products/4/4-1.png", "/products/4/4-2.png", "/products/4/4-3.png"],
     colors: [
       { name: "Шоколад", hex: "#50352A" },
@@ -106,6 +111,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Пальто и тренчи",
     categorySlug: "outerwear",
     materialSlugs: ["wool"],
+    availableSizes: ["S", "M", "L", "XL"],
     images: ["/products/5/5-1.png", "/products/5/5-2.png", "/products/5/5-3.png"],
     colors: [
       { name: "Песочный", hex: "#E1DBD3" },
@@ -120,6 +126,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Трикотаж",
     categorySlug: "knitwear",
     materialSlugs: ["silk"],
+    availableSizes: ["XS", "S", "M"],
     images: ["/products/6/6-1.png", "/products/6/6-2.png", "/products/6/6-3.png"],
     colors: [
       { name: "Молочный", hex: "#F3EFE9" },
@@ -133,6 +140,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Брюки",
     categorySlug: "trousers",
     materialSlugs: ["wool"],
+    availableSizes: ["S", "M", "L"],
     images: ["/products/7/7-1.png", "/products/7/7-2.png", "/products/7/7-3.png"],
     colors: [
       { name: "Угольный", hex: "#1C1B1A" },
@@ -146,6 +154,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Трикотаж",
     categorySlug: "knitwear",
     materialSlugs: ["cotton"],
+    availableSizes: ["XS", "S", "M", "L"],
     images: ["/products/8/8-1.png", "/products/8/8-2.png", "/products/8/8-3.png"],
     colors: [
       { name: "Овсяный", hex: "#E2DCD5" },
@@ -160,6 +169,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Обувь",
     categorySlug: "shoes",
     materialSlugs: ["leather"],
+    availableSizes: [],
     images: ["/products/9/9-1.png", "/products/9/9-2.png", "/products/9/9-3.png"],
     colors: [
       { name: "Черный", hex: "#1C1B1A" },
@@ -173,6 +183,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Аксессуары",
     categorySlug: "accessories",
     materialSlugs: ["wool", "cashmere"],
+    availableSizes: [],
     images: ["/products/10/10-1.png", "/products/10/10-2.png", "/products/10/10-3.png"],
     colors: [
       { name: "Светло-серый", hex: "#DCDCDC" },
@@ -186,6 +197,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Обувь",
     categorySlug: "shoes",
     materialSlugs: ["leather"],
+    availableSizes: [],
     images: ["/products/11/11-1.png", "/products/11/11-2.png", "/products/11/11-3.png"],
     colors: [
       { name: "Черный", hex: "#1C1B1A" },
@@ -199,6 +211,7 @@ export const MOCK_PRODUCTS: Product[] = [
     category: "Аксессуары",
     categorySlug: "accessories",
     materialSlugs: ["leather"],
+    availableSizes: [],
     images: ["/products/12/12-1.png", "/products/12/12-2.png", "/products/12/12-3.png"],
     colors: [
       { name: "Горький шоколад", hex: "#302E2B" },

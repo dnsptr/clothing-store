@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import ProductCard from "../../components/ProductCard";
@@ -15,13 +15,27 @@ import {
   getCategoryBySlug,
   getMaterialBySlug,
 } from "../../lib/catalog";
+import { AVAILABLE_SIZES } from "../../lib/shop";
 import styles from "./catalog.module.css";
 
+const COLOR_FILTERS = Array.from(
+  new Map(
+    MOCK_PRODUCTS.flatMap((product) =>
+      product.colors.map((color) => [color.name, color.name])
+    )
+  ).values()
+);
+
 function CatalogContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
   const sectionParam = searchParams.get("section");
   const materialParam = searchParams.get("material");
+  const sizeParam = searchParams.get("size");
+  const colorParam = searchParams.get("color");
+  const priceParam = searchParams.get("price");
+  const availabilityParam = searchParams.get("availability");
 
   const [sortBy, setSortBy] = useState("default");
 
@@ -39,6 +53,16 @@ function CatalogContent() {
     if (sectionParam === "shoes") return product.categorySlug === "shoes";
     if (sectionParam === "accessories") return product.categorySlug === "accessories";
     if (sectionParam === "sale") return true;
+    return true;
+  }).filter((product) => {
+    if (sizeParam && !product.availableSizes.includes(sizeParam)) return false;
+    if (colorParam && !product.colors.some((color) => color.name === colorParam)) return false;
+    if (priceParam === "under-10000" && product.price >= 10000) return false;
+    if (priceParam === "10000-15000" && (product.price < 10000 || product.price > 15000)) return false;
+    if (priceParam === "from-15000" && product.price < 15000) return false;
+    if (availabilityParam === "available" && product.isSoldOut) return false;
+    if (availabilityParam === "sold-out" && !product.isSoldOut) return false;
+
     return true;
   }).sort((a, b) => {
     if (sortBy === "price-low-to-high") return a.price - b.price;
@@ -61,6 +85,19 @@ function CatalogContent() {
     if (params.has("category")) return params.get("category") === categoryParam;
 
     return !categoryParam && !sectionParam && !materialParam;
+  };
+
+  const updateCatalogParam = (key: string, value: string) => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+
+    if (value) {
+      nextParams.set(key, value);
+    } else {
+      nextParams.delete(key);
+    }
+
+    const queryString = nextParams.toString();
+    router.push(queryString ? `/catalog?${queryString}` : "/catalog", { scroll: false });
   };
 
   return (
@@ -106,6 +143,56 @@ function CatalogContent() {
                     {item.label}
                   </Link>
                 ))}
+              </div>
+
+              <div className={styles.facetControls} aria-label="Фильтры товаров">
+                <select
+                  className={styles.facetSelect}
+                  value={sizeParam ?? ""}
+                  onChange={(event) => updateCatalogParam("size", event.target.value)}
+                  aria-label="Размер"
+                >
+                  <option value="">Размер</option>
+                  {AVAILABLE_SIZES.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={styles.facetSelect}
+                  value={colorParam ?? ""}
+                  onChange={(event) => updateCatalogParam("color", event.target.value)}
+                  aria-label="Цвет"
+                >
+                  <option value="">Цвет</option>
+                  {COLOR_FILTERS.map((color) => (
+                    <option key={color} value={color}>
+                      {color}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={styles.facetSelect}
+                  value={priceParam ?? ""}
+                  onChange={(event) => updateCatalogParam("price", event.target.value)}
+                  aria-label="Цена"
+                >
+                  <option value="">Цена</option>
+                  <option value="under-10000">До 10 000</option>
+                  <option value="10000-15000">10 000-15 000</option>
+                  <option value="from-15000">От 15 000</option>
+                </select>
+                <select
+                  className={styles.facetSelect}
+                  value={availabilityParam ?? ""}
+                  onChange={(event) => updateCatalogParam("availability", event.target.value)}
+                  aria-label="Наличие"
+                >
+                  <option value="">Наличие</option>
+                  <option value="available">В наличии</option>
+                  <option value="sold-out">Нет в наличии</option>
+                </select>
               </div>
 
               <label className={styles.sortControl}>
