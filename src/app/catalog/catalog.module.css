@@ -75,13 +75,12 @@
 .facetControls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
 .filterButton,
-.sortControl,
-.facetSelect {
+.sortControl {
   display: inline-flex;
   align-items: center;
   height: 42px;
@@ -105,6 +104,70 @@
 .filterButton:hover,
 .filterButtonActive {
   border-bottom-color: currentColor;
+}
+
+.facet {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.facetButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 108px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.facetButton:hover,
+.facetButtonActive {
+  border-color: var(--border-color);
+}
+
+.facetChevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.facetPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 35;
+  display: grid;
+  min-width: 184px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  background: var(--bg-primary);
+  box-shadow: 0 18px 44px rgba(45, 34, 27, 0.08);
+}
+
+.facetOption {
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.facetOption:hover,
+.facetOptionActive {
+  background: var(--bg-soft);
+  color: var(--text-primary);
 }
 
 .sortControl {
@@ -134,19 +197,47 @@
   cursor: pointer;
 }
 
-.facetSelect {
-  min-width: 104px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
 .grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 24px 0;
   margin: 16px -4px 90px;
+}
+
+.activeFilters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 2px;
+}
+
+.filterChip,
+.clearFilters {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.filterChip span {
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 16px;
+}
+
+.clearFilters {
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.clearFilters:hover {
+  color: var(--text-primary);
 }
 
 .emptyState {
@@ -230,6 +321,7 @@
   .facetControls {
     width: 100%;
     overflow-x: auto;
+    overflow-y: visible;
     padding-bottom: 4px;
     scrollbar-width: none;
   }

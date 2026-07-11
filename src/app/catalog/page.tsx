@@ -26,6 +26,17 @@ const COLOR_FILTERS = Array.from(
   ).values()
 );
 
+const PRICE_FILTERS = [
+  { value: "under-10000", label: "До 10 000" },
+  { value: "10000-15000", label: "10 000-15 000" },
+  { value: "from-15000", label: "От 15 000" },
+];
+
+const AVAILABILITY_FILTERS = [
+  { value: "available", label: "В наличии" },
+  { value: "sold-out", label: "Нет в наличии" },
+];
+
 function CatalogContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -38,6 +49,7 @@ function CatalogContent() {
   const availabilityParam = searchParams.get("availability");
 
   const [sortBy, setSortBy] = useState("default");
+  const [openFacet, setOpenFacet] = useState<string | null>(null);
 
   const category = categoryParam ? getCategoryBySlug(categoryParam) : undefined;
   const material = materialParam ? getMaterialBySlug(materialParam) : undefined;
@@ -100,6 +112,43 @@ function CatalogContent() {
     router.push(queryString ? `/catalog?${queryString}` : "/catalog", { scroll: false });
   };
 
+  const clearCatalogParams = (keys: string[]) => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    keys.forEach((key) => nextParams.delete(key));
+
+    const queryString = nextParams.toString();
+    router.push(queryString ? `/catalog?${queryString}` : "/catalog", { scroll: false });
+  };
+
+  const applyFacetValue = (key: string, value: string) => {
+    updateCatalogParam(key, value);
+    setOpenFacet(null);
+  };
+
+  const getFacetButtonLabel = (label: string, value?: string | null, options?: { value: string; label: string }[]) => {
+    if (!value) return label;
+    return options?.find((option) => option.value === value)?.label ?? value;
+  };
+
+  const activeFilterChips = [
+    sizeParam ? { key: "size", label: `Размер: ${sizeParam}` } : null,
+    colorParam ? { key: "color", label: `Цвет: ${colorParam}` } : null,
+    priceParam
+      ? {
+          key: "price",
+          label: `Цена: ${getFacetButtonLabel("Цена", priceParam, PRICE_FILTERS)}`,
+        }
+      : null,
+    availabilityParam
+      ? {
+          key: "availability",
+          label: getFacetButtonLabel("Наличие", availabilityParam, AVAILABILITY_FILTERS),
+        }
+      : null,
+  ].filter((chip): chip is { key: string; label: string } => Boolean(chip));
+
+  const hasActiveFilters = activeFilterChips.length > 0;
+
   return (
     <>
       <Header />
@@ -146,53 +195,121 @@ function CatalogContent() {
               </div>
 
               <div className={styles.facetControls} aria-label="Фильтры товаров">
-                <select
-                  className={styles.facetSelect}
-                  value={sizeParam ?? ""}
-                  onChange={(event) => updateCatalogParam("size", event.target.value)}
-                  aria-label="Размер"
-                >
-                  <option value="">Размер</option>
-                  {AVAILABLE_SIZES.map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className={styles.facetSelect}
-                  value={colorParam ?? ""}
-                  onChange={(event) => updateCatalogParam("color", event.target.value)}
-                  aria-label="Цвет"
-                >
-                  <option value="">Цвет</option>
-                  {COLOR_FILTERS.map((color) => (
-                    <option key={color} value={color}>
-                      {color}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className={styles.facetSelect}
-                  value={priceParam ?? ""}
-                  onChange={(event) => updateCatalogParam("price", event.target.value)}
-                  aria-label="Цена"
-                >
-                  <option value="">Цена</option>
-                  <option value="under-10000">До 10 000</option>
-                  <option value="10000-15000">10 000-15 000</option>
-                  <option value="from-15000">От 15 000</option>
-                </select>
-                <select
-                  className={styles.facetSelect}
-                  value={availabilityParam ?? ""}
-                  onChange={(event) => updateCatalogParam("availability", event.target.value)}
-                  aria-label="Наличие"
-                >
-                  <option value="">Наличие</option>
-                  <option value="available">В наличии</option>
-                  <option value="sold-out">Нет в наличии</option>
-                </select>
+                <div className={styles.facet}>
+                  <button
+                    type="button"
+                    className={`${styles.facetButton} ${sizeParam ? styles.facetButtonActive : ""}`}
+                    onClick={() => setOpenFacet(openFacet === "size" ? null : "size")}
+                    aria-expanded={openFacet === "size"}
+                  >
+                    {getFacetButtonLabel("Размер", sizeParam)}
+                    <span className={styles.facetChevron} aria-hidden="true" />
+                  </button>
+                  {openFacet === "size" && (
+                    <div className={styles.facetPanel}>
+                      <button type="button" className={styles.facetOption} onClick={() => applyFacetValue("size", "")}>
+                        Все размеры
+                      </button>
+                      {AVAILABLE_SIZES.map((size) => (
+                        <button
+                          key={size}
+                          type="button"
+                          className={`${styles.facetOption} ${sizeParam === size ? styles.facetOptionActive : ""}`}
+                          onClick={() => applyFacetValue("size", size)}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className={styles.facet}>
+                  <button
+                    type="button"
+                    className={`${styles.facetButton} ${colorParam ? styles.facetButtonActive : ""}`}
+                    onClick={() => setOpenFacet(openFacet === "color" ? null : "color")}
+                    aria-expanded={openFacet === "color"}
+                  >
+                    {getFacetButtonLabel("Цвет", colorParam)}
+                    <span className={styles.facetChevron} aria-hidden="true" />
+                  </button>
+                  {openFacet === "color" && (
+                    <div className={styles.facetPanel}>
+                      <button type="button" className={styles.facetOption} onClick={() => applyFacetValue("color", "")}>
+                        Все цвета
+                      </button>
+                      {COLOR_FILTERS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          className={`${styles.facetOption} ${colorParam === color ? styles.facetOptionActive : ""}`}
+                          onClick={() => applyFacetValue("color", color)}
+                        >
+                          {color}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className={styles.facet}>
+                  <button
+                    type="button"
+                    className={`${styles.facetButton} ${priceParam ? styles.facetButtonActive : ""}`}
+                    onClick={() => setOpenFacet(openFacet === "price" ? null : "price")}
+                    aria-expanded={openFacet === "price"}
+                  >
+                    {getFacetButtonLabel("Цена", priceParam, PRICE_FILTERS)}
+                    <span className={styles.facetChevron} aria-hidden="true" />
+                  </button>
+                  {openFacet === "price" && (
+                    <div className={styles.facetPanel}>
+                      <button type="button" className={styles.facetOption} onClick={() => applyFacetValue("price", "")}>
+                        Любая цена
+                      </button>
+                      {PRICE_FILTERS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`${styles.facetOption} ${priceParam === option.value ? styles.facetOptionActive : ""}`}
+                          onClick={() => applyFacetValue("price", option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className={styles.facet}>
+                  <button
+                    type="button"
+                    className={`${styles.facetButton} ${availabilityParam ? styles.facetButtonActive : ""}`}
+                    onClick={() => setOpenFacet(openFacet === "availability" ? null : "availability")}
+                    aria-expanded={openFacet === "availability"}
+                  >
+                    {getFacetButtonLabel("Наличие", availabilityParam, AVAILABILITY_FILTERS)}
+                    <span className={styles.facetChevron} aria-hidden="true" />
+                  </button>
+                  {openFacet === "availability" && (
+                    <div className={styles.facetPanel}>
+                      <button type="button" className={styles.facetOption} onClick={() => applyFacetValue("availability", "")}>
+                        Все товары
+                      </button>
+                      {AVAILABILITY_FILTERS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`${styles.facetOption} ${availabilityParam === option.value ? styles.facetOptionActive : ""}`}
+                          onClick={() => applyFacetValue("availability", option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <label className={styles.sortControl}>
@@ -213,6 +330,29 @@ function CatalogContent() {
         </div>
 
         <section className={styles.shell} aria-label="Товары">
+          {hasActiveFilters && (
+            <div className={styles.activeFilters} aria-label="Активные фильтры">
+              {activeFilterChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  className={styles.filterChip}
+                  onClick={() => clearCatalogParams([chip.key])}
+                >
+                  {chip.label}
+                  <span aria-hidden="true">×</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className={styles.clearFilters}
+                onClick={() => clearCatalogParams(["size", "color", "price", "availability"])}
+              >
+                Сбросить фильтры
+              </button>
+            </div>
+          )}
+
           {filteredProducts.length === 0 ? (
             <div className={styles.emptyState}>
               <h2 className={styles.emptyTitle}>Категория пуста</h2>
