@@ -8,9 +8,13 @@ export interface CatalogCard extends CatalogLink {
   image: string;
 }
 
+export interface CatalogCategory extends CatalogLink {
+  slug: string;
+  section: "clothing" | "shoes" | "accessories";
+}
+
 export interface CatalogMaterial extends CatalogCard {
   slug: string;
-  productIds: string[];
 }
 
 export const CATALOG_SECTIONS = {
@@ -32,25 +36,56 @@ export const CATALOG_SECTIONS = {
   },
 } as const satisfies Record<string, CatalogLink>;
 
+export const PRODUCT_CATEGORIES: CatalogCategory[] = [
+  {
+    slug: "outerwear",
+    label: "Пальто и тренчи",
+    section: "clothing",
+    href: "/catalog?category=outerwear",
+  },
+  {
+    slug: "knitwear",
+    label: "Трикотаж",
+    section: "clothing",
+    href: "/catalog?category=knitwear",
+  },
+  {
+    slug: "trousers",
+    label: "Брюки",
+    section: "clothing",
+    href: "/catalog?category=trousers",
+  },
+  {
+    slug: "shoes",
+    label: "Обувь",
+    section: "shoes",
+    href: "/catalog?category=shoes",
+  },
+  {
+    slug: "accessories",
+    label: "Аксессуары",
+    section: "accessories",
+    href: "/catalog?category=accessories",
+  },
+];
+
 export const CLOTHING_CATEGORIES: CatalogLink[] = [
   { label: "Все товары", href: CATALOG_SECTIONS.clothing.href },
-  { label: "Пальто и тренчи", href: "/catalog?category=Пальто%20и%20тренчи" },
-  { label: "Трикотаж", href: "/catalog?category=Трикотаж" },
-  { label: "Брюки", href: "/catalog?category=Брюки" },
-  { label: "Платья", href: "/catalog?category=Трикотаж" },
+  ...PRODUCT_CATEGORIES.filter((category) => category.section === "clothing"),
+  { label: "Платья", href: "/catalog?category=knitwear" },
 ];
 
 export const SHOES_CATEGORIES: CatalogLink[] = [
   { label: "Вся обувь", href: CATALOG_SECTIONS.shoes.href },
-  { label: "Лоферы", href: "/catalog?category=Обувь" },
-  { label: "Босоножки", href: "/catalog?category=Обувь" },
+  { label: "Лоферы", href: "/catalog?category=shoes" },
+  { label: "Босоножки", href: "/catalog?category=shoes" },
 ];
 
 export const SALE_CATEGORIES: CatalogLink[] = [
   { label: "До 30%", href: "/catalog?section=sale" },
   { label: "До 50%", href: "/catalog?section=sale" },
-  { label: "Трикотаж", href: "/catalog?category=Трикотаж" },
-  { label: "Аксессуары", href: "/catalog?category=Аксессуары" },
+  { label: "Трикотаж", href: "/catalog?category=knitwear" },
+  { label: "Аксессуары", href: "/catalog?category=accessories" },
   { label: "Все акции", href: "/catalog?section=sale" },
 ];
 
@@ -61,7 +96,6 @@ export const MATERIALS: CatalogMaterial[] = [
     eyebrow: "Материалы в деталях",
     image: "/products/3/3-1.png",
     href: "/catalog?material=linen",
-    productIds: ["1", "3"],
   },
   {
     slug: "silk",
@@ -69,7 +103,6 @@ export const MATERIALS: CatalogMaterial[] = [
     eyebrow: "Материалы в деталях",
     image: "/products/6/6-1.png",
     href: "/catalog?material=silk",
-    productIds: ["6"],
   },
   {
     slug: "cashmere",
@@ -77,7 +110,6 @@ export const MATERIALS: CatalogMaterial[] = [
     eyebrow: "Материалы в деталях",
     image: "/products/2/2-1.png",
     href: "/catalog?material=cashmere",
-    productIds: ["2", "10"],
   },
   {
     slug: "wool",
@@ -85,7 +117,6 @@ export const MATERIALS: CatalogMaterial[] = [
     eyebrow: "Материалы в деталях",
     image: "/products/5/5-1.png",
     href: "/catalog?material=wool",
-    productIds: ["5", "7", "10"],
   },
 ];
 
@@ -123,7 +154,11 @@ export const HOME_RECOMMENDATIONS: CatalogCard[] = [
   },
 ];
 
-export const CLOTHING_SECTION_CATEGORIES = ["Пальто и тренчи", "Трикотаж", "Брюки"];
+export const CLOTHING_SECTION_CATEGORY_SLUGS = ["outerwear", "knitwear", "trousers"];
+
+export function getCategoryBySlug(slug: string) {
+  return PRODUCT_CATEGORIES.find((category) => category.slug === slug);
+}
 
 export function getMaterialBySlug(slug: string) {
   return MATERIALS.find((material) => material.slug === slug);
@@ -134,7 +169,9 @@ export function getCatalogTitle(params: {
   material?: string | null;
   section?: string | null;
 }) {
-  if (params.category) return params.category;
+  if (params.category) {
+    return getCategoryBySlug(params.category)?.label ?? params.category;
+  }
 
   if (params.material) {
     return getMaterialBySlug(params.material)?.label ?? "Материалы";

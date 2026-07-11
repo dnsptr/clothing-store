@@ -9,9 +9,10 @@ import ProductCard from "../../components/ProductCard";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import {
   CATALOG_PRIMARY_NAV,
-  CLOTHING_SECTION_CATEGORIES,
+  CLOTHING_SECTION_CATEGORY_SLUGS,
   MATERIALS,
   getCatalogTitle,
+  getCategoryBySlug,
   getMaterialBySlug,
 } from "../../lib/catalog";
 import styles from "./catalog.module.css";
@@ -24,14 +25,19 @@ function CatalogContent() {
 
   const [sortBy, setSortBy] = useState("default");
 
+  const category = categoryParam ? getCategoryBySlug(categoryParam) : undefined;
   const material = materialParam ? getMaterialBySlug(materialParam) : undefined;
   const filteredProducts = MOCK_PRODUCTS.filter((product) => {
-    if (categoryParam) return product.category === categoryParam;
-    if (material) return material.productIds.includes(product.id);
+    if (categoryParam) {
+      return category
+        ? product.categorySlug === category.slug
+        : product.category === categoryParam;
+    }
+    if (material) return product.materialSlugs.includes(material.slug);
     if (sectionParam === "new") return Boolean(product.isNew);
-    if (sectionParam === "clothing") return CLOTHING_SECTION_CATEGORIES.includes(product.category);
-    if (sectionParam === "shoes") return product.category === "Обувь";
-    if (sectionParam === "accessories") return product.category === "Аксессуары";
+    if (sectionParam === "clothing") return CLOTHING_SECTION_CATEGORY_SLUGS.includes(product.categorySlug);
+    if (sectionParam === "shoes") return product.categorySlug === "shoes";
+    if (sectionParam === "accessories") return product.categorySlug === "accessories";
     if (sectionParam === "sale") return true;
     return true;
   }).sort((a, b) => {

@@ -3,6 +3,8 @@ export interface Product {
   name: string;
   price: number;
   category: string;
+  categorySlug: string;
+  materialSlugs: string[];
   images: string[];
   colors: { name: string; hex: string }[];
   isNew?: boolean;
@@ -38,7 +40,7 @@ export const MOCK_COLLECTIONS: Collection[] = [
     title: "Аксессуары",
     subtitle: "Кожаные сумки и лаконичная обувь",
     image: "/products/4/4-1.png", // Use bag image for accessories cover (now .png)
-    link: "/catalog?category=Аксессуары",
+    link: "/catalog?category=accessories",
   },
 ];
 
@@ -48,6 +50,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Классический льняной тренч",
     price: 19800,
     category: "Пальто и тренчи",
+    categorySlug: "outerwear",
+    materialSlugs: ["linen"],
     images: ["/products/1/1-1.jpg", "/products/1/1-2.jpg", "/products/1/1-3.jpg"],
     colors: [
       { name: "Песочный", hex: "#E1DBD3" },
@@ -60,6 +64,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Джемпер крупной вязки из кашемира",
     price: 14500,
     category: "Трикотаж",
+    categorySlug: "knitwear",
+    materialSlugs: ["cashmere"],
     images: ["/products/2/2-1.png", "/products/2/2-2.png", "/products/2/2-3.png"],
     colors: [
       { name: "Молочный", hex: "#F3EFE9" },
@@ -72,6 +78,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Льняные брюки прямого кроя",
     price: 9800,
     category: "Брюки",
+    categorySlug: "trousers",
+    materialSlugs: ["linen"],
     images: ["/products/3/3-1.png", "/products/3/3-2.png", "/products/3/3-3.png"],
     colors: [
       { name: "Светло-бежевый", hex: "#EDEAE4" },
@@ -83,6 +91,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Кожаная сумка-шопер на плечо",
     price: 22000,
     category: "Аксессуары",
+    categorySlug: "accessories",
+    materialSlugs: ["leather"],
     images: ["/products/4/4-1.png", "/products/4/4-2.png", "/products/4/4-3.png"],
     colors: [
       { name: "Шоколад", hex: "#50352A" },
@@ -94,6 +104,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Шерстяной оверсайз жакет",
     price: 18900,
     category: "Пальто и тренчи",
+    categorySlug: "outerwear",
+    materialSlugs: ["wool"],
     images: ["/products/5/5-1.png", "/products/5/5-2.png", "/products/5/5-3.png"],
     colors: [
       { name: "Песочный", hex: "#E1DBD3" },
@@ -106,6 +118,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Шелковый топ на тонких бретелях",
     price: 12500,
     category: "Трикотаж",
+    categorySlug: "knitwear",
+    materialSlugs: ["silk"],
     images: ["/products/6/6-1.png", "/products/6/6-2.png", "/products/6/6-3.png"],
     colors: [
       { name: "Молочный", hex: "#F3EFE9" },
@@ -117,6 +131,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Шерстяная юбка миди с разрезом",
     price: 11800,
     category: "Брюки",
+    categorySlug: "trousers",
+    materialSlugs: ["wool"],
     images: ["/products/7/7-1.png", "/products/7/7-2.png", "/products/7/7-3.png"],
     colors: [
       { name: "Угольный", hex: "#1C1B1A" },
@@ -128,6 +144,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Платье-миди из хлопкового трикотажа",
     price: 15900,
     category: "Трикотаж",
+    categorySlug: "knitwear",
+    materialSlugs: ["cotton"],
     images: ["/products/8/8-1.png", "/products/8/8-2.png", "/products/8/8-3.png"],
     colors: [
       { name: "Овсяный", hex: "#E2DCD5" },
@@ -140,6 +158,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Кожаные лоферы на тонкой подошве",
     price: 16500,
     category: "Обувь",
+    categorySlug: "shoes",
+    materialSlugs: ["leather"],
     images: ["/products/9/9-1.png", "/products/9/9-2.png", "/products/9/9-3.png"],
     colors: [
       { name: "Черный", hex: "#1C1B1A" },
@@ -151,6 +171,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Шерстяной палантин крупной вязки",
     price: 6800,
     category: "Аксессуары",
+    categorySlug: "accessories",
+    materialSlugs: ["wool", "cashmere"],
     images: ["/products/10/10-1.png", "/products/10/10-2.png", "/products/10/10-3.png"],
     colors: [
       { name: "Светло-серый", hex: "#DCDCDC" },
@@ -162,6 +184,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Кожаные босоножки на ремешках",
     price: 13800,
     category: "Обувь",
+    categorySlug: "shoes",
+    materialSlugs: ["leather"],
     images: ["/products/11/11-1.png", "/products/11/11-2.png", "/products/11/11-3.png"],
     colors: [
       { name: "Черный", hex: "#1C1B1A" },
@@ -173,6 +197,8 @@ export const MOCK_PRODUCTS: Product[] = [
     name: "Кожаный ремень с лаконичной пряжкой",
     price: 4900,
     category: "Аксессуары",
+    categorySlug: "accessories",
+    materialSlugs: ["leather"],
     images: ["/products/12/12-1.png", "/products/12/12-2.png", "/products/12/12-3.png"],
     colors: [
       { name: "Горький шоколад", hex: "#302E2B" },
