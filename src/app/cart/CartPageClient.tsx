@@ -9,9 +9,9 @@ import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./cart.module.css";
 
-function BookmarkIcon() {
+function BookmarkIcon({ active = false }: { active?: boolean }) {
   return (
-    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <svg fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
     </svg>
   );
@@ -26,7 +26,15 @@ function RemoveIcon() {
 }
 
 export default function CartPageClient() {
-  const { cartItems, cartTotal, addToCart, removeFromCart, updateQuantity } = useCart();
+  const {
+    cartItems,
+    cartTotal,
+    addToCart,
+    removeFromCart,
+    updateQuantity,
+    isFavorite,
+    toggleFavorite,
+  } = useCart();
   const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
   const delivery = cartTotal >= DELIVERY.cartFreeThreshold ? 0 : DELIVERY.cartPrice;
   const recommendations = MOCK_PRODUCTS
@@ -111,6 +119,7 @@ export default function CartPageClient() {
                 <div className={styles.recommendGrid}>
                   {recommendations.map((product) => {
                     const selectedSize = recommendationSizes[product.id] ?? DEFAULT_RECOMMENDATION_SIZE;
+                    const isSaved = isFavorite(product.id);
 
                     return (
                     <article className={styles.recommendCard} key={product.id}>
@@ -127,15 +136,11 @@ export default function CartPageClient() {
                         <button
                           type="button"
                           className={styles.recommendAdd}
-                          onClick={() => addToCart({
-                            product,
-                            selectedSize,
-                            selectedColor: product.colors[0],
-                            quantity: 1,
-                          })}
-                          aria-label={`Добавить ${product.name}, размер ${selectedSize}, в корзину`}
+                          onClick={() => toggleFavorite(product.id)}
+                          aria-label={isSaved ? `Убрать ${product.name} из избранного` : `Добавить ${product.name} в избранное`}
+                          aria-pressed={isSaved}
                         >
-                          <BookmarkIcon />
+                          <BookmarkIcon active={isSaved} />
                         </button>
                       </div>
                       <Link href={`/product/${product.id}`} className={styles.recommendName}>{product.name}</Link>
@@ -160,6 +165,20 @@ export default function CartPageClient() {
                           </button>
                         ))}
                       </div>
+                      <button
+                        type="button"
+                        className={styles.recommendCartButton}
+                        onClick={() =>
+                          addToCart({
+                            product,
+                            selectedSize,
+                            selectedColor: product.colors[0],
+                            quantity: 1,
+                          })
+                        }
+                      >
+                        Добавить
+                      </button>
                     </article>
                     );
                   })}
