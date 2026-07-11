@@ -1,10 +1,17 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { Product } from "../data/mockData";
+import { MOCK_PRODUCTS, Product } from "../data/mockData";
 
 export interface CartItem {
   product: Product;
+  selectedSize: string;
+  selectedColor: { name: string; hex: string };
+  quantity: number;
+}
+
+interface StoredCartItem {
+  productId: string;
   selectedSize: string;
   selectedColor: { name: string; hex: string };
   quantity: number;
@@ -50,6 +57,43 @@ function isCartItem(value: unknown): value is CartItem {
   );
 }
 
+function isStoredCartItem(value: unknown): value is StoredCartItem {
+  if (!value || typeof value !== "object") return false;
+
+  const item = value as StoredCartItem;
+  return (
+    typeof item.productId === "string" &&
+    typeof item.selectedSize === "string" &&
+    typeof item.selectedColor?.hex === "string" &&
+    typeof item.quantity === "number" &&
+    item.quantity > 0
+  );
+}
+
+function restoreCartItem(value: unknown): CartItem | null {
+  if (isCartItem(value)) return value;
+  if (!isStoredCartItem(value)) return null;
+
+  const product = MOCK_PRODUCTS.find((item) => item.id === value.productId);
+  if (!product) return null;
+
+  return {
+    product,
+    selectedSize: value.selectedSize,
+    selectedColor: value.selectedColor,
+    quantity: value.quantity,
+  };
+}
+
+function serializeCartItem(item: CartItem): StoredCartItem {
+  return {
+    productId: item.product.id,
+    selectedSize: item.selectedSize,
+    selectedColor: item.selectedColor,
+    quantity: item.quantity,
+  };
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   // Cart items
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -73,7 +117,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     try {
       const savedCart = window.localStorage.getItem(CART_STORAGE_KEY);
       const parsedCart: unknown = savedCart ? JSON.parse(savedCart) : [];
-      const nextCart = Array.isArray(parsedCart) ? parsedCart.filter(isCartItem) : [];
+      const nextCart = Array.isArray(parsedCart)
+        ? parsedCart
+            .map(restoreCartItem)
+            .filter((item): item is CartItem => item !== null)
+        : [];
 
       window.setTimeout(() => {
         if (!isMounted) return;
@@ -96,7 +144,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isCartHydrated) return;
 
-    window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems));
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify(cartItems.map(serializeCartItem))
+    );
   }, [cartItems, isCartHydrated]);
 
   useEffect(() => {
