@@ -4,10 +4,12 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { MOCK_PRODUCTS } from "../data/mockData";
+import { formatPrice as formatCurrency } from "../lib/format";
 import styles from "./ProductGrid.module.css";
 
 export default function ProductGrid() {
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
+  const [savedProductIds, setSavedProductIds] = useState<string[]>([]);
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
     setActiveColors((prev) => ({
@@ -16,8 +18,12 @@ export default function ProductGrid() {
     }));
   };
 
-  const formatPrice = (price: number) => {
-    return `${price.toLocaleString("ru-RU")} ₽`;
+  const handleSavedToggle = (productId: string) => {
+    setSavedProductIds((previous) =>
+      previous.includes(productId)
+        ? previous.filter((id) => id !== productId)
+        : [...previous, productId]
+    );
   };
 
   return (
@@ -36,6 +42,7 @@ export default function ProductGrid() {
         <div className={styles.grid}>
           {MOCK_PRODUCTS.slice(0, 4).map((product) => {
             const activeIndex = activeColors[product.id] ?? 0;
+            const isSaved = savedProductIds.includes(product.id);
 
             return (
               <article key={product.id} className={styles.card}>
@@ -44,10 +51,11 @@ export default function ProductGrid() {
 
                   <button
                     className={styles.wishlistBtn}
-                    onClick={() => undefined}
+                    onClick={() => handleSavedToggle(product.id)}
+                    aria-pressed={isSaved}
                     aria-label="Добавить в избранное"
                   >
-                    <svg className={styles.wishlistIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={styles.wishlistIcon} fill={isSaved ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
                     </svg>
                   </button>
@@ -71,7 +79,7 @@ export default function ProductGrid() {
                   <h3 className={styles.name} title={product.name}>
                     <Link href={`/product/${product.id}`}>{product.name}</Link>
                   </h3>
-                  <span className={styles.price}>{formatPrice(product.price)}</span>
+                  <span className={styles.price}>{formatCurrency(product.price)}</span>
 
                   {product.colors.length > 0 && (
                     <div className={styles.colors}>

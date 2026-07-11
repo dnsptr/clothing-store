@@ -4,11 +4,13 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Product } from "../../../data/mockData";
+import { formatPrice } from "../../../lib/format";
 import styles from "./collection.module.css";
 import cardStyles from "../../../components/ProductGrid.module.css";
 
 export default function CollectionOutfitClient({ products }: { products: Product[] }) {
   const [activeColors, setActiveColors] = useState<Record<string, number>>({});
+  const [savedProductIds, setSavedProductIds] = useState<string[]>([]);
 
   const handleColorSelect = (productId: string, colorIndex: number) => {
     setActiveColors((prev) => ({
@@ -17,8 +19,12 @@ export default function CollectionOutfitClient({ products }: { products: Product
     }));
   };
 
-  const formatPrice = (price: number) => {
-    return price.toLocaleString("ru-RU") + " ₽";
+  const handleSavedToggle = (productId: string) => {
+    setSavedProductIds((previous) =>
+      previous.includes(productId)
+        ? previous.filter((id) => id !== productId)
+        : [...previous, productId]
+    );
   };
 
   return (
@@ -26,6 +32,8 @@ export default function CollectionOutfitClient({ products }: { products: Product
       <div className={styles.grid}>
         {products.map((product) => {
           const activeIndex = activeColors[product.id] ?? 0;
+          const isSaved = savedProductIds.includes(product.id);
+
           return (
             <div key={product.id} className={cardStyles.card}>
               {/* Product Card Image */}
@@ -35,15 +43,13 @@ export default function CollectionOutfitClient({ products }: { products: Product
                 {/* Wishlist Button */}
                 <button
                   className={cardStyles.wishlistBtn}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    alert("Добавлено в избранное");
-                  }}
+                  onClick={() => handleSavedToggle(product.id)}
+                  aria-pressed={isSaved}
                   aria-label="Добавить в избранное"
                 >
                   <svg
                     className={cardStyles.wishlistIcon}
-                    fill="none"
+                    fill={isSaved ? "currentColor" : "none"}
                     stroke="currentColor"
                     viewBox="0 0 24 24"
                   >

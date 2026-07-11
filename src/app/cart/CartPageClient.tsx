@@ -4,6 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
+import { formatPrice } from "../../lib/format";
+import { DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./cart.module.css";
 
 function BookmarkIcon() {
@@ -22,11 +24,9 @@ function RemoveIcon() {
   );
 }
 
-const formatPrice = (price: number) => `${price.toLocaleString("ru-RU")} ₽`;
-
 export default function CartPageClient() {
   const { cartItems, cartTotal, addToCart, removeFromCart, updateQuantity } = useCart();
-  const delivery = cartTotal >= 15000 ? 0 : 700;
+  const delivery = cartTotal >= DELIVERY.cartFreeThreshold ? 0 : DELIVERY.cartPrice;
   const recommendations = MOCK_PRODUCTS
     .filter((product) => !cartItems.some((item) => item.product.id === product.id))
     .slice(0, 5);
@@ -124,7 +124,7 @@ export default function CartPageClient() {
                           className={styles.recommendAdd}
                           onClick={() => addToCart({
                             product,
-                            selectedSize: "S",
+                            selectedSize: DEFAULT_RECOMMENDATION_SIZE,
                             selectedColor: product.colors[0],
                             quantity: 1,
                           })}

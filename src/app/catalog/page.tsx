@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import { MOCK_PRODUCTS } from "../../data/mockData";
+import { formatPrice } from "../../lib/format";
 import styles from "./catalog.module.css";
 
 const FILTERS = ["Размер одежды", "Размер обуви", "Цвет", "Цена"];
@@ -41,10 +42,6 @@ function CatalogContent() {
       ...prev,
       [productId]: colorIndex,
     }));
-  };
-
-  const formatPrice = (price: number) => {
-    return `${price.toLocaleString("ru-RU")} ₽`;
   };
 
   return (

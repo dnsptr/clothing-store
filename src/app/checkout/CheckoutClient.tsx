@@ -5,9 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
+import { formatPrice } from "../../lib/format";
+import { DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./checkout.module.css";
-
-const formatPrice = (p: number) => p.toLocaleString("ru-RU") + " ₽";
 
 export default function CheckoutClient() {
   const { cartItems, cartTotal, addToCart, updateQuantity, removeFromCart } = useCart();
@@ -29,6 +29,7 @@ export default function CheckoutClient() {
   // Recommend products not already in cart
   const cartIds = cartItems.map((i) => i.product.id);
   const recommendations = MOCK_PRODUCTS.filter((p) => !cartIds.includes(p.id)).slice(0, 3);
+  const deliveryPriceLabel = formatPrice(DELIVERY.checkoutPrice);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -158,7 +159,7 @@ export default function CheckoutClient() {
                       onClick={() =>
                         addToCart({
                           product,
-                          selectedSize: "S",
+                          selectedSize: DEFAULT_RECOMMENDATION_SIZE,
                           selectedColor: product.colors[0],
                           quantity: 1,
                         })
@@ -186,11 +187,11 @@ export default function CheckoutClient() {
             ))}
             <div className={styles.summaryRow}>
               <span>Доставка</span>
-              <span>{delivery === "pickup" ? "Бесплатно" : "350 ₽"}</span>
+              <span>{delivery === "pickup" ? "Бесплатно" : formatPrice(DELIVERY.checkoutPrice)}</span>
             </div>
             <div className={styles.summaryTotal}>
               <span>Итого</span>
-              <span>{formatPrice(cartTotal + (delivery === "pickup" ? 0 : 350))}</span>
+              <span>{formatPrice(cartTotal + (delivery === "pickup" ? 0 : DELIVERY.checkoutPrice))}</span>
             </div>
           </div>
 
@@ -253,9 +254,9 @@ export default function CheckoutClient() {
 
             <div className={styles.deliveryOptions}>
               {[
-                { id: "courier", label: "Курьером", sub: "2–4 рабочих дня · 350 ₽" },
+                { id: "courier", label: "Курьером", sub: `2–4 рабочих дня · ${deliveryPriceLabel}` },
                 { id: "pickup", label: "Самовывоз из магазина", sub: "Бесплатно" },
-                { id: "post", label: "Почтой России", sub: "5–10 рабочих дней · 350 ₽" },
+                { id: "post", label: "Почтой России", sub: `5–10 рабочих дней · ${deliveryPriceLabel}` },
               ].map((opt) => (
                 <label key={opt.id} className={styles.deliveryOption}>
                   <input

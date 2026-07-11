@@ -6,9 +6,9 @@ import Link from "next/link";
 import { MOCK_PRODUCTS, Product } from "../../../data/mockData";
 import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
+import { formatPrice } from "../../../lib/format";
+import { AVAILABLE_SIZES } from "../../../lib/shop";
 import styles from "./product.module.css";
-
-const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"];
 
 const PRODUCT_PANELS = [
   {
@@ -42,10 +42,6 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" d="m9 5 7 7-7 7" />
     </svg>
   );
-}
-
-function formatPrice(price: number) {
-  return `${price.toLocaleString("ru-RU")} ₽`;
 }
 
 export default function ProductDetailClient({ product }: { product: Product }) {

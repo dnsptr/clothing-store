@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useCart } from "../context/CartContext";
+import { formatPrice } from "../lib/format";
 import styles from "./CartDrawer.module.css";
 
 export default function CartDrawer() {
@@ -31,10 +32,6 @@ export default function CartDrawer() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isCartOpen, setIsCartOpen]);
-
-  const formatPrice = (price: number) => {
-    return price.toLocaleString("ru-RU") + " ₽";
-  };
 
   return (
     <>

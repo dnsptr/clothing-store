@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Product } from "../data/mockData";
 import { useCart } from "../context/CartContext";
+import { formatPrice } from "../lib/format";
+import { AVAILABLE_SIZES } from "../lib/shop";
 import styles from "./QuickViewModal.module.css";
 
 interface QuickViewModalProps {
@@ -17,8 +19,6 @@ interface SelectionState {
   selectedSize: string;
   error: string;
 }
-
-const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"];
 
 export default function QuickViewModal({ product, onClose }: QuickViewModalProps) {
   const { addToCart } = useCart();
@@ -76,10 +76,6 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
     
     // Close modal after adding
     onClose();
-  };
-
-  const formatPrice = (price: number) => {
-    return price.toLocaleString("ru-RU") + " ₽";
   };
 
   return (

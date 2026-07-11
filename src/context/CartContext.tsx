@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { Product } from "../data/mockData";
 
 export interface CartItem {
@@ -29,11 +29,26 @@ interface CartContextType {
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
+const CART_STORAGE_KEY = "clothing-store-cart";
+
+function isCartItem(value: unknown): value is CartItem {
+  if (!value || typeof value !== "object") return false;
+
+  const item = value as CartItem;
+  return (
+    Boolean(item.product?.id) &&
+    typeof item.selectedSize === "string" &&
+    typeof item.selectedColor?.hex === "string" &&
+    typeof item.quantity === "number" &&
+    item.quantity > 0
+  );
+}
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   // Cart items
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCartHydrated, setIsCartHydrated] = useState(false);
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const cartTotal = cartItems.reduce(
     (acc, item) => acc + item.product.price * item.quantity,
@@ -42,6 +57,38 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    try {
+      const savedCart = window.localStorage.getItem(CART_STORAGE_KEY);
+      const parsedCart: unknown = savedCart ? JSON.parse(savedCart) : [];
+      const nextCart = Array.isArray(parsedCart) ? parsedCart.filter(isCartItem) : [];
+
+      window.setTimeout(() => {
+        if (!isMounted) return;
+        setCartItems(nextCart);
+        setIsCartHydrated(true);
+      }, 0);
+    } catch {
+      window.localStorage.removeItem(CART_STORAGE_KEY);
+      window.setTimeout(() => {
+        if (!isMounted) return;
+        setIsCartHydrated(true);
+      }, 0);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isCartHydrated) return;
+
+    window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems));
+  }, [cartItems, isCartHydrated]);
 
   const addToCart = (newItem: CartItem) => {
     setCartItems((prevItems) => {
@@ -56,7 +103,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (existingItemIndex > -1) {
         // Increment quantity of existing item
         const updatedItems = [...prevItems];
-        updatedItems[existingItemIndex].quantity += newItem.quantity;
+        updatedItems[existingItemIndex] = {
+          ...updatedItems[existingItemIndex],
+          quantity: updatedItems[existingItemIndex].quantity + newItem.quantity,
+        };
         return updatedItems;
       }
 
