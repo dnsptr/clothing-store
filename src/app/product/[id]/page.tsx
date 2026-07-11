@@ -37,7 +37,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
             <span>/</span>
             <span>Каталог</span>
             <span>/</span>
-            <span style={{ color: "var(--text-primary)" }}>{product.name}</span>
+            <span>{product.name}</span>
           </div>
 
           <ProductDetailClient product={product} />

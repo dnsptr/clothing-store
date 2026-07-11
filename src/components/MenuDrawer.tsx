@@ -76,7 +76,7 @@ export default function MenuDrawer() {
           </svg>
         </button>
 
-        <div style={{ height: "55px", borderBottom: "1px solid var(--border-light)" }} />
+        <div className={styles.drawerSpacer} />
 
         <div
           className={`${styles.panelContainer} ${

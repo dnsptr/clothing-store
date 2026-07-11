@@ -43,12 +43,12 @@ export default function CheckoutClient() {
 
   if (submitted) {
     return (
-      <div className={styles.empty} style={{ paddingTop: 120 }}>
+      <div className={`${styles.empty} ${styles.emptySubmitted}`}>
         <svg width="56" height="56" fill="none" viewBox="0 0 24 24" stroke="var(--text-primary)">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <h2 className={styles.emptyTitle}>Заказ оформлен!</h2>
-        <p style={{ fontFamily: "var(--font-sans)", fontSize: 14, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>
+        <p className={styles.emptyText}>
           Мы отправили подтверждение на&nbsp;<strong>{form.email || "ваш email"}</strong>.<br />
           Менеджер свяжется с вами в течение 1 рабочего дня.
         </p>
@@ -61,7 +61,7 @@ export default function CheckoutClient() {
     return (
       <div className={styles.empty}>
         <h2 className={styles.emptyTitle}>Корзина пуста</h2>
-        <p style={{ fontFamily: "var(--font-sans)", fontSize: 14, color: "var(--text-secondary)" }}>
+        <p className={styles.emptyText}>
           Добавьте товары из каталога, чтобы оформить заказ.
         </p>
         <Link href="/catalog" className={styles.emptyLink}>Перейти в каталог</Link>
@@ -275,7 +275,7 @@ export default function CheckoutClient() {
               />
             </div>
 
-            <p className={styles.sectionTitle} style={{ marginTop: 8 }}>Доставка</p>
+            <p className={`${styles.sectionTitle} ${styles.sectionTitleSpaced}`}>Доставка</p>
 
             <div className={styles.deliveryOptions}>
               {[
@@ -292,10 +292,8 @@ export default function CheckoutClient() {
                     onChange={() => setDelivery(opt.id as typeof delivery)}
                   />
                   <span>
-                    <strong style={{ display: "block", fontSize: 14, fontFamily: "var(--font-sans)", color: "var(--text-primary)" }}>
-                      {opt.label}
-                    </strong>
-                    <span style={{ fontSize: 12 }}>{opt.sub}</span>
+                    <strong className={styles.deliveryLabel}>{opt.label}</strong>
+                    <span className={styles.deliverySub}>{opt.sub}</span>
                   </span>
                 </label>
               ))}
@@ -360,7 +358,6 @@ export default function CheckoutClient() {
                 rows={3}
                 value={form.comment}
                 onChange={handleChange}
-                style={{ resize: "vertical" }}
               />
             </div>
 

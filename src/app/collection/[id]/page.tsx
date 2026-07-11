@@ -63,7 +63,7 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
             <span>/</span>
             <span>Кампания</span>
             <span>/</span>
-            <span style={{ color: "var(--text-primary)" }}>{outfit.title}</span>
+            <span className={styles.breadcrumbCurrent}>{outfit.title}</span>
           </div>
 
           <div className={styles.sectionHeader}>

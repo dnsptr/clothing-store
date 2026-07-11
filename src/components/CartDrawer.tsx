@@ -187,14 +187,13 @@ export default function CartDrawer() {
               <span className={styles.summaryLabel}>Итого</span>
               <span className={styles.summaryValue}>{formatPrice(cartTotal)}</span>
             </div>
-            <button
+            <Link
+              href="/checkout"
               className={styles.checkoutBtn}
               onClick={() => setIsCartOpen(false)}
             >
-              <Link href="/checkout" style={{ color: "inherit", textDecoration: "none", display: "block", width: "100%" }}>
-                Оформить заказ
-              </Link>
-            </button>
+              Оформить заказ
+            </Link>
           </div>
         )}
       </div>

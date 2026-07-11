@@ -42,6 +42,11 @@
   transform: translateX(0);
 }
 
+.drawerSpacer {
+  height: 55px;
+  border-bottom: 1px solid var(--border-light);
+}
+
 /* Header Close Button */
 .headerClose {
   position: absolute;
