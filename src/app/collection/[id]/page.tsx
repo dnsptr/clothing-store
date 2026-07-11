@@ -56,7 +56,7 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
 
       {/* Complete the Look Section */}
       <div className={styles.contentSection}>
-        <div className="container">
+        <div className={styles.shell}>
           {/* Breadcrumbs */}
           <div className={styles.breadcrumbs}>
             <Link href="/">Главная</Link>
