@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useCart } from "../context/CartContext";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { formatPrice } from "../lib/format";
 import styles from "./CartDrawer.module.css";
 
@@ -20,6 +21,7 @@ export default function CartDrawer() {
   } = useCart();
 
   const drawerRef = useRef<HTMLDivElement>(null);
+  useBodyScrollLock(isCartOpen);
 
   // Close drawer on Escape key press
   useEffect(() => {

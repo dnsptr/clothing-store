@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import { MOCK_OUTFITS } from "../data/mockData";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import {
   CATALOG_SECTIONS,
   CLOTHING_CATEGORIES,
@@ -41,6 +42,7 @@ export default function MenuDrawer() {
   const router = useRouter();
   const { isMenuOpen, setIsMenuOpen, toggleMenu } = useCart();
   const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType>(null);
+  useBodyScrollLock(isMenuOpen);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Product } from "../data/mockData";
 import { useCart } from "../context/CartContext";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { formatPrice } from "../lib/format";
 import { AVAILABLE_SIZES } from "../lib/shop";
 import styles from "./QuickViewModal.module.css";
@@ -23,6 +24,7 @@ interface SelectionState {
 export default function QuickViewModal({ product, onClose }: QuickViewModalProps) {
   const { addToCart } = useCart();
   const [selection, setSelection] = useState<SelectionState | null>(null);
+  useBodyScrollLock(Boolean(product));
 
   const activeSelection = product && selection?.productId === product.id ? selection : null;
   const selectedColor =
