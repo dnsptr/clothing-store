@@ -71,7 +71,7 @@
 
 .progress {
   position: absolute;
-  bottom: 81px;
+  bottom: 32px;
   left: 50%;
   z-index: 3;
   display: flex;
@@ -110,7 +110,7 @@
   }
 
   .progress {
-    bottom: 86px;
+    bottom: 34px;
     width: 96px;
   }
 }
