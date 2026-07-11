@@ -1,6 +1,6 @@
 .hero {
   position: relative;
-  height: var(--campaign-height);
+  height: 100svh;
   min-height: 620px;
   overflow: hidden;
   background: var(--bg-secondary);
