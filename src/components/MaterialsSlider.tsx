@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { MATERIALS } from "../lib/catalog";
+import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./MaterialsSlider.module.css";
 
 export default function MaterialsSlider() {
@@ -12,6 +13,7 @@ export default function MaterialsSlider() {
   const [startX, setStartX] = useState(0);
   const [scrollLeftState, setScrollLeftState] = useState(0);
   const [draggedDistance, setDraggedDistance] = useState(0);
+  const { cursorRef, cursorHandlers } = useEditorialCursor();
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!sliderRef.current) return;
@@ -54,6 +56,7 @@ export default function MaterialsSlider() {
             className={styles.card}
             onClick={handleLinkClick}
             draggable={false}
+            {...cursorHandlers}
           >
             <Image
               src={item.image}
@@ -71,6 +74,7 @@ export default function MaterialsSlider() {
           </Link>
         ))}
       </div>
+      <EditorialCursor cursorRef={cursorRef} isDragging={isDragging} />
     </section>
   );
 }

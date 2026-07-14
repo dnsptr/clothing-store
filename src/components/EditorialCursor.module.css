@@ -1,0 +1,46 @@
+.cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1180;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0;
+  opacity: 0;
+  pointer-events: none;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.42);
+  transition: opacity 0.16s ease;
+  will-change: transform, opacity;
+}
+
+.cursor[data-visible="true"] {
+  opacity: 1;
+}
+
+.arrow {
+  width: 28px;
+  height: 12px;
+  transition: transform 0.2s ease;
+}
+
+.cursorDragging .arrow {
+  transform: translateX(4px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cursor {
+    display: flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor,
+  .arrow {
+    transition: none;
+  }
+}

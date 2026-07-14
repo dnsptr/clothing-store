@@ -36,11 +36,11 @@
 
 .image {
   object-fit: cover;
-  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .card:hover .image {
-  transform: scale(1.025);
+  transform: scale(1.04);
 }
 
 .overlay {
@@ -50,6 +50,11 @@
   background:
     linear-gradient(to bottom, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.14) 34%, transparent 64%),
     linear-gradient(to top, rgba(0, 0, 0, 0.48), rgba(0, 0, 0, 0.08) 54%, transparent);
+  transition: background-color 0.35s ease;
+}
+
+.card:hover .overlay {
+  background-color: rgba(0, 0, 0, 0.14);
 }
 
 .info {
@@ -79,15 +84,6 @@
   line-height: 1.64;
 }
 
-.link {
-  margin-top: 18px;
-  padding-bottom: 3px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.72);
-  color: #ffffff;
-  font-size: 13px;
-  line-height: 18px;
-}
-
 @media (max-width: 768px) {
   .slider {
     padding-top: 72px;
@@ -103,5 +99,18 @@
   .info {
     top: 28px;
     left: 24px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .card {
+    cursor: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image,
+  .overlay {
+    transition: none;
   }
 }

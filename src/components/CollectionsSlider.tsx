@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { MOCK_OUTFITS } from "../data/mockData";
+import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./CollectionsSlider.module.css";
 
 export default function CollectionsSlider() {
@@ -12,6 +13,7 @@ export default function CollectionsSlider() {
   const [startX, setStartX] = useState(0);
   const [scrollLeftState, setScrollLeftState] = useState(0);
   const [draggedDistance, setDraggedDistance] = useState(0);
+  const { cursorRef, cursorHandlers } = useEditorialCursor();
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!sliderRef.current) return;
@@ -58,6 +60,7 @@ export default function CollectionsSlider() {
             className={styles.card}
             onClick={handleLinkClick}
             draggable={false}
+            {...cursorHandlers}
           >
             <Image
               src={outfit.image}
@@ -75,6 +78,7 @@ export default function CollectionsSlider() {
           </Link>
         ))}
       </div>
+      <EditorialCursor cursorRef={cursorRef} isDragging={isDragging} />
     </section>
   );
 }

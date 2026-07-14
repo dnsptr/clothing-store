@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { HOME_RECOMMENDATIONS } from "../lib/catalog";
+import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./RecommendationsSlider.module.css";
 
 export default function RecommendationsSlider() {
@@ -12,6 +13,7 @@ export default function RecommendationsSlider() {
   const [startX, setStartX] = useState(0);
   const [scrollLeftState, setScrollLeftState] = useState(0);
   const [draggedDistance, setDraggedDistance] = useState(0);
+  const { cursorRef, cursorHandlers } = useEditorialCursor();
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!sliderRef.current) return;
@@ -54,6 +56,7 @@ export default function RecommendationsSlider() {
             className={styles.card}
             draggable={false}
             onClick={handleLinkClick}
+            {...cursorHandlers}
           >
             <Image
               src={item.image}
@@ -67,11 +70,11 @@ export default function RecommendationsSlider() {
             <div className={styles.info}>
               <span className={styles.eyebrow}>{item.eyebrow}</span>
               <h2 className={styles.title}>{item.label}</h2>
-              <span className={styles.link}>Смотреть</span>
             </div>
           </Link>
         ))}
       </div>
+      <EditorialCursor cursorRef={cursorRef} isDragging={isDragging} />
     </section>
   );
 }
