@@ -7,12 +7,13 @@ import PromoBanner from "@/components/PromoBanner";
 import MaterialsSlider from "@/components/MaterialsSlider";
 import StoresSlider from "@/components/StoresSlider";
 import Footer from "@/components/Footer";
+import styles from "./page.module.css";
 
 export default function Home() {
   return (
     <>
       <Header />
-      <main>
+      <main className={styles.homeMain}>
         {/* Fullscreen Hero Campaign */}
         <Hero />
 
@@ -28,11 +29,13 @@ export default function Home() {
         {/* Fullscreen seasonal Promo Banner */}
         <PromoBanner />
 
-        {/* Drag-to-scroll materials philosophy */}
-        <MaterialsSlider />
+        <div className={styles.afterPromo}>
+          {/* Drag-to-scroll materials philosophy */}
+          <MaterialsSlider />
 
-        {/* Drag-to-scroll retail stores */}
-        <StoresSlider />
+          {/* Drag-to-scroll retail stores */}
+          <StoresSlider />
+        </div>
       </main>
       <Footer />
     </>

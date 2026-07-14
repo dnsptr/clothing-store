@@ -1,5 +1,7 @@
 .section {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 0;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -74,5 +76,11 @@
 
   .content {
     padding-bottom: 72px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section {
+    position: relative;
   }
 }

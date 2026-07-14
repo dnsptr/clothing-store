@@ -140,3 +140,13 @@ a.secondary {
     --button-secondary-border: #1a1a1a;
   }
 }
+
+.homeMain {
+  isolation: isolate;
+}
+
+.afterPromo {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-primary);
+}
