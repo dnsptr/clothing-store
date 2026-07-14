@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { CATALOG_SECTIONS } from "../lib/catalog";
 import styles from "./PromoBanner.module.css";
 
 export default function PromoBanner() {
@@ -8,7 +7,7 @@ export default function PromoBanner() {
     <section className={styles.section}>
       <Image
         src="/images/hero.png"
-        alt="Подарочный сертификат"
+        alt="Женская коллекция MARIO MIKKE"
         fill
         sizes="100vw"
         className={styles.image}
@@ -16,10 +15,10 @@ export default function PromoBanner() {
       <div className={styles.overlay} />
 
       <div className={styles.content}>
-        <span className={styles.subtitle}>Для тех, кто дорог</span>
-        <h2 className={styles.title}>Подарочный сертификат</h2>
-        <Link href={CATALOG_SECTIONS.accessories.href} className={styles.cta}>
-          Выбрать
+        <span className={styles.subtitle}>MARIO MIKKE</span>
+        <h2 className={styles.title}>Современная классика для женщин</h2>
+        <Link href="/info/about" className={styles.cta}>
+          О бренде
         </Link>
       </div>
     </section>

@@ -146,6 +146,18 @@ export default function MenuDrawer() {
               <li className={`${styles.menuItem} ${styles.menuItemAll}`} onClick={() => go("/catalog")}>
                 <span>Смотреть все</span>
               </li>
+
+              <li className={styles.menuDivider} />
+
+              <li className={`${styles.menuItem} ${styles.menuItemInfo}`} onClick={() => go("/info/about")}>
+                <span>О бренде</span>
+              </li>
+              <li className={`${styles.menuItem} ${styles.menuItemInfo}`} onClick={() => go("/info/contacts")}>
+                <span>Магазины и контакты</span>
+              </li>
+              <li className={`${styles.menuItem} ${styles.menuItemInfo}`} onClick={() => go("/info/delivery")}>
+                <span>Доставка и возврат</span>
+              </li>
             </ul>
           </div>
 

@@ -6,19 +6,19 @@ import styles from "./StoresSlider.module.css";
 
 const STORES = [
   {
-    name: "Столешников",
+    name: "Магазин 01",
     image: "/images/collection-women.png",
   },
   {
-    name: "Петровка",
+    name: "Магазин 02",
     image: "/images/hero.png",
   },
   {
-    name: "Галерея",
+    name: "Магазин 03",
     image: "/products/1/1-1.jpg",
   },
   {
-    name: "Ельцин Центр",
+    name: "Магазин 04",
     image: "/products/5/5-1.png",
   },
   {
@@ -54,8 +54,8 @@ export default function StoresSlider() {
   return (
     <section className={styles.section}>
       <div className={styles.titleSection}>
-        <span className={styles.subtitle}>Магазины</span>
-        <h2 className={styles.title}>Примерить в пространстве</h2>
+        <span className={styles.subtitle}>Магазины и контакты</span>
+        <h2 className={styles.title}>10 магазинов сегодня. Одиннадцатый откроется в августе</h2>
       </div>
 
       <div

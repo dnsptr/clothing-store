@@ -183,5 +183,5 @@ export function getCatalogTitle(params: {
   if (params.section === "accessories") return "Сумки и аксессуары";
   if (params.section === "sale") return "Sale";
 
-  return "Женщинам";
+  return "Каталог";
 }

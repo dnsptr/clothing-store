@@ -209,6 +209,10 @@
   color: var(--text-secondary);
 }
 
+.menuItemInfo {
+  color: var(--text-secondary);
+}
+
 /* Divider between sections */
 .menuDivider {
   height: 1px;
