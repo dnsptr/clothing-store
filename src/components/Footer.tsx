@@ -2,6 +2,8 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useOverlayDismiss } from "@/hooks/useOverlayDismiss";
 import styles from "./Footer.module.css";
 
 const footerColumns = [
@@ -30,13 +32,19 @@ const footerColumns = [
 ];
 
 export default function Footer() {
-  const [isSubscribeFormVisible, setIsSubscribeFormVisible] = useState(false);
+  const [isSubscribeModalOpen, setIsSubscribeModalOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const closeSubscribeModal = () => setIsSubscribeModalOpen(false);
+
+  useBodyScrollLock(isSubscribeModalOpen);
+  useOverlayDismiss(isSubscribeModalOpen, closeSubscribeModal);
 
   const handleSubscribe = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!email.trim()) return;
+    if (!isEmailValid) return;
 
     setIsSubscribed(true);
   };
@@ -63,56 +71,21 @@ export default function Footer() {
           </nav>
 
           <div className={styles.subscribeSection}>
-            {isSubscribed ? (
-              <div className={styles.subscribePrompt}>
-                <p className={styles.subscribeText}>
-                  Спасибо. Мы добавили {email} в список рассылки.
-                </p>
-                <button
-                  type="button"
-                  className={styles.submitBtn}
-                  onClick={() => {
-                    setEmail("");
-                    setIsSubscribed(false);
-                    setIsSubscribeFormVisible(false);
-                  }}
-                >
-                  Готово
-                </button>
-              </div>
-            ) : isSubscribeFormVisible ? (
-              <>
-                <p className={styles.subscribeText}>
-                  Подпишитесь на рассылку, чтобы первыми узнавать о новых коллекциях, специальных предложениях и сервисах.
-                </p>
-                <form className={styles.subscribeForm} onSubmit={handleSubscribe}>
-                  <input
-                    type="email"
-                    placeholder="Ваш e-mail"
-                    className={styles.input}
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                  />
-                  <button type="submit" className={styles.submitBtn}>
-                    Подписаться на рассылку
-                  </button>
-                </form>
-              </>
-            ) : (
-              <div className={styles.subscribePrompt}>
-                <p className={styles.subscribeText}>
-                  Давайте дружить по переписке. Будем рассказывать вам о новинках и специальных предложениях. Хотите?
-                </p>
-                <button
-                  type="button"
-                  className={styles.submitBtn}
-                  onClick={() => setIsSubscribeFormVisible(true)}
-                >
-                  Хочу
-                </button>
-              </div>
-            )}
+            <div className={styles.subscribePrompt}>
+              <p className={styles.subscribeText}>
+                Давайте дружить по переписке. Будем рассказывать вам о новинках и специальных предложениях. Хотите?
+              </p>
+              <button
+                type="button"
+                className={styles.submitBtn}
+                onClick={() => {
+                  setIsSubscribed(false);
+                  setIsSubscribeModalOpen(true);
+                }}
+              >
+                Хочу
+              </button>
+            </div>
             <div className={styles.socials}>
               <Link href="https://www.youtube.com/" className={styles.socialLink}>
                 YouTube
@@ -134,6 +107,73 @@ export default function Footer() {
           <div className={styles.copy}>MARIO MIKKE, {new Date().getFullYear()}</div>
         </div>
       </div>
+
+      {isSubscribeModalOpen && (
+        <div
+          className={styles.subscribeOverlay}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeSubscribeModal();
+          }}
+        >
+          <section
+            className={styles.subscribeModal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="subscribe-modal-title"
+          >
+            <button
+              type="button"
+              className={styles.closeButton}
+              onClick={closeSubscribeModal}
+              aria-label="Закрыть"
+            >
+              <span aria-hidden="true" />
+            </button>
+
+            {isSubscribed ? (
+              <div className={styles.subscribeSuccess}>
+                <h2 id="subscribe-modal-title" className={styles.modalTitle}>
+                  Спасибо за подписку
+                </h2>
+                <p className={styles.modalSuccessText}>Мы добавили {email} в список рассылки.</p>
+                <button type="button" className={styles.modalSubmitBtn} onClick={closeSubscribeModal}>
+                  Готово
+                </button>
+              </div>
+            ) : (
+              <>
+                <h2 id="subscribe-modal-title" className={styles.modalTitle}>
+                  Подписка на рассылку
+                </h2>
+                <form className={styles.modalForm} onSubmit={handleSubscribe}>
+                  <label className={styles.visuallyHidden} htmlFor="subscribe-email">
+                    Эл. почта
+                  </label>
+                  <input
+                    id="subscribe-email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    placeholder="Эл. почта"
+                    className={styles.modalInput}
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                  />
+                  <button type="submit" className={styles.modalSubmitBtn} disabled={!isEmailValid}>
+                    Подписаться
+                  </button>
+                  <p className={styles.legalText}>
+                    Нажимая на кнопку «Подписаться», вы подтверждаете, что ознакомились с{" "}
+                    <Link href="/info/privacy">политикой конфиденциальности</Link>, и даете согласие на получение
+                    рассылки, в том числе рекламной.
+                  </p>
+                </form>
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </footer>
   );
 }
