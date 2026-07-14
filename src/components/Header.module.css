@@ -18,6 +18,27 @@
   transition: inherit;
 }
 
+.menuOpen {
+  z-index: 10002;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.menuOpen::before {
+  border-bottom-color: transparent;
+  background: transparent;
+}
+
+.menuOpen .leftSection {
+  pointer-events: auto;
+}
+
+.menuOpen .logo,
+.menuOpen .actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .scrolled {
   color: var(--text-primary);
 }
@@ -78,6 +99,39 @@
 .icon {
   width: 24px;
   height: 24px;
+}
+
+.menuIcon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.menuIcon span {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 20px;
+  height: 1px;
+  background: currentColor;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.menuIcon span:first-child {
+  transform: translateY(-4px);
+}
+
+.menuIcon span:last-child {
+  transform: translateY(4px);
+}
+
+.menuIconOpen span:first-child {
+  transform: rotate(45deg);
+}
+
+.menuIconOpen span:last-child {
+  transform: rotate(-45deg);
 }
 
 .locationIcon {

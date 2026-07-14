@@ -7,11 +7,12 @@ import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
 import styles from "./Header.module.css";
 
-function MenuIcon() {
+function MenuIcon({ isOpen }: { isOpen: boolean }) {
   return (
-    <svg className={styles.icon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeWidth="1.4" d="M4 8h16M4 16h16" />
-    </svg>
+    <span className={`${styles.menuIcon} ${isOpen ? styles.menuIconOpen : ""}`} aria-hidden="true">
+      <span />
+      <span />
+    </span>
   );
 }
 
@@ -78,7 +79,7 @@ export default function Header() {
   }, [isHome]);
 
   return (
-    <header className={`${styles.header} ${isSolid ? styles.scrolled : ""}`}>
+    <header className={`${styles.header} ${isSolid ? styles.scrolled : ""} ${isMenuOpen ? styles.menuOpen : ""}`}>
       <div className={styles.frame}>
         <div className={styles.leftSection}>
           <button
@@ -86,12 +87,12 @@ export default function Header() {
             onPointerEnter={(event) => {
               if (event.pointerType === "mouse") setIsMenuOpen(true);
             }}
-            onClick={() => setIsMenuOpen(true)}
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
             aria-label="Открыть меню"
             aria-expanded={isMenuOpen}
             aria-controls="site-menu-drawer"
           >
-            <MenuIcon />
+            <MenuIcon isOpen={isMenuOpen} />
           </button>
         </div>
 

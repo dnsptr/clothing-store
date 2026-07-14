@@ -20,8 +20,8 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 392px;
-  height: 100vh;
+  width: min(720px, 100vw);
+  height: 100dvh;
   background-color: var(--bg-primary);
   box-shadow: none;
   z-index: 10001;
@@ -32,65 +32,49 @@
   transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@media (max-width: 480px) {
-  .drawer {
-    width: 100%;
-  }
-}
-
 .drawerOpen {
   transform: translateX(0);
 }
 
 .drawerSpacer {
+  display: flex;
+  align-items: center;
   flex: 0 0 var(--header-height);
+  padding-left: 68px;
   border-bottom: 1px solid var(--border-light);
 }
 
-/* Header Close Button */
-.headerClose {
-  position: absolute;
-  top: 12px;
-  left: 20px;
-  z-index: 10005;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  color: var(--text-secondary);
-  transition: var(--transition-fast);
-}
-
-.headerClose:hover {
+.drawerLabel {
+  padding-bottom: 3px;
+  border-bottom: 1px solid currentColor;
   color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.closeIcon {
-  width: 22px;
-  height: 22px;
-}
-
-/* Panels Slider Wrapper */
 .panelContainer {
   flex: 1;
-  display: flex;
-  width: 200%; /* Double width for Level 0 + Level 1 side-by-side */
-  height: calc(100vh - var(--header-height));
-  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  height: calc(100dvh - var(--header-height));
 }
 
-.slideSubPanel {
-  transform: translateX(-50%); /* Slide Level 1 into view */
-}
-
-/* Base Panel Styles */
 .panel {
-  width: 50%; /* Each panel takes half of double-width wrapper */
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  scrollbar-color: rgba(79, 62, 53, 0.22) transparent;
+  scrollbar-width: thin;
+}
+
+.panel + .panel {
+  border-left: 1px solid var(--border-light);
 }
 
 /* Level 0 Menu List */
@@ -104,21 +88,22 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--border-light);
+  min-height: 48px;
+  padding: 12px 24px;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 400;
-  line-height: 18px;
+  line-height: 24px;
   color: var(--text-primary);
-  letter-spacing: 0.044em;
+  letter-spacing: 0;
   cursor: pointer;
   transition: var(--transition-fast);
 }
 
-.menuItem:hover {
+.menuItem:hover,
+.menuItemActive {
   background-color: var(--bg-soft);
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 .chevronIcon {
@@ -129,9 +114,9 @@
 
 /* Level 1 Sub-panel */
 .subPanelHeader {
+  display: none;
   padding: 20px 24px 18px;
   border-bottom: 1px solid var(--border-light);
-  display: flex;
   flex-direction: column;
   gap: 12px;
 }
@@ -176,12 +161,14 @@
 }
 
 .subMenuItem {
-  padding: 15px 24px;
-  border-bottom: 1px solid var(--border-light);
+  min-height: 48px;
+  padding: 12px 24px;
   font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--text-primary);
+  letter-spacing: 0;
+  cursor: pointer;
   transition: var(--transition-fast);
 }
 
@@ -198,14 +185,14 @@
 
 /* Collection items — slightly muted, smaller */
 .menuItemCollection {
-  font-size: 13px;
+  font-size: 15px;
   opacity: 0.85;
 }
 
 /* "Смотреть все" — understated */
 .menuItemAll {
-  font-size: 12px;
-  letter-spacing: 0.1em;
+  font-size: 15px;
+  letter-spacing: 0;
   color: var(--text-secondary);
 }
 
@@ -221,16 +208,36 @@
   list-style: none;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 768px) {
+  .drawer {
+    width: 100%;
+  }
+
   .drawerSpacer {
     flex-basis: var(--header-height-mobile);
   }
 
-  .headerClose {
-    top: 8px;
+  .panelContainer {
+    display: flex;
+    width: 200%;
+    height: calc(100dvh - var(--header-height-mobile));
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  .panelContainer {
-    height: calc(100vh - var(--header-height-mobile));
+  .slideSubPanel {
+    transform: translateX(-50%);
+  }
+
+  .panel {
+    flex: 0 0 50%;
+    width: 50%;
+  }
+
+  .panel + .panel {
+    border-left: 0;
+  }
+
+  .subPanelHeader {
+    display: flex;
   }
 }
