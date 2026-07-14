@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../context/CartContext";
 import type { Product } from "../data/mockData";
 import { formatPrice } from "../lib/format";
+import ProductImageGallery from "./ProductImageGallery";
 import styles from "./ProductCard.module.css";
 
 interface ProductCardProps {
@@ -48,15 +48,13 @@ export default function ProductCard({
         >
           <BookmarkIcon active={isSaved} />
         </button>
-        <Link className={styles.imageButton} href={productHref} aria-label={`Открыть страницу товара: ${product.name}`}>
-          <Image
-            src={product.images[0]}
-            alt={product.name}
-            fill
-            sizes={imageSizes}
-            className={styles.image}
-          />
-        </Link>
+        <ProductImageGallery
+          images={product.images}
+          alt={product.name}
+          href={productHref}
+          sizes={imageSizes}
+          variant={variant}
+        />
       </div>
 
       <div className={styles.info}>

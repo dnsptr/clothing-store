@@ -72,23 +72,6 @@
   background: var(--bg-secondary);
 }
 
-.imageLink {
-  position: relative;
-  display: block;
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  overflow: hidden;
-}
-
-.image {
-  object-fit: cover;
-  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.card:hover .image {
-  transform: scale(1.018);
-}
-
 .removeButton {
   position: absolute;
   top: 8px;

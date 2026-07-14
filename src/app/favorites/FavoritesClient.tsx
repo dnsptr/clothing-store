@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import ProductImageGallery from "../../components/ProductImageGallery";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
 import { formatPrice } from "../../lib/format";
@@ -67,15 +67,12 @@ export default function FavoritesClient() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" d="m6.5 6 12 12M18 6 6 18" />
                     </svg>
                   </button>
-                  <Link href={`/product/${product.id}`} className={styles.imageLink}>
-                    <Image
-                      src={product.images[0]}
-                      alt={product.name}
-                      fill
-                      sizes="(max-width: 768px) 50vw, (max-width: 1180px) 33vw, 25vw"
-                      className={styles.image}
-                    />
-                  </Link>
+                  <ProductImageGallery
+                    images={product.images}
+                    alt={product.name}
+                    href={`/product/${product.id}`}
+                    sizes="(max-width: 768px) 50vw, (max-width: 1180px) 33vw, 25vw"
+                  />
                 </div>
 
                 <div className={styles.info}>

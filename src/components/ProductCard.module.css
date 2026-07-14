@@ -9,24 +9,6 @@
   background: #f3f1ec;
 }
 
-.imageButton {
-  position: relative;
-  display: block;
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  overflow: hidden;
-  color: inherit;
-}
-
-.image {
-  object-fit: cover;
-  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.card:hover .image {
-  transform: scale(1.018);
-}
-
 .badge {
   position: absolute;
   top: 12px;
@@ -121,10 +103,6 @@
 .cardHome .preview {
   margin-bottom: 10px;
   background: var(--bg-secondary);
-}
-
-.cardHome .imageButton {
-  aspect-ratio: 3 / 4;
 }
 
 .cardHome .info {
