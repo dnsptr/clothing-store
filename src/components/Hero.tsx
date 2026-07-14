@@ -9,6 +9,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
+import { withBasePath } from "../lib/assets";
 import { CATALOG_SECTIONS } from "../lib/catalog";
 import styles from "./Hero.module.css";
 
@@ -243,7 +244,7 @@ export default function Hero() {
                       ref={(node) => {
                         videoRefs.current[slide.id] = node;
                       }}
-                      src={slide.media.src}
+                      src={withBasePath(slide.media.src)}
                       muted
                       playsInline
                       autoPlay={isActive}
