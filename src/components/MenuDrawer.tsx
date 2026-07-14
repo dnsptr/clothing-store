@@ -41,7 +41,7 @@ function BackHeader({ label, onBack }: { label: string; onBack: () => void }) {
 
 export default function MenuDrawer() {
   const router = useRouter();
-  const { isMenuOpen, setIsMenuOpen, toggleMenu } = useCart();
+  const { isMenuOpen, setIsMenuOpen } = useCart();
   const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType>(null);
   useBodyScrollLock(isMenuOpen);
   useOverlayDismiss(isMenuOpen, () => setIsMenuOpen(false));
@@ -62,11 +62,17 @@ export default function MenuDrawer() {
     <>
       <div
         className={`${styles.overlay} ${isMenuOpen ? styles.overlayOpen : ""}`}
-        onClick={toggleMenu}
+        onClick={() => setIsMenuOpen(false)}
       />
 
-      <div className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""}`}>
-        <button className={styles.headerClose} onClick={toggleMenu} aria-label="Закрыть меню">
+      <div
+        id="site-menu-drawer"
+        className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""}`}
+        onPointerLeave={(event) => {
+          if (event.pointerType === "mouse") setIsMenuOpen(false);
+        }}
+      >
+        <button className={styles.headerClose} onClick={() => setIsMenuOpen(false)} aria-label="Закрыть меню">
           <svg className={styles.closeIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -85,17 +91,29 @@ export default function MenuDrawer() {
                 <span>{CATALOG_SECTIONS.new.label}</span>
               </li>
 
-              <li className={`${styles.menuItem} ${styles.menuItemSale}`} onClick={() => setActiveSubMenu("sale")}>
+              <li
+                className={`${styles.menuItem} ${styles.menuItemSale}`}
+                onMouseEnter={() => setActiveSubMenu("sale")}
+                onClick={() => setActiveSubMenu("sale")}
+              >
                 <span>Sale</span>
                 <Chevron />
               </li>
 
-              <li className={styles.menuItem} onClick={() => setActiveSubMenu("clothing")}>
+              <li
+                className={styles.menuItem}
+                onMouseEnter={() => setActiveSubMenu("clothing")}
+                onClick={() => setActiveSubMenu("clothing")}
+              >
                 <span>{CATALOG_SECTIONS.clothing.label}</span>
                 <Chevron />
               </li>
 
-              <li className={styles.menuItem} onClick={() => setActiveSubMenu("shoes")}>
+              <li
+                className={styles.menuItem}
+                onMouseEnter={() => setActiveSubMenu("shoes")}
+                onClick={() => setActiveSubMenu("shoes")}
+              >
                 <span>{CATALOG_SECTIONS.shoes.label}</span>
                 <Chevron />
               </li>
@@ -104,7 +122,11 @@ export default function MenuDrawer() {
                 <span>{CATALOG_SECTIONS.accessories.label}</span>
               </li>
 
-              <li className={styles.menuItem} onClick={() => setActiveSubMenu("materials")}>
+              <li
+                className={styles.menuItem}
+                onMouseEnter={() => setActiveSubMenu("materials")}
+                onClick={() => setActiveSubMenu("materials")}
+              >
                 <span>Материалы</span>
                 <Chevron />
               </li>

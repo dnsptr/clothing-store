@@ -5,7 +5,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
-import { CATALOG_SECTIONS } from "../lib/catalog";
 import styles from "./Header.module.css";
 
 function MenuIcon() {
@@ -59,7 +58,7 @@ function LocationIcon() {
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
-  const { cartCount, favoriteCount, toggleMenu } = useCart();
+  const { cartCount, favoriteCount, isMenuOpen, setIsMenuOpen } = useCart();
 
   const isHome = pathname === "/";
   const isSolid = !isHome || isScrolled;
@@ -82,15 +81,18 @@ export default function Header() {
     <header className={`${styles.header} ${isSolid ? styles.scrolled : ""}`}>
       <div className={styles.frame}>
         <div className={styles.leftSection}>
-          <button className={styles.iconButton} onClick={toggleMenu} aria-label="Открыть меню">
+          <button
+            className={styles.iconButton}
+            onPointerEnter={(event) => {
+              if (event.pointerType === "mouse") setIsMenuOpen(true);
+            }}
+            onClick={() => setIsMenuOpen(true)}
+            aria-label="Открыть меню"
+            aria-expanded={isMenuOpen}
+            aria-controls="site-menu-drawer"
+          >
             <MenuIcon />
           </button>
-
-          <nav className={styles.genderNav} aria-label="Раздел каталога">
-            <Link href={CATALOG_SECTIONS.clothing.href} className={styles.genderActive}>
-              Женщинам
-            </Link>
-          </nav>
         </div>
 
         <Link href="/" className={styles.logo} aria-label="Mario Mikke">
