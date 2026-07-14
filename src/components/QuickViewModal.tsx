@@ -6,6 +6,7 @@ import { Product } from "../data/mockData";
 import { useCart } from "../context/CartContext";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { withBasePath } from "../lib/assets";
 import { formatPrice } from "../lib/format";
 import { AVAILABLE_SIZES } from "../lib/shop";
 import styles from "./QuickViewModal.module.css";
@@ -99,7 +100,7 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
         {/* Left Side: Image */}
         <div className={styles.imageSection}>
           <Image
-            src={product.images[0]}
+            src={withBasePath(product.images[0])}
             alt={product.name}
             fill
             sizes="(max-width: 768px) 100vw, 50vw"

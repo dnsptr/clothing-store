@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { MOCK_OUTFITS, MOCK_PRODUCTS } from "../../../data/mockData";
+import { withBasePath } from "../../../lib/assets";
 import CollectionOutfitClient from "./CollectionOutfitClient";
 import Header from "../../../components/Header";
 import Footer from "../../../components/Footer";
@@ -39,7 +40,7 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
       <section className={styles.hero}>
         <div className={styles.imageWrapper}>
           <Image
-            src={outfit.image}
+            src={withBasePath(outfit.image)}
             alt={outfit.title}
             fill
             priority

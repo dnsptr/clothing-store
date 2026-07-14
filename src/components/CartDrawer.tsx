@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useCart } from "../context/CartContext";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { withBasePath } from "../lib/assets";
 import { formatPrice } from "../lib/format";
 import styles from "./CartDrawer.module.css";
 
@@ -90,7 +91,7 @@ export default function CartDrawer() {
                 {/* Product Thumbnail */}
                 <div className={styles.imageWrapper}>
                   <Image
-                    src={item.product.images[0]}
+                    src={withBasePath(item.product.images[0])}
                     alt={item.product.name}
                     fill
                     sizes="80px"

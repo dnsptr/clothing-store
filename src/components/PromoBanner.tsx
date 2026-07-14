@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { withBasePath } from "../lib/assets";
 import styles from "./PromoBanner.module.css";
 
 export default function PromoBanner() {
@@ -7,7 +8,7 @@ export default function PromoBanner() {
     <section className={styles.section}>
       <div className={styles.frame}>
         <Image
-          src="/images/hero.png"
+          src={withBasePath("/images/hero.png")}
           alt="Женская коллекция MARIO MIKKE"
           fill
           sizes="100vw"

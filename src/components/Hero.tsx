@@ -220,7 +220,7 @@ export default function Hero() {
             >
               {slide.media.type === "image" ? (
                 <Image
-                  src={slide.media.src}
+                  src={withBasePath(slide.media.src)}
                   alt=""
                   fill
                   sizes="100vw"
@@ -231,7 +231,7 @@ export default function Hero() {
               ) : (
                 <>
                   <Image
-                    src={slide.media.poster}
+                    src={withBasePath(slide.media.poster)}
                     alt=""
                     fill
                     priority={index === 0}

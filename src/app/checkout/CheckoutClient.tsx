@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
+import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./checkout.module.css";
@@ -82,7 +83,7 @@ export default function CheckoutClient() {
                 {/* Thumbnail */}
                 <div className={styles.orderItemImage}>
                   <Image
-                    src={item.product.images[0]}
+                    src={withBasePath(item.product.images[0])}
                     alt={item.product.name}
                     fill
                     sizes="90px"
@@ -148,7 +149,7 @@ export default function CheckoutClient() {
                     <Link href={`/product/${product.id}`}>
                       <div className={styles.recommendImage}>
                         <Image
-                          src={product.images[0]}
+                          src={withBasePath(product.images[0])}
                           alt={product.name}
                           fill
                           sizes="200px"

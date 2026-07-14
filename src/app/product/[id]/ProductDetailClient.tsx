@@ -6,6 +6,7 @@ import Link from "next/link";
 import { MOCK_PRODUCTS, Product } from "../../../data/mockData";
 import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
+import { withBasePath } from "../../../lib/assets";
 import { formatPrice } from "../../../lib/format";
 import { AVAILABLE_SIZES } from "../../../lib/shop";
 import styles from "./product.module.css";
@@ -89,7 +90,7 @@ export default function ProductDetailClient({ product }: { product: Product }) {
             return (
               <figure className={styles.imageWrapper} key={imageUrl}>
                 <Image
-                  src={imageUrl}
+                  src={withBasePath(imageUrl)}
                   alt={`${product.name}, ракурс ${index + 1}`}
                   fill
                   sizes="(max-width: 767px) 100vw, (max-width: 1100px) 58vw, 560px"
@@ -225,7 +226,7 @@ export default function ProductDetailClient({ product }: { product: Product }) {
           {lookProducts.map((item) => (
             <article className={styles.outfitCard} key={item.id}>
               <Link href={`/product/${item.id}`} className={styles.outfitImageLink} aria-label={item.name}>
-                <Image src={item.images[0]} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
+                <Image src={withBasePath(item.images[0])} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
               </Link>
               <Link href={`/product/${item.id}`} className={styles.outfitName}>
                 {item.name}

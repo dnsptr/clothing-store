@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { withBasePath } from "../lib/assets";
 import { HOME_RECOMMENDATIONS } from "../lib/catalog";
 import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./RecommendationsSlider.module.css";
@@ -59,7 +60,7 @@ export default function RecommendationsSlider() {
             {...cursorHandlers}
           >
             <Image
-              src={item.image}
+              src={withBasePath(item.image)}
               alt={item.label}
               fill
               sizes="(max-width: 768px) 82vw, 25vw"

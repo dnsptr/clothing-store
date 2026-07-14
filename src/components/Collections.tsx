@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { MOCK_COLLECTIONS } from "../data/mockData";
+import { withBasePath } from "../lib/assets";
 import styles from "./Collections.module.css";
 
 export default function Collections() {
@@ -13,7 +14,7 @@ export default function Collections() {
               {/* Background Image */}
               <div className={styles.imageWrapper}>
                 <Image
-                  src={collection.image}
+                  src={withBasePath(collection.image)}
                   alt={collection.title}
                   fill
                   sizes="(max-width: 768px) 100vw, 50vw"

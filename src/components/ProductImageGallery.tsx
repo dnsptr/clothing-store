@@ -3,6 +3,7 @@
 import { PointerEvent, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { withBasePath } from "../lib/assets";
 import styles from "./ProductImageGallery.module.css";
 
 interface ProductImageGalleryProps {
@@ -29,7 +30,7 @@ export default function ProductImageGallery({
 
     frames.slice(1).forEach((src) => {
       const image = new window.Image();
-      image.src = src;
+      image.src = withBasePath(src);
     });
     hasPreloaded.current = true;
   };
@@ -57,7 +58,7 @@ export default function ProductImageGallery({
     >
       <Image
         key={frames[activeImageIndex]}
-        src={frames[activeImageIndex]}
+        src={withBasePath(frames[activeImageIndex])}
         alt={alt}
         fill
         sizes={sizes}

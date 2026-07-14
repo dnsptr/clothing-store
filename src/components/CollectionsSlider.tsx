@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { MOCK_OUTFITS } from "../data/mockData";
+import { withBasePath } from "../lib/assets";
 import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./CollectionsSlider.module.css";
 
@@ -63,7 +64,7 @@ export default function CollectionsSlider() {
             {...cursorHandlers}
           >
             <Image
-              src={outfit.image}
+              src={withBasePath(outfit.image)}
               alt={outfit.title}
               fill
               sizes="(max-width: 768px) 86vw, 45vw"

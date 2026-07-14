@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { MOCK_PRODUCTS } from "../../data/mockData";
+import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./cart.module.css";
@@ -126,7 +127,7 @@ export default function CartPageClient() {
                       <div className={styles.recommendImageWrap}>
                         <Link href={`/product/${product.id}`} className={styles.recommendImageLink} aria-label={product.name}>
                           <Image
-                            src={product.images[0]}
+                            src={withBasePath(product.images[0])}
                             alt={product.name}
                             fill
                             sizes="(max-width: 767px) 45vw, 20vw"

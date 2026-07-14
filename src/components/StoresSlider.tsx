@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Image from "next/image";
+import { withBasePath } from "../lib/assets";
 import styles from "./StoresSlider.module.css";
 
 const STORES = [
@@ -69,7 +70,7 @@ export default function StoresSlider() {
         {STORES.map((store) => (
           <article key={store.name} className={styles.card} draggable={false}>
             <Image
-              src={store.image}
+              src={withBasePath(store.image)}
               alt={store.name}
               fill
               sizes="(max-width: 768px) 76vw, 22vw"

@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCart } from "../context/CartContext";
+import { withBasePath } from "../lib/assets";
 import styles from "./Header.module.css";
 
 function MenuIcon({ isOpen }: { isOpen: boolean }) {
@@ -98,7 +99,7 @@ export default function Header() {
 
         <Link href="/" className={styles.logo} aria-label="Mario Mikke">
           <Image
-            src="/mario-mikke-logo.svg"
+            src={withBasePath("/mario-mikke-logo.svg")}
             alt=""
             aria-hidden="true"
             width={193}
@@ -107,7 +108,7 @@ export default function Header() {
             priority
           />
           <Image
-            src="/mario-mikke-logo-dark.svg"
+            src={withBasePath("/mario-mikke-logo-dark.svg")}
             alt=""
             aria-hidden="true"
             width={193}
