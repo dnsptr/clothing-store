@@ -17,14 +17,6 @@ import styles from "./MenuDrawer.module.css";
 
 type SubMenuType = "sale" | "clothing" | "shoes" | "materials" | null;
 
-const DEFAULT_SUBMENU = [
-  { label: "Смотреть все", href: "/catalog" },
-  CATALOG_SECTIONS.new,
-  CATALOG_SECTIONS.clothing,
-  CATALOG_SECTIONS.shoes,
-  CATALOG_SECTIONS.accessories,
-];
-
 function Chevron() {
   return (
     <svg className={styles.chevronIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -75,7 +67,12 @@ export default function MenuDrawer() {
 
       <div
         id="site-menu-drawer"
-        className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""}`}
+        className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""} ${
+          activeSubMenu !== null ? styles.drawerExpanded : ""
+        }`}
+        onPointerLeave={(event) => {
+          if (event.pointerType === "mouse") setActiveSubMenu(null);
+        }}
       >
         <div className={styles.drawerSpacer}>
           <span className={styles.drawerLabel}>Каталог</span>
@@ -148,41 +145,48 @@ export default function MenuDrawer() {
                 <li
                   key={outfit.id}
                   className={`${styles.menuItem} ${styles.menuItemCollection}`}
+                  onMouseEnter={() => setActiveSubMenu(null)}
                   onClick={() => go(`/collection/${outfit.id}`)}
                 >
                   <span>{outfit.title}</span>
                 </li>
               ))}
 
-              <li className={`${styles.menuItem} ${styles.menuItemAll}`} onClick={() => go("/catalog")}>
+              <li
+                className={`${styles.menuItem} ${styles.menuItemAll}`}
+                onMouseEnter={() => setActiveSubMenu(null)}
+                onClick={() => go("/catalog")}
+              >
                 <span>Смотреть все</span>
               </li>
 
               <li className={styles.menuDivider} />
 
-              <li className={`${styles.menuItem} ${styles.menuItemInfo}`} onClick={() => go("/info/about")}>
+              <li
+                className={`${styles.menuItem} ${styles.menuItemInfo}`}
+                onMouseEnter={() => setActiveSubMenu(null)}
+                onClick={() => go("/info/about")}
+              >
                 <span>О бренде</span>
               </li>
-              <li className={`${styles.menuItem} ${styles.menuItemInfo}`} onClick={() => go("/info/contacts")}>
+              <li
+                className={`${styles.menuItem} ${styles.menuItemInfo}`}
+                onMouseEnter={() => setActiveSubMenu(null)}
+                onClick={() => go("/info/contacts")}
+              >
                 <span>Магазины и контакты</span>
               </li>
-              <li className={`${styles.menuItem} ${styles.menuItemInfo}`} onClick={() => go("/info/delivery")}>
+              <li
+                className={`${styles.menuItem} ${styles.menuItemInfo}`}
+                onMouseEnter={() => setActiveSubMenu(null)}
+                onClick={() => go("/info/delivery")}
+              >
                 <span>Доставка и возврат</span>
               </li>
             </ul>
           </div>
 
           <div className={styles.panel}>
-            {activeSubMenu === null && (
-              <ul className={styles.subMenuList}>
-                {DEFAULT_SUBMENU.map((item) => (
-                  <li key={item.href} className={styles.subMenuItem} onClick={() => go(item.href)}>
-                    {item.label}
-                  </li>
-                ))}
-              </ul>
-            )}
-
             {activeSubMenu === "sale" && (
               <>
                 <BackHeader label="Sale" onBack={() => setActiveSubMenu(null)} />
