@@ -48,7 +48,7 @@ export const MOCK_COLLECTIONS: Collection[] = [
 export const MOCK_PRODUCTS: Product[] = [
   {
     id: "1",
-    name: "Классический льняной тренч",
+    name: "Комплект Noma с брюками палаццо",
     price: 19800,
     category: "Пальто и тренчи",
     categorySlug: "outerwear",
@@ -63,7 +63,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "2",
-    name: "Джемпер крупной вязки из кашемира",
+    name: "Джемпер Maren с геометрическим узором",
     price: 14500,
     category: "Трикотаж",
     categorySlug: "knitwear",
@@ -78,7 +78,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "3",
-    name: "Льняные брюки прямого кроя",
+    name: "Юбка Elba макси с принтом пейсли",
     price: 9800,
     category: "Брюки",
     categorySlug: "trousers",
@@ -92,7 +92,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "4",
-    name: "Кожаная сумка-шопер на плечо",
+    name: "Сумка-шопер Siena из фактурной кожи",
     price: 22000,
     category: "Аксессуары",
     categorySlug: "accessories",
@@ -106,7 +106,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "5",
-    name: "Шерстяной оверсайз жакет",
+    name: "Джемпер Limoncello с нагрудным карманом",
     price: 18900,
     category: "Пальто и тренчи",
     categorySlug: "outerwear",
@@ -121,7 +121,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "6",
-    name: "Шелковый топ на тонких бретелях",
+    name: "Джемпер Luna с коротким рукавом",
     price: 12500,
     category: "Трикотаж",
     categorySlug: "knitwear",
@@ -135,7 +135,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "7",
-    name: "Шерстяная юбка миди с разрезом",
+    name: "Юбка Vichy миди в клетку",
     price: 11800,
     category: "Брюки",
     categorySlug: "trousers",
@@ -149,7 +149,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "8",
-    name: "Платье-миди из хлопкового трикотажа",
+    name: "Комплект Alba с контрастной вышивкой",
     price: 15900,
     category: "Трикотаж",
     categorySlug: "knitwear",
@@ -164,7 +164,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "9",
-    name: "Кожаные лоферы на тонкой подошве",
+    name: "Платье-кафтан Sahara изо льна",
     price: 16500,
     category: "Обувь",
     categorySlug: "shoes",
@@ -178,7 +178,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "10",
-    name: "Шерстяной палантин крупной вязки",
+    name: "Платье-кафтан Riviera с контрастной отделкой",
     price: 6800,
     category: "Аксессуары",
     categorySlug: "accessories",
@@ -192,7 +192,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "11",
-    name: "Кожаные босоножки на ремешках",
+    name: "Сапоги Garda из фактурной кожи",
     price: 13800,
     category: "Обувь",
     categorySlug: "shoes",
@@ -206,7 +206,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
   {
     id: "12",
-    name: "Кожаный ремень с лаконичной пряжкой",
+    name: "Трикотажный костюм Magnolia с вышивкой",
     price: 4900,
     category: "Аксессуары",
     categorySlug: "accessories",
