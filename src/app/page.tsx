@@ -21,7 +21,7 @@ export default function Home() {
         <RecommendationsSlider />
 
         {/* Own product cards */}
-        <ProductGrid />
+        {/* <ProductGrid /> */}
 
         {/* Drag-to-scroll collections (Образы) */}
         <CollectionsSlider />
