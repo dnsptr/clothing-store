@@ -20,6 +20,19 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Mario Mikke | Premium Clothing Store",
   description: "Minimalist and elegant online clothing store by Mario Mikke",
+  applicationName: "Mario Mikke",
+  openGraph: {
+    title: "Mario Mikke | Premium Clothing Store",
+    description: "Minimalist and elegant online clothing store by Mario Mikke",
+    siteName: "Mario Mikke",
+    locale: "ru_RU",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Mario Mikke | Premium Clothing Store",
+    description: "Minimalist and elegant online clothing store by Mario Mikke",
+  },
 };
 
 export default function RootLayout({
