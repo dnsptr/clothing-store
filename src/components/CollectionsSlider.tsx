@@ -43,7 +43,7 @@ export default function CollectionsSlider() {
   return (
     <section id="collections" className={styles.section}>
       <div className={styles.titleSection}>
-        <h2 className={styles.title}>Истории</h2>
+        <h2 className={styles.title}>Коллекции</h2>
       </div>
 
       <div
