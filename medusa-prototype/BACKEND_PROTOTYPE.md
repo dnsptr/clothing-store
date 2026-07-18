@@ -5,9 +5,10 @@ This folder contains a first Medusa backend prototype generated with `create-med
 ## Current Scope
 
 - Medusa backend lives in `apps/backend`.
-- Medusa Admin will be available at `http://localhost:9000/app` after the backend is connected to PostgreSQL.
+- Medusa Admin is available at `http://localhost:9000/app` while the backend is running.
 - The current storefront remains the existing Next.js app in the repository root.
-- Database setup was skipped during generation because PostgreSQL and Docker are not installed on this machine yet.
+- PostgreSQL and Redis run in Docker with persistent local volumes.
+- Initial Medusa migrations and starter seed data have been applied.
 
 ## Local Prerequisites
 
@@ -16,17 +17,25 @@ This folder contains a first Medusa backend prototype generated with `create-med
 
 ## Local Run With Docker
 
-1. Start infrastructure:
+1. Install dependencies:
 
 ```bash
 cd medusa-prototype
+npm ci
+```
+
+2. Start infrastructure:
+
+```bash
 docker compose up -d postgres redis
 ```
 
-2. Create `apps/backend/.env` from `apps/backend/.env.template` and set:
+PostgreSQL uses host port `5433` to avoid conflicting with a native PostgreSQL installation on `5432`.
+
+3. Create `apps/backend/.env` from `apps/backend/.env.template` and set:
 
 ```bash
-DATABASE_URL=postgres://medusa:medusa@localhost:5432/medusa_backend
+DATABASE_URL=postgres://medusa:medusa@localhost:5433/medusa_backend
 REDIS_URL=redis://localhost:6379
 STORE_CORS=http://localhost:3000
 ADMIN_CORS=http://localhost:5173,http://localhost:9000
@@ -35,18 +44,30 @@ JWT_SECRET=replace-with-random-secret
 COOKIE_SECRET=replace-with-random-secret
 ```
 
-3. Run migrations and seed data from `apps/backend` once the database is available.
-
-4. Start the backend:
+4. Apply migrations from `apps/backend`:
 
 ```bash
+cd apps/backend
+npm exec -- medusa db:migrate
+```
+
+5. Create a local admin user:
+
+```bash
+npm exec -- medusa user -e admin@example.com -p "replace-with-a-local-password"
+```
+
+6. Start the backend from the prototype root:
+
+```bash
+cd ../..
 npm run backend:dev
 ```
 
+The backend health endpoint is `http://localhost:9000/health`. Stop the containers with `docker compose stop` when they are not needed.
+
 ## Next Prototype Tasks
 
-- Connect PostgreSQL and run Medusa migrations.
-- Create the first admin user.
 - Define the product import mapping from `src/data/mockData.ts`.
 - Add a seed script for Mario Mikke demo products, categories, sizes, colors, and collections.
 - Expose storefront API settings for the existing Next.js frontend.
