@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "medusa-prototype/**",
     "next-env.d.ts",
   ]),
 ]);
