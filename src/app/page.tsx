@@ -1,7 +1,6 @@
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import RecommendationsSlider from "@/components/RecommendationsSlider";
-import ProductGrid from "@/components/ProductGrid";
 import CollectionsSlider from "@/components/CollectionsSlider";
 import PromoBanner from "@/components/PromoBanner";
 import MaterialsSlider from "@/components/MaterialsSlider";

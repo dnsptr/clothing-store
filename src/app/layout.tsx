@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import { CartProvider } from "@/context/CartContext";
+import { CatalogProvider } from "@/context/CatalogContext";
 import MenuDrawer from "@/components/MenuDrawer";
 import RouteScrollReset from "@/components/RouteScrollReset";
 import "./globals.css";
@@ -43,11 +44,13 @@ export default function RootLayout({
   return (
     <html lang="ru" className={`${cormorant.variable} ${inter.variable}`}>
       <body>
-        <CartProvider>
-          <RouteScrollReset />
-          {children}
-          <MenuDrawer />
-        </CartProvider>
+        <CatalogProvider>
+          <CartProvider>
+            <RouteScrollReset />
+            {children}
+            <MenuDrawer />
+          </CartProvider>
+        </CatalogProvider>
       </body>
     </html>
   );

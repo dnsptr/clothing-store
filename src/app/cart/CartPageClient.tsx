@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
-import { MOCK_PRODUCTS } from "../../data/mockData";
+import { useCatalog } from "../../context/CatalogContext";
 import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
@@ -27,6 +27,7 @@ function RemoveIcon() {
 }
 
 export default function CartPageClient() {
+  const { products } = useCatalog();
   const {
     cartItems,
     cartTotal,
@@ -38,7 +39,7 @@ export default function CartPageClient() {
   } = useCart();
   const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
   const delivery = cartTotal >= DELIVERY.cartFreeThreshold ? 0 : DELIVERY.cartPrice;
-  const recommendations = MOCK_PRODUCTS
+  const recommendations = products
     .filter((product) => !cartItems.some((item) => item.product.id === product.id))
     .slice(0, 5);
 
@@ -119,7 +120,9 @@ export default function CartPageClient() {
                 <h2>Дополните заказ</h2>
                 <div className={styles.recommendGrid}>
                   {recommendations.map((product) => {
-                    const selectedSize = recommendationSizes[product.id] ?? DEFAULT_RECOMMENDATION_SIZE;
+                    const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
+                    const selectedSize = recommendationSizes[product.id] ??
+                      (sizes.includes(DEFAULT_RECOMMENDATION_SIZE) ? DEFAULT_RECOMMENDATION_SIZE : sizes[0]);
                     const isSaved = isFavorite(product.id);
 
                     return (
@@ -147,7 +150,7 @@ export default function CartPageClient() {
                       <Link href={`/product/${product.id}`} className={styles.recommendName}>{product.name}</Link>
                       <p className={styles.recommendPrice}>{formatPrice(product.price)}</p>
                       <div className={styles.recommendSizes} aria-label={`Размер для ${product.name}`}>
-                        {AVAILABLE_SIZES.map((size) => (
+                        {sizes.map((size) => (
                           <button
                             key={size}
                             type="button"

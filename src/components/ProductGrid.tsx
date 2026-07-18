@@ -1,10 +1,14 @@
+"use client";
+
 import Link from "next/link";
-import { MOCK_PRODUCTS } from "../data/mockData";
+import { useCatalog } from "../context/CatalogContext";
 import { CATALOG_SECTIONS } from "../lib/catalog";
 import ProductCard from "./ProductCard";
 import styles from "./ProductGrid.module.css";
 
 export default function ProductGrid() {
+  const { products } = useCatalog();
+
   return (
     <section className={styles.section}>
       <div className={`${styles.container} container`}>
@@ -19,7 +23,7 @@ export default function ProductGrid() {
         </div>
 
         <div className={styles.grid}>
-          {MOCK_PRODUCTS.slice(0, 4).map((product) => (
+          {products.slice(0, 4).map((product) => (
             <ProductCard
               key={product.id}
               product={product}

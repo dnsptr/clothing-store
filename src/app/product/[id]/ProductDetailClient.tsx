@@ -3,12 +3,12 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { MOCK_PRODUCTS, Product } from "../../../data/mockData";
+import type { Product } from "../../../data/mockData";
+import { useCatalog } from "../../../context/CatalogContext";
 import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
 import { withBasePath } from "../../../lib/assets";
 import { formatPrice } from "../../../lib/format";
-import { AVAILABLE_SIZES } from "../../../lib/shop";
 import styles from "./product.module.css";
 
 const PRODUCT_PANELS = [
@@ -45,7 +45,9 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
   );
 }
 
-export default function ProductDetailClient({ product }: { product: Product }) {
+export default function ProductDetailClient({ product: initialProduct }: { product: Product }) {
+  const { products } = useCatalog();
+  const product = products.find((item) => item.id === initialProduct.id) ?? initialProduct;
   const { addToCart } = useCart();
   const [selectedColor, setSelectedColor] = useState(product.colors[0] ?? null);
   const [selectedSize, setSelectedSize] = useState("");
@@ -54,7 +56,7 @@ export default function ProductDetailClient({ product }: { product: Product }) {
   const [savedPhotoIndexes, setSavedPhotoIndexes] = useState<number[]>([]);
   const [openPanels, setOpenPanels] = useState<Record<string, boolean>>({});
 
-  const lookProducts = MOCK_PRODUCTS.filter((item) => item.id !== product.id).slice(0, 2);
+  const lookProducts = products.filter((item) => item.id !== product.id).slice(0, 2);
 
   const handleAddToCart = () => {
     if (!selectedSize) {
@@ -152,7 +154,7 @@ export default function ProductDetailClient({ product }: { product: Product }) {
                 </button>
               </div>
               <div className={styles.sizeList} role="group" aria-label="Выбор размера">
-                {AVAILABLE_SIZES.map((size) => {
+                {product.availableSizes.map((size) => {
                   const isSelected = selectedSize === size;
 
                   return (

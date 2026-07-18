@@ -4,12 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import ProductImageGallery from "../../components/ProductImageGallery";
 import { useCart } from "../../context/CartContext";
-import { MOCK_PRODUCTS } from "../../data/mockData";
+import { useCatalog } from "../../context/CatalogContext";
 import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES } from "../../lib/shop";
 import styles from "./favorites.module.css";
 
 export default function FavoritesClient() {
+  const { products } = useCatalog();
   const {
     addToCart,
     favoriteProductIds,
@@ -17,7 +18,7 @@ export default function FavoritesClient() {
   } = useCart();
   const [selectedSizes, setSelectedSizes] = useState<Record<string, string>>({});
 
-  const favoriteProducts = MOCK_PRODUCTS.filter((product) =>
+  const favoriteProducts = products.filter((product) =>
     favoriteProductIds.includes(product.id)
   );
 
@@ -51,7 +52,8 @@ export default function FavoritesClient() {
 
         <section className={styles.grid} aria-label="Избранные товары">
           {favoriteProducts.map((product) => {
-            const selectedSize = selectedSizes[product.id] ?? AVAILABLE_SIZES[1];
+            const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
+            const selectedSize = selectedSizes[product.id] ?? sizes[0];
             const selectedColor = product.colors[0];
 
             return (
@@ -82,7 +84,7 @@ export default function FavoritesClient() {
                   <span className={styles.price}>{formatPrice(product.price)}</span>
 
                   <div className={styles.sizeList} aria-label={`Размер для ${product.name}`}>
-                    {AVAILABLE_SIZES.map((size) => (
+                    {sizes.map((size) => (
                       <button
                         key={size}
                         type="button"

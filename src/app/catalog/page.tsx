@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import ProductCard from "../../components/ProductCard";
-import { MOCK_PRODUCTS } from "../../data/mockData";
+import { useCatalog } from "../../context/CatalogContext";
 import {
   CATALOG_PRIMARY_NAV,
   CLOTHING_SECTION_CATEGORY_SLUGS,
@@ -15,16 +15,7 @@ import {
   getCategoryBySlug,
   getMaterialBySlug,
 } from "../../lib/catalog";
-import { AVAILABLE_SIZES } from "../../lib/shop";
 import styles from "./catalog.module.css";
-
-const COLOR_FILTERS = Array.from(
-  new Map(
-    MOCK_PRODUCTS.flatMap((product) =>
-      product.colors.map((color) => [color.name, color.name])
-    )
-  ).values()
-);
 
 const PRICE_FILTERS = [
   { value: "under-10000", label: "До 10 000" },
@@ -38,6 +29,7 @@ const AVAILABILITY_FILTERS = [
 ];
 
 function CatalogContent() {
+  const { products } = useCatalog();
   const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
@@ -50,10 +42,20 @@ function CatalogContent() {
 
   const [sortBy, setSortBy] = useState("default");
   const [openFacet, setOpenFacet] = useState<string | null>(null);
+  const colorFilters = Array.from(
+    new Map(
+      products.flatMap((product) =>
+        product.colors.map((color) => [color.name, color.name]),
+      ),
+    ).values(),
+  );
+  const sizeFilters = Array.from(
+    new Set(products.flatMap((product) => product.availableSizes)),
+  );
 
   const category = categoryParam ? getCategoryBySlug(categoryParam) : undefined;
   const material = materialParam ? getMaterialBySlug(materialParam) : undefined;
-  const filteredProducts = MOCK_PRODUCTS.filter((product) => {
+  const filteredProducts = products.filter((product) => {
     if (categoryParam) {
       return category
         ? product.categorySlug === category.slug
@@ -210,7 +212,7 @@ function CatalogContent() {
                       <button type="button" className={styles.facetOption} onClick={() => applyFacetValue("size", "")}>
                         Все размеры
                       </button>
-                      {AVAILABLE_SIZES.map((size) => (
+                      {sizeFilters.map((size) => (
                         <button
                           key={size}
                           type="button"
@@ -239,7 +241,7 @@ function CatalogContent() {
                       <button type="button" className={styles.facetOption} onClick={() => applyFacetValue("color", "")}>
                         Все цвета
                       </button>
-                      {COLOR_FILTERS.map((color) => (
+                      {colorFilters.map((color) => (
                         <button
                           key={color}
                           type="button"

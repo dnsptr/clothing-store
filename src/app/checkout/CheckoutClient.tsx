@@ -4,13 +4,14 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
-import { MOCK_PRODUCTS } from "../../data/mockData";
+import { useCatalog } from "../../context/CatalogContext";
 import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
 import styles from "./checkout.module.css";
 
 export default function CheckoutClient() {
+  const { products } = useCatalog();
   const { cartItems, cartTotal, addToCart, updateQuantity, removeFromCart } = useCart();
 
   const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");
@@ -30,7 +31,7 @@ export default function CheckoutClient() {
 
   // Recommend products not already in cart
   const cartIds = cartItems.map((i) => i.product.id);
-  const recommendations = MOCK_PRODUCTS.filter((p) => !cartIds.includes(p.id)).slice(0, 3);
+  const recommendations = products.filter((p) => !cartIds.includes(p.id)).slice(0, 3);
   const deliveryPriceLabel = formatPrice(DELIVERY.checkoutPrice);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -141,8 +142,10 @@ export default function CheckoutClient() {
             <div className={styles.recommendSection}>
               <p className={styles.sectionTitle}>Дополните заказ</p>
               <div className={styles.recommendGrid}>
-                {recommendations.map((product) => {
-                  const selectedSize = recommendationSizes[product.id] ?? DEFAULT_RECOMMENDATION_SIZE;
+              {recommendations.map((product) => {
+                  const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
+                  const selectedSize = recommendationSizes[product.id] ??
+                    (sizes.includes(DEFAULT_RECOMMENDATION_SIZE) ? DEFAULT_RECOMMENDATION_SIZE : sizes[0]);
 
                   return (
                   <div key={product.id} className={styles.recommendCard}>
@@ -160,7 +163,7 @@ export default function CheckoutClient() {
                     <span className={styles.recommendName}>{product.name}</span>
                     <span className={styles.recommendPrice}>{formatPrice(product.price)}</span>
                     <div className={styles.recommendSizes} aria-label={`Размер для ${product.name}`}>
-                      {AVAILABLE_SIZES.map((size) => (
+                      {sizes.map((size) => (
                         <button
                           key={size}
                           type="button"

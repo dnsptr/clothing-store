@@ -80,6 +80,6 @@ The script also configures RUB as the default store currency, creates a Russian 
 
 ## Next Prototype Tasks
 
-- Expose storefront API settings for the existing Next.js frontend.
+- Deploy the backend, PostgreSQL, and Redis to a temporary Node.js host.
 - Decide which Russian payment provider will be implemented first.
 - Decide which delivery integration will be implemented first: CDEK or Yandex Delivery.
