@@ -9,6 +9,7 @@
     "lint": "eslint",
     "backend:dev": "npm --prefix medusa-prototype run backend:dev",
     "backend:build": "npm --prefix medusa-prototype run build",
+    "backend:catalog": "npm --prefix medusa-prototype run catalog:import",
     "backend:lint": "npm --prefix medusa-prototype run lint"
   },
   "dependencies": {

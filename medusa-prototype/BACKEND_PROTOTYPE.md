@@ -66,10 +66,20 @@ npm run backend:dev
 
 The backend health endpoint is `http://localhost:9000/health`. Stop the containers with `docker compose stop` when they are not needed.
 
+## Demo Catalog
+
+Import or refresh the Mario Mikke demo catalog from the repository root:
+
+```bash
+npm run backend:catalog
+```
+
+The import is repeatable. It replaces only products previously imported by this script and the original Medusa starter products. Manually created admin products are preserved.
+
+The script also configures RUB as the default store currency, creates a Russian sales region, and adds inventory for every size/color variant. Russian shipping options are intentionally left for the CDEK or Yandex Delivery integration stage.
+
 ## Next Prototype Tasks
 
-- Define the product import mapping from `src/data/mockData.ts`.
-- Add a seed script for Mario Mikke demo products, categories, sizes, colors, and collections.
 - Expose storefront API settings for the existing Next.js frontend.
 - Decide which Russian payment provider will be implemented first.
 - Decide which delivery integration will be implemented first: CDEK or Yandex Delivery.
