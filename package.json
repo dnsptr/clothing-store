@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "backend:dev": "npm --prefix medusa-prototype run backend:dev",
     "backend:build": "npm --prefix medusa-prototype run build",
     "backend:catalog": "npm --prefix medusa-prototype run catalog:import",
