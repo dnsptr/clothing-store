@@ -37,6 +37,19 @@ interface MedusaRegionsResponse {
   regions?: { id: string; currency_code?: string | null }[];
 }
 
+export interface MedusaCart {
+  id: string;
+  items?: {
+    id: string;
+    variant_id?: string | null;
+    quantity: number;
+  }[];
+}
+
+interface MedusaCartResponse {
+  cart: MedusaCart;
+}
+
 const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, "");
 const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
 const configuredRegionId = process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
@@ -156,14 +169,22 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
   };
 }
 
-async function medusaRequest<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function medusaRequest<T>(
+  path: string,
+  options: { body?: unknown; method?: "DELETE" | "POST"; signal?: AbortSignal } = {},
+): Promise<T> {
   if (!backendUrl || !publishableKey) {
     throw new Error("Medusa storefront environment variables are not configured.");
   }
 
   const response = await fetch(`${backendUrl}${path}`, {
-    headers: { "x-publishable-api-key": publishableKey },
-    signal,
+    method: options.method,
+    headers: {
+      "x-publishable-api-key": publishableKey,
+      ...(options.body ? { "content-type": "application/json" } : {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -178,7 +199,7 @@ async function getRussianRegionId(signal?: AbortSignal) {
 
   const response = await medusaRequest<MedusaRegionsResponse>(
     "/store/regions?limit=100",
-    signal,
+    { signal },
   );
   return response.regions?.find((region) => region.currency_code === "rub")?.id;
 }
@@ -192,12 +213,46 @@ export async function fetchMedusaProducts(signal?: AbortSignal) {
 
   if (regionId) params.set("region_id", regionId);
 
-  const response = await medusaRequest<MedusaProductsResponse>(
-    `/store/products?${params.toString()}`,
-    signal,
-  );
+  const response = await medusaRequest<MedusaProductsResponse>(`/store/products?${params.toString()}`, { signal });
 
   return (response.products || [])
     .map(mapMedusaProduct)
     .sort((first, second) => Number(first.id) - Number(second.id));
+}
+
+export async function createMedusaCart() {
+  const regionId = await getRussianRegionId();
+  const response = await medusaRequest<MedusaCartResponse>("/store/carts", {
+    method: "POST",
+    body: regionId ? { region_id: regionId } : {},
+  });
+  return response.cart;
+}
+
+export async function retrieveMedusaCart(cartId: string) {
+  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}`);
+  return response.cart;
+}
+
+export async function addMedusaCartLineItem(cartId: string, variantId: string, quantity: number) {
+  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}/line-items`, {
+    method: "POST",
+    body: { variant_id: variantId, quantity },
+  });
+  return response.cart;
+}
+
+export async function updateMedusaCartLineItem(cartId: string, lineItemId: string, quantity: number) {
+  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}/line-items/${lineItemId}`, {
+    method: "POST",
+    body: { quantity },
+  });
+  return response.cart;
+}
+
+export async function removeMedusaCartLineItem(cartId: string, lineItemId: string) {
+  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}/line-items/${lineItemId}`, {
+    method: "DELETE",
+  });
+  return response.cart;
 }

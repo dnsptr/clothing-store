@@ -108,7 +108,13 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
     }
 
     setError("");
-    addToCart({ product, selectedSize, selectedColor, quantity: 1 });
+    addToCart({
+      product,
+      selectedSize,
+      selectedColor,
+      variantId: selectedVariant.variantId,
+      quantity: 1,
+    });
   };
 
   const toggleSavedPhoto = (index: number) => {

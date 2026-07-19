@@ -186,10 +186,13 @@ export default function CheckoutClient() {
                       className={styles.addBtn}
                       onClick={() =>
                         addToCart({
-                          product,
-                          selectedSize,
-                          selectedColor: product.colors[0],
-                          quantity: 1,
+                            product,
+                            selectedSize,
+                            selectedColor: product.colors[0],
+                            variantId: product.variants.find(
+                              (variant) => variant.options.Размер === selectedSize,
+                            )?.variantId ?? "",
+                            quantity: 1,
                         })
                       }
                     >

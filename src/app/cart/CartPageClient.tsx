@@ -177,6 +177,9 @@ export default function CartPageClient() {
                             product,
                             selectedSize,
                             selectedColor: product.colors[0],
+                            variantId: product.variants.find(
+                              (variant) => variant.options.Размер === selectedSize,
+                            )?.variantId ?? "",
                             quantity: 1,
                           })
                         }

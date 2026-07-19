@@ -112,6 +112,11 @@ export default function FavoritesClient() {
                         product,
                         selectedSize,
                         selectedColor,
+                        variantId: product.variants.find(
+                          (variant) =>
+                            variant.options.Размер === selectedSize &&
+                            variant.options.Цвет === selectedColor.name,
+                        )?.variantId ?? "",
                         quantity: 1,
                       })
                     }

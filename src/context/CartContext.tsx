@@ -1,19 +1,22 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { MOCK_PRODUCTS, Product } from "../data/mockData";
+import { Product } from "../data/mockData";
+import {
+  addMedusaCartLineItem,
+  createMedusaCart,
+  isMedusaConfigured,
+  removeMedusaCartLineItem,
+  retrieveMedusaCart,
+  updateMedusaCartLineItem,
+} from "../lib/medusa";
 
 export interface CartItem {
   product: Product;
   selectedSize: string;
   selectedColor: { name: string; hex: string };
-  quantity: number;
-}
-
-interface StoredCartItem {
-  productId: string;
-  selectedSize: string;
-  selectedColor: { name: string; hex: string };
+  variantId: string;
+  lineItemId?: string;
   quantity: number;
 }
 
@@ -21,9 +24,9 @@ interface CartContextType {
   // Cart States
   cartItems: CartItem[];
   isCartOpen: boolean;
-  addToCart: (item: CartItem) => void;
-  removeFromCart: (productId: string, size: string, colorHex: string) => void;
-  updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => void;
+  addToCart: (item: CartItem) => Promise<void>;
+  removeFromCart: (productId: string, size: string, colorHex: string) => Promise<void>;
+  updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
@@ -42,6 +45,7 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = "clothing-store-cart";
+const MEDUSA_CART_STORAGE_KEY = "clothing-store-medusa-cart";
 const FAVORITES_STORAGE_KEY = "clothing-store-favorites";
 
 function isCartItem(value: unknown): value is CartItem {
@@ -52,46 +56,10 @@ function isCartItem(value: unknown): value is CartItem {
     Boolean(item.product?.id) &&
     typeof item.selectedSize === "string" &&
     typeof item.selectedColor?.hex === "string" &&
+    typeof item.variantId === "string" &&
     typeof item.quantity === "number" &&
     item.quantity > 0
   );
-}
-
-function isStoredCartItem(value: unknown): value is StoredCartItem {
-  if (!value || typeof value !== "object") return false;
-
-  const item = value as StoredCartItem;
-  return (
-    typeof item.productId === "string" &&
-    typeof item.selectedSize === "string" &&
-    typeof item.selectedColor?.hex === "string" &&
-    typeof item.quantity === "number" &&
-    item.quantity > 0
-  );
-}
-
-function restoreCartItem(value: unknown): CartItem | null {
-  if (isCartItem(value)) return value;
-  if (!isStoredCartItem(value)) return null;
-
-  const product = MOCK_PRODUCTS.find((item) => item.id === value.productId);
-  if (!product) return null;
-
-  return {
-    product,
-    selectedSize: value.selectedSize,
-    selectedColor: value.selectedColor,
-    quantity: value.quantity,
-  };
-}
-
-function serializeCartItem(item: CartItem): StoredCartItem {
-  return {
-    productId: item.product.id,
-    selectedSize: item.selectedSize,
-    selectedColor: item.selectedColor,
-    quantity: item.quantity,
-  };
 }
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
@@ -111,6 +79,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
+  const syncRemoteCart = (items: NonNullable<Awaited<ReturnType<typeof retrieveMedusaCart>>["items"]>) => {
+    setCartItems((currentItems) =>
+      currentItems
+        .flatMap((item) => {
+          const remoteItem = items.find((remote) => remote.variant_id === item.variantId);
+          return remoteItem ? [{ ...item, lineItemId: remoteItem.id, quantity: remoteItem.quantity }] : [];
+        }),
+    );
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -118,9 +96,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const savedCart = window.localStorage.getItem(CART_STORAGE_KEY);
       const parsedCart: unknown = savedCart ? JSON.parse(savedCart) : [];
       const nextCart = Array.isArray(parsedCart)
-        ? parsedCart
-            .map(restoreCartItem)
-            .filter((item): item is CartItem => item !== null)
+        ? parsedCart.filter(isCartItem)
         : [];
 
       window.setTimeout(() => {
@@ -142,11 +118,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!isCartHydrated || !isMedusaConfigured) return;
+
+    const cartId = window.localStorage.getItem(MEDUSA_CART_STORAGE_KEY);
+    if (!cartId) return;
+
+    retrieveMedusaCart(cartId)
+      .then((cart) => syncRemoteCart(cart.items || []))
+      .catch(() => window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY));
+  }, [isCartHydrated]);
+
+  useEffect(() => {
     if (!isCartHydrated) return;
 
     window.localStorage.setItem(
       CART_STORAGE_KEY,
-      JSON.stringify(cartItems.map(serializeCartItem))
+        JSON.stringify(cartItems)
     );
   }, [cartItems, isCartHydrated]);
 
@@ -184,7 +171,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favoriteProductIds));
   }, [favoriteProductIds, isFavoritesHydrated]);
 
-  const addToCart = (newItem: CartItem) => {
+  const getMedusaCartId = async () => {
+    const existingCartId = window.localStorage.getItem(MEDUSA_CART_STORAGE_KEY);
+    if (existingCartId) return existingCartId;
+
+    const cart = await createMedusaCart();
+    window.localStorage.setItem(MEDUSA_CART_STORAGE_KEY, cart.id);
+    return cart.id;
+  };
+
+  const addToCart = async (newItem: CartItem) => {
+    if (isMedusaConfigured) {
+      const cartId = await getMedusaCartId();
+      const cart = await addMedusaCartLineItem(cartId, newItem.variantId, newItem.quantity);
+      const lineItem = cart.items?.find((item) => item.variant_id === newItem.variantId);
+      newItem = { ...newItem, lineItemId: lineItem?.id, quantity: lineItem?.quantity ?? newItem.quantity };
+    }
+
     setCartItems((prevItems) => {
       // Check if product with exact same size and color is already in cart
       const existingItemIndex = prevItems.findIndex(
@@ -195,22 +198,30 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (existingItemIndex > -1) {
-        // Increment quantity of existing item
         const updatedItems = [...prevItems];
         updatedItems[existingItemIndex] = {
           ...updatedItems[existingItemIndex],
-          quantity: updatedItems[existingItemIndex].quantity + newItem.quantity,
+          lineItemId: newItem.lineItemId ?? updatedItems[existingItemIndex].lineItemId,
+          quantity: isMedusaConfigured
+            ? newItem.quantity
+            : updatedItems[existingItemIndex].quantity + newItem.quantity,
         };
         return updatedItems;
       }
 
-      // Add new item to cart
       return [...prevItems, newItem];
     });
     
   };
 
-  const removeFromCart = (productId: string, size: string, colorHex: string) => {
+  const removeFromCart = async (productId: string, size: string, colorHex: string) => {
+    const item = cartItems.find(
+      (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
+    );
+    if (isMedusaConfigured && item?.lineItemId) {
+      const cartId = await getMedusaCartId();
+      await removeMedusaCartLineItem(cartId, item.lineItemId);
+    }
     setCartItems((prevItems) =>
       prevItems.filter(
         (item) =>
@@ -223,13 +234,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  const updateQuantity = (
+  const updateQuantity = async (
     productId: string,
     size: string,
     colorHex: string,
     newQuantity: number
   ) => {
     if (newQuantity < 1) return;
+    const item = cartItems.find(
+      (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
+    );
+    if (isMedusaConfigured && item?.lineItemId) {
+      const cartId = await getMedusaCartId();
+      await updateMedusaCartLineItem(cartId, item.lineItemId, newQuantity);
+    }
     
     setCartItems((prevItems) =>
       prevItems.map((item) =>
