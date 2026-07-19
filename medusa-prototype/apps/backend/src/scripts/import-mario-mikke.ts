@@ -1,6 +1,7 @@
 import { MedusaContainer } from "@medusajs/framework";
 import {
   ContainerRegistrationKeys,
+  ModuleRegistrationName,
   ProductStatus,
 } from "@medusajs/framework/utils";
 import {
@@ -9,6 +10,7 @@ import {
   createProductCategoriesWorkflow,
   createProductsWorkflow,
   createRegionsWorkflow,
+  createShippingOptionsWorkflow,
   createTaxRegionsWorkflow,
   deleteProductsWorkflow,
   updateStoresWorkflow,
@@ -34,6 +36,7 @@ type ExecArgs = {
 export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const query = container.resolve(ContainerRegistrationKeys.QUERY);
+  const fulfillmentModuleService = container.resolve(ModuleRegistrationName.FULFILLMENT);
   const storefrontUrl = (
     process.env.STOREFRONT_URL || "http://localhost:3000"
   ).replace(/\/$/, "");
@@ -133,6 +136,53 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     throw new Error(
       "Sales channel, shipping profile, or stock location is missing.",
     );
+  }
+
+  const { data: serviceZones } = await query.graph({
+    entity: "service_zone",
+    fields: ["id", "geo_zones.country_code"],
+  });
+  const serviceZone = serviceZones[0];
+
+  if (!serviceZone) {
+    throw new Error("No fulfillment service zone exists.");
+  }
+
+  if (!serviceZone.geo_zones?.some((zone) => zone.country_code === "ru")) {
+    await fulfillmentModuleService.createGeoZones({
+      service_zone_id: serviceZone.id,
+      type: "country",
+      country_code: "ru",
+    });
+  }
+
+  const { data: shippingOptions } = await query.graph({
+    entity: "shipping_option",
+    fields: ["id", "name", "service_zone_id"],
+  });
+
+  if (!shippingOptions.some((option) => option.name === "MVP доставка по России")) {
+    await createShippingOptionsWorkflow(container).run({
+      input: [
+        {
+          name: "MVP доставка по России",
+          price_type: "flat",
+          provider_id: "manual_manual",
+          service_zone_id: serviceZone.id,
+          shipping_profile_id: shippingProfile.id,
+          type: {
+            label: "MVP доставка",
+            description: "Тестовая доставка для локального MVP.",
+            code: "mvp-ru",
+          },
+          prices: [{ currency_code: "rub", amount: 0 }],
+          rules: [
+            { attribute: "enabled_in_store", value: "true", operator: "eq" },
+            { attribute: "is_return", value: "false", operator: "eq" },
+          ],
+        },
+      ],
+    });
   }
 
   const { data: existingProducts } = await query.graph({
