@@ -168,6 +168,16 @@
   transform: scale(1.05);
 }
 
+.colorDot:disabled,
+.sizeBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.colorDot:disabled:hover {
+  transform: none;
+}
+
 .colorDotActive {
   outline: 1px solid var(--text-primary);
   outline-offset: 3px;
@@ -213,6 +223,10 @@
 
 .sizeBtn:hover {
   border-color: var(--text-primary);
+}
+
+.sizeBtn:disabled:hover {
+  border-color: var(--border-color);
 }
 
 .sizeBtnActive {

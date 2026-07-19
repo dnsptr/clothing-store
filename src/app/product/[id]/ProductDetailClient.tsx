@@ -49,7 +49,18 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
   const { products } = useCatalog();
   const product = products.find((item) => item.id === initialProduct.id) ?? initialProduct;
   const { addToCart } = useCart();
-  const [selectedColor, setSelectedColor] = useState(product.colors[0] ?? null);
+  const colorValues = product.options.find((option) => option.title === "Цвет")?.values ?? [];
+  const colors = colorValues.map(
+    (name) => product.colors.find((color) => color.name === name) ?? { name, hex: "#808080" },
+  );
+  const sizes = product.options.find((option) => option.title === "Размер")?.values ?? [];
+  const defaultColor =
+    colors.find((color) =>
+      product.variants.some(
+        (variant) => variant.available && variant.options.Цвет === color.name,
+      ),
+    ) ?? colors[0] ?? null;
+  const [selectedColor, setSelectedColor] = useState(defaultColor);
   const [selectedSize, setSelectedSize] = useState("");
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [error, setError] = useState("");
@@ -57,6 +68,28 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
   const [openPanels, setOpenPanels] = useState<Record<string, boolean>>({});
 
   const lookProducts = products.filter((item) => item.id !== product.id).slice(0, 2);
+  const selectedVariant = product.variants.find(
+    (variant) =>
+      variant.available &&
+      variant.options.Размер === selectedSize &&
+      variant.options.Цвет === selectedColor?.name,
+  );
+
+  const isColorAvailable = (colorName: string) =>
+    product.variants.some(
+      (variant) =>
+        variant.available &&
+        variant.options.Цвет === colorName &&
+        (!selectedSize || variant.options.Размер === selectedSize),
+    );
+
+  const isSizeAvailable = (size: string) =>
+    product.variants.some(
+      (variant) =>
+        variant.available &&
+        variant.options.Размер === size &&
+        (!selectedColor || variant.options.Цвет === selectedColor.name),
+    );
 
   const handleAddToCart = () => {
     if (!selectedSize) {
@@ -65,6 +98,12 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
     }
 
     if (!selectedColor) {
+      setError("Пожалуйста, выберите цвет");
+      return;
+    }
+
+    if (!selectedVariant) {
+      setError("Выбранного варианта нет в наличии");
       return;
     }
 
@@ -118,7 +157,7 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
             <div className={styles.productHeader}>
               <p className={styles.category}>{product.category}</p>
               <h1 className={styles.title}>{product.name}</h1>
-              <p className={styles.price}>{formatPrice(product.price)}</p>
+              <p className={styles.price}>{formatPrice(selectedVariant?.price ?? product.price)}</p>
             </div>
 
             <section className={styles.optionSection} aria-labelledby="color-title">
@@ -126,8 +165,9 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
                 Цвет: {selectedColor?.name}
               </h2>
               <div className={styles.colorList}>
-                {product.colors.map((color) => {
-                  const isSelected = selectedColor?.hex === color.hex;
+                {colors.map((color) => {
+                  const isSelected = selectedColor?.name === color.name;
+                  const isDisabled = !isColorAvailable(color.name);
 
                   return (
                     <button
@@ -135,9 +175,13 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
                       key={color.name}
                       className={`${styles.colorDot} ${isSelected ? styles.colorDotActive : ""}`}
                       style={{ backgroundColor: color.hex }}
-                      onClick={() => setSelectedColor(color)}
+                      onClick={() => {
+                        setSelectedColor(color);
+                        setError("");
+                      }}
                       aria-label={`Выбрать цвет ${color.name}`}
                       aria-pressed={isSelected}
+                      disabled={isDisabled}
                     />
                   );
                 })}
@@ -154,8 +198,9 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
                 </button>
               </div>
               <div className={styles.sizeList} role="group" aria-label="Выбор размера">
-                {product.availableSizes.map((size) => {
+                {sizes.map((size) => {
                   const isSelected = selectedSize === size;
+                  const isDisabled = !isSizeAvailable(size);
 
                   return (
                     <button
@@ -167,6 +212,7 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
                         setError("");
                       }}
                       aria-pressed={isSelected}
+                      disabled={isDisabled}
                     >
                       {size}
                     </button>
