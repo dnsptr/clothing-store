@@ -91,6 +91,8 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
 
   return {
     id: frontendId,
+    productId: product.id,
+    handle: product.handle,
     name: product.title,
     price: typeof price === "number" ? price : (fallback?.price ?? 0),
     category: category?.name || fallback?.category || "Каталог",
@@ -99,6 +101,9 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
     availableSizes: sizes.length ? sizes : (fallback?.availableSizes ?? []),
     images: images.length ? images : (fallback?.images ?? []),
     colors: colors.length ? colors : (fallback?.colors ?? []),
+    options: [],
+    variants: [],
+    available: !Boolean(metadata.is_sold_out),
     isNew: Boolean(metadata.is_new),
     isSoldOut: Boolean(metadata.is_sold_out),
   };

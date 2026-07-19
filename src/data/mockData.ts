@@ -1,16 +1,6 @@
-export interface Product {
-  id: string;
-  name: string;
-  price: number;
-  category: string;
-  categorySlug: string;
-  materialSlugs: string[];
-  availableSizes: string[];
-  images: string[];
-  colors: { name: string; hex: string }[];
-  isNew?: boolean;
-  isSoldOut?: boolean;
-}
+import type { Product } from "../lib/product";
+
+export type { Product } from "../lib/product";
 
 export interface Collection {
   id: string;
@@ -44,6 +34,38 @@ export const MOCK_COLLECTIONS: Collection[] = [
     link: "/catalog?category=accessories",
   },
 ];
+
+type MockProduct = Omit<
+  Product,
+  "productId" | "handle" | "options" | "variants" | "available"
+>;
+
+function createMockProduct(product: MockProduct): Product {
+  const sizes = product.availableSizes.length ? product.availableSizes : ["One Size"];
+  const colors = product.colors.length ? product.colors : [{ name: "Единственный", hex: "#000000" }];
+  const available = !product.isSoldOut;
+
+  return {
+    ...product,
+    productId: `mock-product-${product.id}`,
+    handle: `mario-mikke-${product.id}`,
+    availableSizes: sizes,
+    options: [
+      { title: "Размер", values: sizes },
+      { title: "Цвет", values: colors.map((color) => color.name) },
+    ],
+    variants: sizes.flatMap((size) =>
+      colors.map((color, colorIndex) => ({
+        variantId: `mock-variant-${product.id}-${size}-${colorIndex + 1}`,
+        sku: `MM-${product.id.padStart(3, "0")}-${size.replace(/\s+/g, "-").toUpperCase()}-${colorIndex + 1}`,
+        options: { Размер: size, Цвет: color.name },
+        price: product.price,
+        available,
+      })),
+    ),
+    available,
+  };
+}
 
 export const MOCK_PRODUCTS: Product[] = [
   {
@@ -218,7 +240,7 @@ export const MOCK_PRODUCTS: Product[] = [
       { name: "Черный", hex: "#1C1B1A" },
     ],
   },
-];
+].map(createMockProduct);
 
 export const MOCK_OUTFITS: CollectionOutfit[] = [
   {
