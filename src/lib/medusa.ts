@@ -39,6 +39,10 @@ interface MedusaRegionsResponse {
 
 export interface MedusaCart {
   id: string;
+  total?: number | null;
+  subtotal?: number | null;
+  tax_total?: number | null;
+  discount_total?: number | null;
   items?: {
     id: string;
     variant_id?: string | null;

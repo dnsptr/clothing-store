@@ -69,17 +69,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [isCartHydrated, setIsCartHydrated] = useState(false);
   const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>([]);
   const [isFavoritesHydrated, setIsFavoritesHydrated] = useState(false);
+  const [serverCartTotal, setServerCartTotal] = useState<number | null>(null);
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
-  const cartTotal = cartItems.reduce(
-    (acc, item) => acc + item.product.price * item.quantity,
-    0
-  );
+  const cartTotal = isMedusaConfigured && serverCartTotal !== null
+    ? serverCartTotal
+    : cartItems.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const favoriteCount = favoriteProductIds.length;
 
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const syncRemoteCart = (items: NonNullable<Awaited<ReturnType<typeof retrieveMedusaCart>>["items"]>) => {
+  const syncRemoteCart = (cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
+    setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
+    const items = cart.items || [];
     setCartItems((currentItems) =>
       currentItems
         .flatMap((item) => {
@@ -124,7 +126,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!cartId) return;
 
     retrieveMedusaCart(cartId)
-      .then((cart) => syncRemoteCart(cart.items || []))
+      .then(syncRemoteCart)
       .catch(() => window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY));
   }, [isCartHydrated]);
 
@@ -184,6 +186,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (isMedusaConfigured) {
       const cartId = await getMedusaCartId();
       const cart = await addMedusaCartLineItem(cartId, newItem.variantId, newItem.quantity);
+      setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
       const lineItem = cart.items?.find((item) => item.variant_id === newItem.variantId);
       newItem = { ...newItem, lineItemId: lineItem?.id, quantity: lineItem?.quantity ?? newItem.quantity };
     }
@@ -220,7 +223,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
     if (isMedusaConfigured && item?.lineItemId) {
       const cartId = await getMedusaCartId();
-      await removeMedusaCartLineItem(cartId, item.lineItemId);
+      const cart = await removeMedusaCartLineItem(cartId, item.lineItemId);
+      setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
     }
     setCartItems((prevItems) =>
       prevItems.filter(
@@ -246,7 +250,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     );
     if (isMedusaConfigured && item?.lineItemId) {
       const cartId = await getMedusaCartId();
-      await updateMedusaCartLineItem(cartId, item.lineItemId, newQuantity);
+      const cart = await updateMedusaCartLineItem(cartId, item.lineItemId, newQuantity);
+      setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
     }
     
     setCartItems((prevItems) =>
