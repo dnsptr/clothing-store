@@ -9,7 +9,16 @@ interface MedusaStoreProduct {
   metadata?: unknown;
   images?: { url?: string | null }[];
   categories?: { name?: string | null; handle?: string | null }[];
+  options?: {
+    title?: string | null;
+    values?: { value?: string | null }[];
+  }[];
   variants?: {
+    id?: string | null;
+    sku?: string | null;
+    manage_inventory?: boolean | null;
+    allow_backorder?: boolean | null;
+    inventory_quantity?: number | null;
     calculated_price?: {
       calculated_amount?: number | null;
     } | null;
@@ -59,6 +68,21 @@ function unique(values: string[]) {
   return [...new Set(values)];
 }
 
+function getVariantOptions(variant: NonNullable<MedusaStoreProduct["variants"]>[number]) {
+  return Object.fromEntries(
+    (variant.options || []).flatMap((option) => {
+      const title = option.option?.title;
+      const value = option.value;
+      return typeof title === "string" && typeof value === "string" ? [[title, value]] : [];
+    }),
+  );
+}
+
+function isVariantAvailable(variant: NonNullable<MedusaStoreProduct["variants"]>[number]) {
+  if (variant.manage_inventory === false || variant.allow_backorder === true) return true;
+  return typeof variant.inventory_quantity === "number" && variant.inventory_quantity > 0;
+}
+
 function normalizeImageUrl(url: string) {
   try {
     const parsedUrl = new URL(url);
@@ -74,20 +98,43 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
     typeof metadata.frontend_id === "string" ? metadata.frontend_id : product.id;
   const fallback = MOCK_PRODUCTS.find((item) => item.id === frontendId);
   const category = product.categories?.[0];
-  const sizes = unique(
-    (product.variants || []).flatMap((variant) =>
-      (variant.options || [])
-        .filter((option) => option.option?.title === "Размер")
-        .flatMap((option) => (typeof option.value === "string" ? [option.value] : [])),
-    ),
-  );
+  const variants = (product.variants || []).flatMap((variant) => {
+    const price = variant.calculated_price?.calculated_amount;
+    if (
+      typeof variant.id !== "string" ||
+      typeof variant.sku !== "string" ||
+      typeof price !== "number"
+    ) {
+      return [];
+    }
+
+    return [{
+      variantId: variant.id,
+      sku: variant.sku,
+      options: getVariantOptions(variant),
+      price,
+      available: isVariantAvailable(variant),
+    }];
+  });
+  const options = (product.options || []).flatMap((option) => {
+    if (typeof option.title !== "string") return [];
+
+    return [{
+      title: option.title,
+      values: unique(
+        (option.values || []).flatMap((value) =>
+          typeof value.value === "string" ? [value.value] : [],
+        ),
+      ),
+    }];
+  });
+  const sizes = options.find((option) => option.title === "Размер")?.values ?? [];
   const images = (product.images || []).flatMap((image) =>
     typeof image.url === "string" ? [normalizeImageUrl(image.url)] : [],
   );
   const colors = getColors(metadata.colors);
-  const price = product.variants?.find(
-    (variant) => typeof variant.calculated_price?.calculated_amount === "number",
-  )?.calculated_price?.calculated_amount;
+  const price = variants[0]?.price;
+  const available = variants.some((variant) => variant.available);
 
   return {
     id: frontendId,
@@ -98,14 +145,14 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
     category: category?.name || fallback?.category || "Каталог",
     categorySlug: category?.handle || fallback?.categorySlug || "catalog",
     materialSlugs: getStringArray(metadata.material_slugs),
-    availableSizes: sizes.length ? sizes : (fallback?.availableSizes ?? []),
+    availableSizes: sizes,
     images: images.length ? images : (fallback?.images ?? []),
     colors: colors.length ? colors : (fallback?.colors ?? []),
-    options: [],
-    variants: [],
-    available: !Boolean(metadata.is_sold_out),
+    options,
+    variants,
+    available,
     isNew: Boolean(metadata.is_new),
-    isSoldOut: Boolean(metadata.is_sold_out),
+    isSoldOut: !available,
   };
 }
 
@@ -140,7 +187,7 @@ export async function fetchMedusaProducts(signal?: AbortSignal) {
   const regionId = await getRussianRegionId(signal);
   const params = new URLSearchParams({
     limit: "100",
-    fields: "*variants.calculated_price,*variants.options,*categories,*images,+metadata",
+    fields: "*variants.calculated_price,*variants.options,+variants.inventory_quantity,*options,*categories,*images,+metadata",
   });
 
   if (regionId) params.set("region_id", regionId);
