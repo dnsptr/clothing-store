@@ -2,6 +2,7 @@ import { MedusaContainer } from "@medusajs/framework";
 import {
   ContainerRegistrationKeys,
   ModuleRegistrationName,
+  Modules,
   ProductStatus,
 } from "@medusajs/framework/utils";
 import {
@@ -35,6 +36,7 @@ type ExecArgs = {
 
 export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
+  const link = container.resolve(ContainerRegistrationKeys.LINK);
   const query = container.resolve(ContainerRegistrationKeys.QUERY);
   const fulfillmentModuleService = container.resolve(ModuleRegistrationName.FULFILLMENT);
   const storefrontUrl = (
@@ -138,22 +140,35 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     );
   }
 
-  const { data: serviceZones } = await query.graph({
-    entity: "service_zone",
-    fields: ["id", "geo_zones.country_code"],
+  const { data: fulfillmentSets } = await query.graph({
+    entity: "fulfillment_set",
+    fields: ["id", "name", "service_zones.id"],
   });
-  const serviceZone = serviceZones[0];
+  const existingRuFulfillmentSet = fulfillmentSets.find(
+    (fulfillmentSet) => fulfillmentSet.name === "MVP Россия delivery",
+  );
+  let ruServiceZoneId = existingRuFulfillmentSet?.service_zones[0]?.id;
 
-  if (!serviceZone) {
-    throw new Error("No fulfillment service zone exists.");
+  if (!ruServiceZoneId) {
+    const createdRuFulfillmentSet = await fulfillmentModuleService.createFulfillmentSets({
+      name: "MVP Россия delivery",
+      type: "shipping",
+      service_zones: [
+        {
+          name: "Россия",
+          geo_zones: [{ country_code: "ru", type: "country" }],
+        },
+      ],
+    });
+    ruServiceZoneId = createdRuFulfillmentSet.service_zones[0]?.id;
+    await link.create({
+      [Modules.STOCK_LOCATION]: { stock_location_id: stockLocation.id },
+      [Modules.FULFILLMENT]: { fulfillment_set_id: createdRuFulfillmentSet.id },
+    });
   }
 
-  if (!serviceZone.geo_zones?.some((zone) => zone.country_code === "ru")) {
-    await fulfillmentModuleService.createGeoZones({
-      service_zone_id: serviceZone.id,
-      type: "country",
-      country_code: "ru",
-    });
+  if (!ruServiceZoneId) {
+    throw new Error("RU fulfillment set has no service zone.");
   }
 
   const { data: shippingOptions } = await query.graph({
@@ -161,14 +176,18 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     fields: ["id", "name", "service_zone_id"],
   });
 
-  if (!shippingOptions.some((option) => option.name === "MVP доставка по России")) {
+  const ruShippingOption = shippingOptions.find(
+    (option) => option.name === "MVP доставка по России",
+  );
+
+  if (!ruShippingOption) {
     await createShippingOptionsWorkflow(container).run({
       input: [
         {
           name: "MVP доставка по России",
           price_type: "flat",
           provider_id: "manual_manual",
-          service_zone_id: serviceZone.id,
+          service_zone_id: ruServiceZoneId,
           shipping_profile_id: shippingProfile.id,
           type: {
             label: "MVP доставка",
@@ -182,6 +201,10 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
           ],
         },
       ],
+    });
+  } else if (ruShippingOption.service_zone_id !== ruServiceZoneId) {
+    await fulfillmentModuleService.updateShippingOptions(ruShippingOption.id, {
+      service_zone_id: ruServiceZoneId,
     });
   }
 
