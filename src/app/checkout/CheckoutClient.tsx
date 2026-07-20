@@ -12,7 +12,7 @@ import styles from "./checkout.module.css";
 
 export default function CheckoutClient() {
   const { products } = useCatalog();
-  const { cartItems, cartTotal, addToCart, updateQuantity, removeFromCart } = useCart();
+  const { cartItems, cartTotal, addToCart, prepareCheckout, updateQuantity, removeFromCart } = useCart();
 
   const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");
   const [form, setForm] = useState({
@@ -26,7 +26,8 @@ export default function CheckoutClient() {
     zip: "",
     comment: "",
   });
-  const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
   const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
 
   // Recommend products not already in cart
@@ -38,25 +39,18 @@ export default function CheckoutClient() {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitted(true);
-  };
-
-  if (submitted) {
-    return (
-      <div className={`${styles.empty} ${styles.emptySubmitted}`}>
-        <svg width="56" height="56" fill="none" viewBox="0 0 24 24" stroke="var(--text-primary)">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <h2 className={styles.emptyTitle}>Заказ оформлен!</h2>
-        <p className={styles.emptyText}>
-          Мы отправили подтверждение на&nbsp;<strong>{form.email || "ваш email"}</strong>.<br />
-          Менеджер свяжется с вами в течение 1 рабочего дня.
-        </p>
-        <Link href="/" className={styles.emptyLink}>Вернуться на главную</Link>
-      </div>
-    );
+    setIsSubmitting(true);
+    setSubmitMessage("");
+    try {
+      await prepareCheckout(form);
+      setSubmitMessage("Контакты и тестовая доставка сохранены. Подтверждение заказа будет доступно после настройки payment session.");
+    } catch (error) {
+      setSubmitMessage(error instanceof Error ? error.message : "Не удалось сохранить checkout.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   if (cartItems.length === 0) {
@@ -368,9 +362,10 @@ export default function CheckoutClient() {
               />
             </div>
 
-            <button type="submit" className={styles.submitBtn}>
-              Подтвердить заказ
+            <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
+              {isSubmitting ? "Сохраняем..." : "Сохранить доставку"}
             </button>
+            {submitMessage && <p className={styles.formNote}>{submitMessage}</p>}
             <p className={styles.formNote}>
               Нажимая кнопку, вы соглашаетесь с условиями обработки персональных данных и публичной офертой.
             </p>

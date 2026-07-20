@@ -5,12 +5,15 @@ import { Product } from "../data/mockData";
 import { useCatalog } from "./CatalogContext";
 import {
   addMedusaCartLineItem,
+  addMedusaCartShippingMethod,
   createMedusaCart,
   isMedusaConfigured,
+  listMedusaShippingOptions,
   removeMedusaCartLineItem,
   retrieveMedusaCart,
   storefrontDataMode,
   updateMedusaCartLineItem,
+  updateMedusaCart,
 } from "../lib/medusa";
 
 export interface CartItem {
@@ -22,6 +25,17 @@ export interface CartItem {
   quantity: number;
 }
 
+export interface CheckoutDetails {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  city: string;
+  address: string;
+  apartment: string;
+  zip: string;
+}
+
 interface CartContextType {
   // Cart States
   cartItems: CartItem[];
@@ -29,6 +43,7 @@ interface CartContextType {
   addToCart: (item: CartItem) => Promise<void>;
   removeFromCart: (productId: string, size: string, colorHex: string) => Promise<void>;
   updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
+  prepareCheckout: (details: CheckoutDetails) => Promise<void>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
@@ -84,7 +99,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const syncRemoteCart = useEffectEvent((cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
+  const syncRemoteCart = (cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
     setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
     const items = cart.items || [];
     setCartItems((currentItems) => {
@@ -113,6 +128,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       cartItemsRef.current = nextItems;
       return nextItems;
     });
+  };
+
+  const restoreRemoteCart = useEffectEvent((cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
+    syncRemoteCart(cart);
   });
 
   useEffect(() => {
@@ -154,7 +173,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!cartId) return;
 
     retrieveMedusaCart(cartId)
-      .then(syncRemoteCart)
+      .then(restoreRemoteCart)
       .catch((error: unknown) => console.warn("Unable to restore Medusa cart.", error));
   }, [isCartHydrated, products]);
 
@@ -313,6 +332,34 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     });
   });
 
+  const prepareCheckout = (details: CheckoutDetails) => enqueueCartMutation(async () => {
+    if (!isMedusaConfigured) {
+      throw new Error("Checkout requires Medusa mode with a configured Store API.");
+    }
+
+    const cartId = await getMedusaCartId();
+    await updateMedusaCart(cartId, {
+      email: details.email,
+      shipping_address: {
+        first_name: details.firstName,
+        last_name: details.lastName,
+        phone: details.phone,
+        address_1: details.address,
+        address_2: details.apartment || undefined,
+        city: details.city,
+        country_code: "ru",
+        postal_code: details.zip,
+      },
+    });
+    const shippingOption = (await listMedusaShippingOptions(cartId)).find(
+      (option) => option.name === "MVP доставка по России",
+    );
+    if (!shippingOption) {
+      throw new Error("No manual shipping option is available for this address.");
+    }
+    syncRemoteCart(await addMedusaCartShippingMethod(cartId, shippingOption.id));
+  });
+
   const toggleFavorite = (productId: string) => {
     setFavoriteProductIds((previous) =>
       previous.includes(productId)
@@ -345,6 +392,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         addToCart,
         removeFromCart,
         updateQuantity,
+        prepareCheckout,
         toggleCart,
         setIsCartOpen,
         cartCount,

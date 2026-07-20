@@ -59,6 +59,10 @@ interface MedusaLineItemDeleteResponse {
   parent: MedusaCart;
 }
 
+interface MedusaShippingOptionsResponse {
+  shipping_options?: { id: string; name: string }[];
+}
+
 const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, "");
 const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
 const configuredRegionId = process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
@@ -276,4 +280,27 @@ export async function removeMedusaCartLineItem(cartId: string, lineItemId: strin
     method: "DELETE",
   });
   return response.parent;
+}
+
+export async function updateMedusaCart(cartId: string, body: Record<string, unknown>) {
+  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}`, {
+    method: "POST",
+    body,
+  });
+  return response.cart;
+}
+
+export async function listMedusaShippingOptions(cartId: string) {
+  const response = await medusaRequest<MedusaShippingOptionsResponse>(
+    `/store/shipping-options?cart_id=${encodeURIComponent(cartId)}`,
+  );
+  return response.shipping_options || [];
+}
+
+export async function addMedusaCartShippingMethod(cartId: string, optionId: string) {
+  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}/shipping-methods`, {
+    method: "POST",
+    body: { option_id: optionId },
+  });
+  return response.cart;
 }
