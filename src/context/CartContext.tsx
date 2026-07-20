@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useEffectEvent, useRef, useState } from "react";
 import { Product } from "../data/mockData";
+import { useCatalog } from "./CatalogContext";
 import {
   addMedusaCartLineItem,
   createMedusaCart,
@@ -64,6 +65,7 @@ function isCartItem(value: unknown): value is CartItem {
 }
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
+  const { products } = useCatalog();
   // Cart items
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -71,6 +73,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>([]);
   const [isFavoritesHydrated, setIsFavoritesHydrated] = useState(false);
   const [serverCartTotal, setServerCartTotal] = useState<number | null>(null);
+  const cartItemsRef = useRef<CartItem[]>([]);
+  const mutationQueue = useRef(Promise.resolve());
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const cartTotal = isMedusaConfigured && serverCartTotal !== null
     ? serverCartTotal
@@ -80,17 +84,40 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const syncRemoteCart = (cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
+  const syncRemoteCart = useEffectEvent((cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
     setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
     const items = cart.items || [];
-    setCartItems((currentItems) =>
-      currentItems
-        .flatMap((item) => {
-          const remoteItem = items.find((remote) => remote.variant_id === item.variantId);
-          return remoteItem ? [{ ...item, lineItemId: remoteItem.id, quantity: remoteItem.quantity }] : [];
-        }),
-    );
-  };
+    setCartItems((currentItems) => {
+      const nextItems = items.flatMap((remoteItem) => {
+        const existingItem = currentItems.find((item) => item.variantId === remoteItem.variant_id);
+        if (existingItem) {
+          return [{ ...existingItem, lineItemId: remoteItem.id, quantity: remoteItem.quantity }];
+        }
+
+        const product = products.find((candidate) =>
+          candidate.variants.some((variant) => variant.variantId === remoteItem.variant_id),
+        );
+        const variant = product?.variants.find((candidate) => candidate.variantId === remoteItem.variant_id);
+        if (!product || !variant) return [];
+
+        const colorName = variant.options.Цвет ?? "";
+        return [{
+          product,
+          selectedSize: variant.options.Размер ?? "",
+          selectedColor: product.colors.find((color) => color.name === colorName) ?? { name: colorName, hex: "#808080" },
+          variantId: variant.variantId,
+          lineItemId: remoteItem.id,
+          quantity: remoteItem.quantity,
+        }];
+      });
+      cartItemsRef.current = nextItems;
+      return nextItems;
+    });
+  });
+
+  useEffect(() => {
+    cartItemsRef.current = cartItems;
+  }, [cartItems]);
 
   useEffect(() => {
     let isMounted = true;
@@ -128,8 +155,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     retrieveMedusaCart(cartId)
       .then(syncRemoteCart)
-      .catch(() => window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY));
-  }, [isCartHydrated]);
+      .catch((error: unknown) => console.warn("Unable to restore Medusa cart.", error));
+  }, [isCartHydrated, products]);
 
   useEffect(() => {
     if (!isCartHydrated) return;
@@ -183,7 +210,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return cart.id;
   };
 
-  const addToCart = async (newItem: CartItem) => {
+  const enqueueCartMutation = <T,>(operation: () => Promise<T>) => {
+    const next = mutationQueue.current.then(operation, operation);
+    mutationQueue.current = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+
+  const addToCart = (newItem: CartItem) => enqueueCartMutation(async () => {
     if (storefrontDataMode === "medusa" && !isMedusaConfigured) {
       throw new Error("Medusa mode requires a backend URL and publishable API key.");
     }
@@ -214,16 +250,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             ? newItem.quantity
             : updatedItems[existingItemIndex].quantity + newItem.quantity,
         };
+        cartItemsRef.current = updatedItems;
         return updatedItems;
       }
 
-      return [...prevItems, newItem];
+      const updatedItems = [...prevItems, newItem];
+      cartItemsRef.current = updatedItems;
+      return updatedItems;
     });
     
-  };
+  });
 
-  const removeFromCart = async (productId: string, size: string, colorHex: string) => {
-    const item = cartItems.find(
+  const removeFromCart = (productId: string, size: string, colorHex: string) => enqueueCartMutation(async () => {
+    const item = cartItemsRef.current.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
     if (storefrontDataMode === "medusa" && item?.lineItemId) {
@@ -231,26 +270,28 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const cart = await removeMedusaCartLineItem(cartId, item.lineItemId);
       setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
     }
-    setCartItems((prevItems) =>
-      prevItems.filter(
+    setCartItems((prevItems) => {
+      const updatedItems = prevItems.filter(
         (item) =>
           !(
             item.product.id === productId &&
             item.selectedSize === size &&
             item.selectedColor.hex === colorHex
           )
-      )
-    );
-  };
+      );
+      cartItemsRef.current = updatedItems;
+      return updatedItems;
+    });
+  });
 
-  const updateQuantity = async (
+  const updateQuantity = (
     productId: string,
     size: string,
     colorHex: string,
     newQuantity: number
-  ) => {
+  ) => enqueueCartMutation(async () => {
     if (newQuantity < 1) return;
-    const item = cartItems.find(
+    const item = cartItemsRef.current.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
     if (storefrontDataMode === "medusa" && item?.lineItemId) {
@@ -259,16 +300,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
     }
     
-    setCartItems((prevItems) =>
-      prevItems.map((item) =>
+    setCartItems((prevItems) => {
+      const updatedItems = prevItems.map((item) =>
         item.product.id === productId &&
         item.selectedSize === size &&
         item.selectedColor.hex === colorHex
           ? { ...item, quantity: newQuantity }
           : item
-      )
-    );
-  };
+      );
+      cartItemsRef.current = updatedItems;
+      return updatedItems;
+    });
+  });
 
   const toggleFavorite = (productId: string) => {
     setFavoriteProductIds((previous) =>
