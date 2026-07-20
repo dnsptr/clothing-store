@@ -10,6 +10,7 @@ interface MedusaStoreProduct {
   images?: { url?: string | null }[];
   categories?: { name?: string | null; handle?: string | null }[];
   options?: {
+    id?: string | null;
     title?: string | null;
     values?: { value?: string | null }[];
   }[];
@@ -24,7 +25,7 @@ interface MedusaStoreProduct {
     } | null;
     options?: {
       value?: string | null;
-      option?: { title?: string | null } | null;
+      option_id?: string | null;
     }[];
   }[];
 }
@@ -52,6 +53,10 @@ export interface MedusaCart {
 
 interface MedusaCartResponse {
   cart: MedusaCart;
+}
+
+interface MedusaLineItemDeleteResponse {
+  parent: MedusaCart;
 }
 
 const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, "");
@@ -88,10 +93,13 @@ function unique(values: string[]) {
   return [...new Set(values)];
 }
 
-function getVariantOptions(variant: NonNullable<MedusaStoreProduct["variants"]>[number]) {
+function getVariantOptions(
+  variant: NonNullable<MedusaStoreProduct["variants"]>[number],
+  optionTitlesById: Map<string, string>,
+) {
   return Object.fromEntries(
     (variant.options || []).flatMap((option) => {
-      const title = option.option?.title;
+      const title = option.option_id ? optionTitlesById.get(option.option_id) : undefined;
       const value = option.value;
       return typeof title === "string" && typeof value === "string" ? [[title, value]] : [];
     }),
@@ -118,11 +126,17 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
     typeof metadata.frontend_id === "string" ? metadata.frontend_id : product.id;
   const fallback = MOCK_PRODUCTS.find((item) => item.id === frontendId);
   const category = product.categories?.[0];
+  const optionTitlesById = new Map(
+    (product.options || []).flatMap((option) =>
+      typeof option.title === "string" && typeof option.id === "string"
+        ? [[option.id, option.title]]
+        : [],
+    ),
+  );
   const variants = (product.variants || []).flatMap((variant) => {
     const price = variant.calculated_price?.calculated_amount;
     if (
       typeof variant.id !== "string" ||
-      typeof variant.sku !== "string" ||
       typeof price !== "number"
     ) {
       return [];
@@ -130,8 +144,8 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product {
 
     return [{
       variantId: variant.id,
-      sku: variant.sku,
-      options: getVariantOptions(variant),
+      sku: variant.sku ?? null,
+      options: getVariantOptions(variant, optionTitlesById),
       price,
       available: isVariantAvailable(variant),
     }];
@@ -215,7 +229,7 @@ export async function fetchMedusaProducts(signal?: AbortSignal) {
   const regionId = await getRussianRegionId(signal);
   const params = new URLSearchParams({
     limit: "100",
-    fields: "*variants.calculated_price,*variants.options,+variants.inventory_quantity,*options,*categories,*images,+metadata",
+    fields: "*variants.calculated_price,*variants.options,+variants.inventory_quantity,*options,*options.values,*categories,*images,+metadata",
   });
 
   if (regionId) params.set("region_id", regionId);
@@ -258,8 +272,8 @@ export async function updateMedusaCartLineItem(cartId: string, lineItemId: strin
 }
 
 export async function removeMedusaCartLineItem(cartId: string, lineItemId: string) {
-  const response = await medusaRequest<MedusaCartResponse>(`/store/carts/${cartId}/line-items/${lineItemId}`, {
+  const response = await medusaRequest<MedusaLineItemDeleteResponse>(`/store/carts/${cartId}/line-items/${lineItemId}`, {
     method: "DELETE",
   });
-  return response.cart;
+  return response.parent;
 }

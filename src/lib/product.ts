@@ -5,7 +5,7 @@ export interface ProductOption {
 
 export interface ProductVariant {
   variantId: string;
-  sku: string;
+  sku: string | null;
   options: Record<string, string>;
   price: number;
   available: boolean;
