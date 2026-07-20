@@ -46,8 +46,9 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
 }
 
 export default function ProductDetailClient({ product: initialProduct }: { product: Product }) {
-  const { products } = useCatalog();
+  const { products, source } = useCatalog();
   const product = products.find((item) => item.id === initialProduct.id) ?? initialProduct;
+  const isMedusaProductLoaded = source === "mock" || products.some((item) => item.id === initialProduct.id);
   const { addToCart } = useCart();
   const colorValues = product.options.find((option) => option.title === "Цвет")?.values ?? [];
   const colors = colorValues.map(
@@ -92,6 +93,10 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
     );
 
   const handleAddToCart = () => {
+    if (!isMedusaProductLoaded) {
+      setError("Товар загружается из Medusa. Повторите попытку через несколько секунд.");
+      return;
+    }
     if (!selectedSize) {
       setError("Пожалуйста, выберите размер");
       return;

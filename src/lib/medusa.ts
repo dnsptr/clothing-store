@@ -58,7 +58,10 @@ const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, ""
 const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
 const configuredRegionId = process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
 
-export const isMedusaConfigured = Boolean(backendUrl && publishableKey);
+export const storefrontDataMode =
+  process.env.NEXT_PUBLIC_DATA_MODE === "medusa" ? "medusa" : "mock";
+export const isMedusaConfigured =
+  storefrontDataMode === "medusa" && Boolean(backendUrl && publishableKey);
 
 function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

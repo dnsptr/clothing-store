@@ -8,6 +8,7 @@ import {
   isMedusaConfigured,
   removeMedusaCartLineItem,
   retrieveMedusaCart,
+  storefrontDataMode,
   updateMedusaCartLineItem,
 } from "../lib/medusa";
 
@@ -44,7 +45,7 @@ interface CartContextType {
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
-const CART_STORAGE_KEY = "clothing-store-cart";
+const CART_STORAGE_KEY = `clothing-store-cart-${storefrontDataMode}`;
 const MEDUSA_CART_STORAGE_KEY = "clothing-store-medusa-cart";
 const FAVORITES_STORAGE_KEY = "clothing-store-favorites";
 
@@ -183,7 +184,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addToCart = async (newItem: CartItem) => {
-    if (isMedusaConfigured) {
+    if (storefrontDataMode === "medusa" && !isMedusaConfigured) {
+      throw new Error("Medusa mode requires a backend URL and publishable API key.");
+    }
+
+    if (storefrontDataMode === "medusa") {
       const cartId = await getMedusaCartId();
       const cart = await addMedusaCartLineItem(cartId, newItem.variantId, newItem.quantity);
       setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
@@ -205,7 +210,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         updatedItems[existingItemIndex] = {
           ...updatedItems[existingItemIndex],
           lineItemId: newItem.lineItemId ?? updatedItems[existingItemIndex].lineItemId,
-          quantity: isMedusaConfigured
+          quantity: storefrontDataMode === "medusa"
             ? newItem.quantity
             : updatedItems[existingItemIndex].quantity + newItem.quantity,
         };
@@ -221,7 +226,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const item = cartItems.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
-    if (isMedusaConfigured && item?.lineItemId) {
+    if (storefrontDataMode === "medusa" && item?.lineItemId) {
       const cartId = await getMedusaCartId();
       const cart = await removeMedusaCartLineItem(cartId, item.lineItemId);
       setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
@@ -248,7 +253,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const item = cartItems.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
-    if (isMedusaConfigured && item?.lineItemId) {
+    if (storefrontDataMode === "medusa" && item?.lineItemId) {
       const cartId = await getMedusaCartId();
       const cart = await updateMedusaCartLineItem(cartId, item.lineItemId, newQuantity);
       setServerCartTotal(typeof cart.total === "number" ? cart.total : null);

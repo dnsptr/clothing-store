@@ -2,40 +2,50 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { MOCK_PRODUCTS, type Product } from "../data/mockData";
-import { fetchMedusaProducts, isMedusaConfigured } from "../lib/medusa";
+import { fetchMedusaProducts, isMedusaConfigured, storefrontDataMode } from "../lib/medusa";
 
 interface CatalogContextValue {
   products: Product[];
   source: "medusa" | "mock";
+  status: "error" | "loading" | "ready";
 }
 
 const CatalogContext = createContext<CatalogContextValue | undefined>(undefined);
 
 export function CatalogProvider({ children }: { children: React.ReactNode }) {
-  const [products, setProducts] = useState(MOCK_PRODUCTS);
-  const [source, setSource] = useState<CatalogContextValue["source"]>("mock");
+  const [products, setProducts] = useState<Product[]>(
+    storefrontDataMode === "mock" ? MOCK_PRODUCTS : [],
+  );
+  const [status, setStatus] = useState<CatalogContextValue["status"]>(
+    storefrontDataMode === "mock" ? "ready" : isMedusaConfigured ? "loading" : "error",
+  );
+  const source = storefrontDataMode;
 
   useEffect(() => {
-    if (!isMedusaConfigured) return;
+    if (storefrontDataMode === "mock") return;
+
+    if (!isMedusaConfigured) {
+      return;
+    }
 
     const controller = new AbortController();
 
     fetchMedusaProducts(controller.signal)
       .then((nextProducts) => {
-        if (!nextProducts.length) return;
         setProducts(nextProducts);
-        setSource("medusa");
+        setStatus("ready");
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        console.warn("Medusa catalog is unavailable; using demo data.", error);
+        console.error("Medusa catalog is unavailable.", error);
+        setStatus("error");
       });
 
     return () => controller.abort();
   }, []);
 
   return (
-    <CatalogContext.Provider value={{ products, source }}>
+    <CatalogContext.Provider value={{ products, source, status }}>
       {children}
     </CatalogContext.Provider>
   );
