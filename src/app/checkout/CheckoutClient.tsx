@@ -12,7 +12,7 @@ import styles from "./checkout.module.css";
 
 export default function CheckoutClient() {
   const { products } = useCatalog();
-  const { cartItems, cartTotal, addToCart, prepareCheckout, updateQuantity, removeFromCart } = useCart();
+  const { cartItems, cartTotal, addToCart, completeCheckout, prepareCheckout, updateQuantity, removeFromCart } = useCart();
 
   const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");
   const [form, setForm] = useState({
@@ -28,6 +28,7 @@ export default function CheckoutClient() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+  const [orderId, setOrderId] = useState<string | null>(null);
   const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
 
   // Recommend products not already in cart
@@ -45,12 +46,23 @@ export default function CheckoutClient() {
     setSubmitMessage("");
     try {
       await prepareCheckout(form);
-      setSubmitMessage("Контакты и тестовая доставка сохранены. Подтверждение заказа будет доступно после настройки payment session.");
+      const order = await completeCheckout();
+      setOrderId(order.displayId ? String(order.displayId) : order.id);
     } catch (error) {
       setSubmitMessage(error instanceof Error ? error.message : "Не удалось сохранить checkout.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (orderId) {
+    return (
+      <div className={`${styles.empty} ${styles.emptySubmitted}`}>
+        <h2 className={styles.emptyTitle}>Заказ оформлен</h2>
+        <p className={styles.emptyText}>Тестовый заказ №{orderId} создан в Medusa.</p>
+        <Link href="/" className={styles.emptyLink}>Вернуться на главную</Link>
+      </div>
+    );
   }
 
   if (cartItems.length === 0) {
@@ -363,7 +375,7 @@ export default function CheckoutClient() {
             </div>
 
             <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
-              {isSubmitting ? "Сохраняем..." : "Сохранить доставку"}
+              {isSubmitting ? "Оформляем..." : "Подтвердить заказ"}
             </button>
             {submitMessage && <p className={styles.formNote}>{submitMessage}</p>}
             <p className={styles.formNote}>

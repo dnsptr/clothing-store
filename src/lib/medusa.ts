@@ -63,6 +63,14 @@ interface MedusaShippingOptionsResponse {
   shipping_options?: { id: string; name: string }[];
 }
 
+interface MedusaPaymentCollectionResponse {
+  payment_collection: { id: string };
+}
+
+type MedusaCompleteCartResponse =
+  | { type: "order"; order: { id: string; display_id?: number | null } }
+  | { type: "cart"; error: { message: string } };
+
 const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, "");
 const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
 const configuredRegionId = process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
@@ -303,4 +311,26 @@ export async function addMedusaCartShippingMethod(cartId: string, optionId: stri
     body: { option_id: optionId },
   });
   return response.cart;
+}
+
+export async function createMedusaPaymentCollection(cartId: string) {
+  const response = await medusaRequest<MedusaPaymentCollectionResponse>("/store/payment-collections", {
+    method: "POST",
+    body: { cart_id: cartId },
+  });
+  return response.payment_collection;
+}
+
+export async function initializeMedusaPaymentSession(paymentCollectionId: string) {
+  await medusaRequest(`/store/payment-collections/${paymentCollectionId}/payment-sessions`, {
+    method: "POST",
+    body: { provider_id: "pp_system_default" },
+  });
+}
+
+export async function completeMedusaCart(cartId: string) {
+  return medusaRequest<MedusaCompleteCartResponse>(`/store/carts/${cartId}/complete`, {
+    method: "POST",
+    body: {},
+  });
 }

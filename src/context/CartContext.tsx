@@ -6,8 +6,11 @@ import { useCatalog } from "./CatalogContext";
 import {
   addMedusaCartLineItem,
   addMedusaCartShippingMethod,
+  completeMedusaCart,
+  createMedusaPaymentCollection,
   createMedusaCart,
   isMedusaConfigured,
+  initializeMedusaPaymentSession,
   listMedusaShippingOptions,
   removeMedusaCartLineItem,
   retrieveMedusaCart,
@@ -44,6 +47,7 @@ interface CartContextType {
   removeFromCart: (productId: string, size: string, colorHex: string) => Promise<void>;
   updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
   prepareCheckout: (details: CheckoutDetails) => Promise<void>;
+  completeCheckout: () => Promise<{ id: string; displayId?: number | null }>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
@@ -360,6 +364,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     syncRemoteCart(await addMedusaCartShippingMethod(cartId, shippingOption.id));
   });
 
+  const completeCheckout = () => enqueueCartMutation(async () => {
+    if (!isMedusaConfigured) {
+      throw new Error("Checkout requires Medusa mode with a configured Store API.");
+    }
+
+    const cartId = await getMedusaCartId();
+    const paymentCollection = await createMedusaPaymentCollection(cartId);
+    await initializeMedusaPaymentSession(paymentCollection.id);
+    const response = await completeMedusaCart(cartId);
+    if (response.type !== "order") {
+      throw new Error(response.error.message);
+    }
+
+    window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY);
+    cartItemsRef.current = [];
+    setCartItems([]);
+    setServerCartTotal(null);
+    return { id: response.order.id, displayId: response.order.display_id };
+  });
+
   const toggleFavorite = (productId: string) => {
     setFavoriteProductIds((previous) =>
       previous.includes(productId)
@@ -393,6 +417,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         removeFromCart,
         updateQuantity,
         prepareCheckout,
+        completeCheckout,
         toggleCart,
         setIsCartOpen,
         cartCount,
