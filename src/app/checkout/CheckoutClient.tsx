@@ -7,12 +7,12 @@ import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
 import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
-import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
+import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
 import styles from "./checkout.module.css";
 
 export default function CheckoutClient() {
   const { products } = useCatalog();
-  const { cartItems, cartTotal, addToCart, completeCheckout, prepareCheckout, updateQuantity, removeFromCart } = useCart();
+  const { cartItems, cartShippingTotal, cartTotal, addToCart, completeCheckout, prepareCheckout, updateQuantity, removeFromCart } = useCart();
 
   const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");
   const [form, setForm] = useState({
@@ -34,7 +34,6 @@ export default function CheckoutClient() {
   // Recommend products not already in cart
   const cartIds = cartItems.map((i) => i.product.id);
   const recommendations = products.filter((p) => !cartIds.includes(p.id)).slice(0, 3);
-  const deliveryPriceLabel = formatPrice(DELIVERY.checkoutPrice);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -137,7 +136,7 @@ export default function CheckoutClient() {
 
                 {/* Price */}
                 <span className={styles.orderItemPrice}>
-                  {formatPrice(item.product.price * item.quantity)}
+                  {formatPrice(item.lineTotal ?? item.product.price * item.quantity)}
                 </span>
               </div>
             ))}
@@ -220,16 +219,16 @@ export default function CheckoutClient() {
             {cartItems.map((item, i) => (
               <div key={i} className={styles.summaryRow}>
                 <span>{item.product.name} × {item.quantity}</span>
-                <span>{formatPrice(item.product.price * item.quantity)}</span>
+                <span>{formatPrice(item.lineTotal ?? item.product.price * item.quantity)}</span>
               </div>
             ))}
             <div className={styles.summaryRow}>
               <span>Доставка</span>
-              <span>{delivery === "pickup" ? "Бесплатно" : formatPrice(DELIVERY.checkoutPrice)}</span>
+              <span>{cartShippingTotal === 0 ? "Бесплатно" : formatPrice(cartShippingTotal)}</span>
             </div>
             <div className={styles.summaryTotal}>
               <span>Итого</span>
-              <span>{formatPrice(cartTotal + (delivery === "pickup" ? 0 : DELIVERY.checkoutPrice))}</span>
+              <span>{formatPrice(cartTotal)}</span>
             </div>
           </div>
 
@@ -292,9 +291,9 @@ export default function CheckoutClient() {
 
             <div className={styles.deliveryOptions}>
               {[
-                { id: "courier", label: "Курьером", sub: `2–4 рабочих дня · ${deliveryPriceLabel}` },
+                { id: "courier", label: "Курьером", sub: "Тестовая доставка Medusa" },
                 { id: "pickup", label: "Самовывоз из магазина", sub: "Бесплатно" },
-                { id: "post", label: "Почтой России", sub: `5–10 рабочих дней · ${deliveryPriceLabel}` },
+                { id: "post", label: "Почтой России", sub: "Тестовая доставка Medusa" },
               ].map((opt) => (
                 <label key={opt.id} className={styles.deliveryOption}>
                   <input

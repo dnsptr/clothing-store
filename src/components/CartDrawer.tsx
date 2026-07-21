@@ -164,7 +164,7 @@ export default function CartDrawer() {
 
                     {/* Total Price for this item line */}
                     <span className={styles.itemPrice}>
-                      {formatPrice(item.product.price * item.quantity)}
+                      {formatPrice(item.lineTotal ?? item.product.price * item.quantity)}
                     </span>
                   </div>
                 </div>

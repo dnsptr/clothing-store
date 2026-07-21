@@ -7,7 +7,7 @@ import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
 import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
-import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE, DELIVERY } from "../../lib/shop";
+import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
 import styles from "./cart.module.css";
 
 function BookmarkIcon({ active = false }: { active?: boolean }) {
@@ -30,6 +30,7 @@ export default function CartPageClient() {
   const { products } = useCatalog();
   const {
     cartItems,
+    cartShippingTotal,
     cartTotal,
     addToCart,
     removeFromCart,
@@ -38,7 +39,6 @@ export default function CartPageClient() {
     toggleFavorite,
   } = useCart();
   const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
-  const delivery = cartTotal >= DELIVERY.cartFreeThreshold ? 0 : DELIVERY.cartPrice;
   const recommendations = products
     .filter((product) => !cartItems.some((item) => item.product.id === product.id))
     .slice(0, 5);
@@ -63,7 +63,7 @@ export default function CartPageClient() {
             <section className={styles.items} aria-label="Товары в корзине">
               {cartItems.map((item, index) => {
                 const itemKey = `${item.product.id}-${item.selectedSize}-${item.selectedColor.hex}-${index}`;
-                const lineTotal = item.product.price * item.quantity;
+                const lineTotal = item.lineTotal ?? item.product.price * item.quantity;
 
                 return (
                   <article className={styles.item} key={itemKey}>
@@ -210,11 +210,11 @@ export default function CartPageClient() {
             <dl className={styles.totals}>
               <div>
                 <dt>Доставка:</dt>
-                <dd>{delivery === 0 ? "Бесплатно" : formatPrice(delivery)}</dd>
+                <dd>{cartShippingTotal === 0 ? "Бесплатно" : formatPrice(cartShippingTotal)}</dd>
               </div>
               <div>
                 <dt>Итого:</dt>
-                <dd>{formatPrice(cartTotal + delivery)}</dd>
+                <dd>{formatPrice(cartTotal)}</dd>
               </div>
             </dl>
 

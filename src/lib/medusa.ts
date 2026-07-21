@@ -44,10 +44,13 @@ export interface MedusaCart {
   subtotal?: number | null;
   tax_total?: number | null;
   discount_total?: number | null;
+  shipping_total?: number | null;
   items?: {
     id: string;
     variant_id?: string | null;
     quantity: number;
+    unit_price?: number | null;
+    total?: number | null;
   }[];
 }
 
