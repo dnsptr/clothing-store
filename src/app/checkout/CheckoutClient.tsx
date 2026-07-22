@@ -10,12 +10,118 @@ import { formatPrice } from "../../lib/format";
 import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
 import styles from "./checkout.module.css";
 
+// ── Validation helpers ────────────────────────────────────────────────────────
+
+/** Strip spaces, parentheses and dashes, then return +7XXXXXXXXXX or null. */
+function normalizePhone(raw: string): string | null {
+  const stripped = raw.replace(/[\s()\-]/g, "");
+  if (/^(\+7|8)\d{10}$/.test(stripped)) {
+    // Normalise 8-prefixed numbers to +7
+    return stripped.startsWith("8") ? "+7" + stripped.slice(1) : stripped;
+  }
+  return null;
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+type FormFields = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  city: string;
+  address: string;
+  apartment: string;
+  zip: string;
+  comment: string;
+};
+
+type FormErrors = Record<string, string>;
+
+/**
+ * Validate all relevant fields. Returns an errors object; empty means valid.
+ * deliveryIsPickup — when true, city/zip/address are not required.
+ */
+function validateForm(form: FormFields, deliveryIsPickup: boolean): FormErrors {
+  const errors: FormErrors = {};
+
+  if (!form.firstName.trim()) {
+    errors.firstName = "Введите имя";
+  }
+
+  if (!form.lastName.trim()) {
+    errors.lastName = "Введите фамилию";
+  }
+
+  if (!form.email.trim()) {
+    errors.email = "Введите email";
+  } else if (!isValidEmail(form.email)) {
+    errors.email = "Неверный формат email";
+  }
+
+  if (!form.phone.trim()) {
+    errors.phone = "Введите телефон";
+  } else if (normalizePhone(form.phone) === null) {
+    errors.phone = "Введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX";
+  }
+
+  if (!deliveryIsPickup) {
+    if (!form.city.trim()) {
+      errors.city = "Введите город";
+    }
+
+    if (!form.zip.trim()) {
+      errors.zip = "Введите индекс";
+    } else if (!/^\d{6}$/.test(form.zip)) {
+      errors.zip = "Индекс — 6 цифр";
+    }
+
+    if (!form.address.trim()) {
+      errors.address = "Введите адрес";
+    }
+  }
+
+  return errors;
+}
+
+/** Validate a single field on blur, returning an error string or "". */
+function validateField(name: keyof FormFields, value: string, deliveryIsPickup: boolean): string {
+  switch (name) {
+    case "firstName":
+      return value.trim() ? "" : "Введите имя";
+    case "lastName":
+      return value.trim() ? "" : "Введите фамилию";
+    case "email":
+      if (!value.trim()) return "Введите email";
+      return isValidEmail(value) ? "" : "Неверный формат email";
+    case "phone":
+      if (!value.trim()) return "Введите телефон";
+      return normalizePhone(value) !== null ? "" : "Введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX";
+    case "city":
+      if (deliveryIsPickup) return "";
+      return value.trim() ? "" : "Введите город";
+    case "zip":
+      if (deliveryIsPickup) return "";
+      if (!value.trim()) return "Введите индекс";
+      return /^\d{6}$/.test(value) ? "" : "Индекс — 6 цифр";
+    case "address":
+      if (deliveryIsPickup) return "";
+      return value.trim() ? "" : "Введите адрес";
+    default:
+      return "";
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function CheckoutClient() {
   const { products } = useCatalog();
   const { cartItems, cartShippingTotal, cartTotal, addToCart, completeCheckout, prepareCheckout, updateQuantity, removeFromCart } = useCart();
 
   const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormFields>({
     firstName: "",
     lastName: "",
     email: "",
@@ -26,6 +132,7 @@ export default function CheckoutClient() {
     zip: "",
     comment: "",
   });
+  const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -36,15 +143,48 @@ export default function CheckoutClient() {
   const recommendations = products.filter((p) => !cartIds.includes(p.id)).slice(0, 3);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    // Clear the error as soon as the user starts correcting the field
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    const error = validateField(name as keyof FormFields, value, delivery === "pickup");
+    setErrors((prev) => ({ ...prev, [name]: error }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Run full validation
+    const newErrors = validateForm(form, delivery === "pickup");
+    if (Object.values(newErrors).some(Boolean)) {
+      setErrors(newErrors);
+      return;
+    }
+
+    // Build the normalised form data to pass downstream
+    const normalizedPhone = normalizePhone(form.phone) ?? form.phone;
+    const checkoutDetails = {
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim(),
+      email: form.email.trim(),
+      phone: normalizedPhone,
+      city: form.city.trim(),
+      address: form.address.trim(),
+      apartment: form.apartment.trim(),
+      zip: form.zip,
+      comment: form.comment,
+    };
+
     setIsSubmitting(true);
     setSubmitMessage("");
     try {
-      await prepareCheckout(form);
+      await prepareCheckout(checkoutDetails);
       const order = await completeCheckout();
       setOrderId(order.displayId ? String(order.displayId) : order.id);
     } catch (error) {
@@ -52,7 +192,7 @@ export default function CheckoutClient() {
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
 
   if (orderId) {
     return (
@@ -233,7 +373,7 @@ export default function CheckoutClient() {
           </div>
 
           {/* Form */}
-          <form className={styles.formSection} onSubmit={handleSubmit}>
+          <form className={styles.formSection} onSubmit={handleSubmit} noValidate>
             <p className={styles.sectionTitle}>Данные получателя</p>
 
             <div className={styles.formRow}>
@@ -242,22 +382,28 @@ export default function CheckoutClient() {
                 <input
                   name="firstName"
                   required
-                  className={styles.formInput}
+                  maxLength={100}
+                  className={`${styles.formInput}${errors.firstName ? ` ${styles.formInputError}` : ""}`}
                   placeholder="Анна"
                   value={form.firstName}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                 />
+                {errors.firstName && <span className={styles.fieldError}>{errors.firstName}</span>}
               </div>
               <div className={styles.formGroup}>
                 <label className={styles.formLabel}>Фамилия *</label>
                 <input
                   name="lastName"
                   required
-                  className={styles.formInput}
+                  maxLength={100}
+                  className={`${styles.formInput}${errors.lastName ? ` ${styles.formInputError}` : ""}`}
                   placeholder="Иванова"
                   value={form.lastName}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                 />
+                {errors.lastName && <span className={styles.fieldError}>{errors.lastName}</span>}
               </div>
             </div>
 
@@ -267,11 +413,13 @@ export default function CheckoutClient() {
                 name="email"
                 type="email"
                 required
-                className={styles.formInput}
+                className={`${styles.formInput}${errors.email ? ` ${styles.formInputError}` : ""}`}
                 placeholder="anna@example.com"
                 value={form.email}
                 onChange={handleChange}
+                onBlur={handleBlur}
               />
+              {errors.email && <span className={styles.fieldError}>{errors.email}</span>}
             </div>
 
             <div className={styles.formGroup}>
@@ -279,12 +427,15 @@ export default function CheckoutClient() {
               <input
                 name="phone"
                 type="tel"
+                inputMode="tel"
                 required
-                className={styles.formInput}
+                className={`${styles.formInput}${errors.phone ? ` ${styles.formInputError}` : ""}`}
                 placeholder="+7 (999) 000-00-00"
                 value={form.phone}
                 onChange={handleChange}
+                onBlur={handleBlur}
               />
+              {errors.phone && <span className={styles.fieldError}>{errors.phone}</span>}
             </div>
 
             <p className={`${styles.sectionTitle} ${styles.sectionTitleSpaced}`}>Доставка</p>
@@ -319,22 +470,30 @@ export default function CheckoutClient() {
                     <input
                       name="city"
                       required
-                      className={styles.formInput}
+                      maxLength={100}
+                      className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
                       placeholder="Москва"
                       value={form.city}
                       onChange={handleChange}
+                      onBlur={handleBlur}
                     />
+                    {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
                   </div>
                   <div className={styles.formGroup}>
                     <label className={styles.formLabel}>Индекс *</label>
                     <input
                       name="zip"
                       required
-                      className={styles.formInput}
+                      inputMode="numeric"
+                      pattern="[0-9]{6}"
+                      maxLength={6}
+                      className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
                       placeholder="123456"
                       value={form.zip}
                       onChange={handleChange}
+                      onBlur={handleBlur}
                     />
+                    {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
                   </div>
                 </div>
                 <div className={styles.formGroup}>
@@ -342,11 +501,13 @@ export default function CheckoutClient() {
                   <input
                     name="address"
                     required
-                    className={styles.formInput}
+                    className={`${styles.formInput}${errors.address ? ` ${styles.formInputError}` : ""}`}
                     placeholder="ул. Тверская, д. 1"
                     value={form.address}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                   />
+                  {errors.address && <span className={styles.fieldError}>{errors.address}</span>}
                 </div>
                 <div className={styles.formGroup}>
                   <label className={styles.formLabel}>Квартира / офис</label>
