@@ -1,0 +1,77 @@
+name: CI
+
+# Validation pipeline. Runs on every push to main and on every PR targeting main.
+# No deployment happens here — publishing to GitHub Pages is handled solely by
+# deploy-pages.yml (on push to main only), so a push to main produces exactly one
+# CI run and one deploy, while a pull request produces only this CI run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: CI only needs to read the repository.
+permissions:
+  contents: read
+
+# Cancel superseded CI runs for the same branch/PR to avoid piling up builds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (lint, typecheck, build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      # Build the static export exactly as it is built for Pages, so CI catches
+      # any regression in the deployable artifact. basePath is derived from the
+      # repository name (matches next.config.ts and deploy-pages.yml).
+      - name: Build static export
+        run: npm run build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+
+  backend:
+    name: Backend (build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: medusa-prototype/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: medusa-prototype
+
+      # `npm run build` -> `turbo build` -> `medusa build`. This compiles the
+      # backend and admin bundle only; it does not start the server and needs
+      # no Postgres/Redis connection.
+      - name: Build backend
+        run: npm run build
+        working-directory: medusa-prototype
