@@ -58,6 +58,7 @@ interface CartContextType {
   cartShippingTotal: number;
   cartTaxTotal: number;
   cartDiscountTotal: number;
+  isCartMutating: boolean;
   favoriteProductIds: string[];
   favoriteCount: number;
   toggleFavorite: (productId: string) => void;
@@ -99,12 +100,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [isFavoritesHydrated, setIsFavoritesHydrated] = useState(false);
   const [serverCartTotal, setServerCartTotal] = useState<number | null>(null);
   const [serverCartTotals, setServerCartTotals] = useState({ subtotal: 0, shipping: 0, tax: 0, discount: 0 });
+  const [mutationCount, setMutationCount] = useState(0);
   const cartItemsRef = useRef<CartItem[]>([]);
   const mutationQueue = useRef(Promise.resolve());
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const cartTotal = isMedusaConfigured && serverCartTotal !== null
     ? serverCartTotal
     : cartItems.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
+  const isCartMutating = mutationCount > 0;
   const favoriteCount = favoriteProductIds.length;
   const cartSubtotal = isMedusaConfigured && serverCartTotal !== null ? serverCartTotals.subtotal : cartTotal;
   const cartShippingTotal = isMedusaConfigured && serverCartTotal !== null ? serverCartTotals.shipping : 0;
@@ -253,7 +256,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   const enqueueCartMutation = <T,>(operation: () => Promise<T>) => {
-    const next = mutationQueue.current.then(operation, operation);
+    const tracked = () => {
+      setMutationCount((c) => c + 1);
+      return operation().finally(() => {
+        setMutationCount((c) => c - 1);
+      });
+    };
+    const next = mutationQueue.current.then(tracked, tracked);
     mutationQueue.current = next.then(
       () => undefined,
       () => undefined,
@@ -268,22 +277,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     if (storefrontDataMode === "medusa") {
       const cartId = await getMedusaCartId();
-      const cart = await addMedusaCartLineItem(cartId, newItem.variantId, newItem.quantity);
-      setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
-      setServerCartTotals({
-        subtotal: cart.subtotal ?? 0,
-        shipping: cart.shipping_total ?? 0,
-        tax: cart.tax_total ?? 0,
-        discount: cart.discount_total ?? 0,
-      });
-      const lineItem = cart.items?.find((item) => item.variant_id === newItem.variantId);
-      newItem = {
-        ...newItem,
-        lineItemId: lineItem?.id,
-        quantity: lineItem?.quantity ?? newItem.quantity,
-        unitPrice: lineItem?.unit_price,
-        lineTotal: lineItem?.total,
-      };
+      let cart = await addMedusaCartLineItem(cartId, newItem.variantId, newItem.quantity);
+      // If the server merged or relocated the line item, fall back to a fresh retrieval
+      if (!cart.items?.some((item) => item.variant_id === newItem.variantId)) {
+        cart = await retrieveMedusaCart(cartId);
+      }
+      // Full reconciliation: resolves lineItemId for every local item from server state
+      syncRemoteCart(cart);
+      return;
     }
 
     setCartItems((prevItems) => {
@@ -299,10 +300,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         const updatedItems = [...prevItems];
         updatedItems[existingItemIndex] = {
           ...updatedItems[existingItemIndex],
-          lineItemId: newItem.lineItemId ?? updatedItems[existingItemIndex].lineItemId,
-          quantity: storefrontDataMode === "medusa"
-            ? newItem.quantity
-            : updatedItems[existingItemIndex].quantity + newItem.quantity,
+          quantity: updatedItems[existingItemIndex].quantity + newItem.quantity,
         };
         cartItemsRef.current = updatedItems;
         return updatedItems;
@@ -312,26 +310,42 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       cartItemsRef.current = updatedItems;
       return updatedItems;
     });
-    
   });
 
   const removeFromCart = (productId: string, size: string, colorHex: string) => enqueueCartMutation(async () => {
     const item = cartItemsRef.current.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
-    if (storefrontDataMode === "medusa" && item?.lineItemId) {
+
+    if (storefrontDataMode === "medusa") {
       const cartId = await getMedusaCartId();
-      const cart = await removeMedusaCartLineItem(cartId, item.lineItemId);
-      setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
-      setServerCartTotals({ subtotal: cart.subtotal ?? 0, shipping: cart.shipping_total ?? 0, tax: cart.tax_total ?? 0, discount: cart.discount_total ?? 0 });
+      let resolvedLineItemId = item?.lineItemId;
+
+      // Resolve lineItemId if missing by fetching fresh server state
+      if (!resolvedLineItemId) {
+        const freshCart = await retrieveMedusaCart(cartId);
+        const serverItem = freshCart.items?.find((si) => si.variant_id === item?.variantId);
+        if (!serverItem) {
+          // Item genuinely doesn't exist on the server — reconcile and warn
+          console.warn("[Cart] removeFromCart: item not found on server, reconciling.", { variantId: item?.variantId, operation: "removeFromCart" });
+          syncRemoteCart(freshCart);
+          return;
+        }
+        resolvedLineItemId = serverItem.id;
+      }
+
+      const cart = await removeMedusaCartLineItem(cartId, resolvedLineItemId);
+      syncRemoteCart(cart);
+      return;
     }
+
     setCartItems((prevItems) => {
       const updatedItems = prevItems.filter(
-        (item) =>
+        (cartItem) =>
           !(
-            item.product.id === productId &&
-            item.selectedSize === size &&
-            item.selectedColor.hex === colorHex
+            cartItem.product.id === productId &&
+            cartItem.selectedSize === size &&
+            cartItem.selectedColor.hex === colorHex
           )
       );
       cartItemsRef.current = updatedItems;
@@ -349,20 +363,36 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const item = cartItemsRef.current.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
-    if (storefrontDataMode === "medusa" && item?.lineItemId) {
+
+    if (storefrontDataMode === "medusa") {
       const cartId = await getMedusaCartId();
-      const cart = await updateMedusaCartLineItem(cartId, item.lineItemId, newQuantity);
-      setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
-      setServerCartTotals({ subtotal: cart.subtotal ?? 0, shipping: cart.shipping_total ?? 0, tax: cart.tax_total ?? 0, discount: cart.discount_total ?? 0 });
+      let resolvedLineItemId = item?.lineItemId;
+
+      // Resolve lineItemId if missing by fetching fresh server state
+      if (!resolvedLineItemId) {
+        const freshCart = await retrieveMedusaCart(cartId);
+        const serverItem = freshCart.items?.find((si) => si.variant_id === item?.variantId);
+        if (!serverItem) {
+          // Item genuinely doesn't exist on the server — reconcile and warn
+          console.warn("[Cart] updateQuantity: item not found on server, reconciling.", { variantId: item?.variantId, operation: "updateQuantity" });
+          syncRemoteCart(freshCart);
+          return;
+        }
+        resolvedLineItemId = serverItem.id;
+      }
+
+      const cart = await updateMedusaCartLineItem(cartId, resolvedLineItemId, newQuantity);
+      syncRemoteCart(cart);
+      return;
     }
-    
+
     setCartItems((prevItems) => {
-      const updatedItems = prevItems.map((item) =>
-        item.product.id === productId &&
-        item.selectedSize === size &&
-        item.selectedColor.hex === colorHex
-          ? { ...item, quantity: newQuantity }
-          : item
+      const updatedItems = prevItems.map((cartItem) =>
+        cartItem.product.id === productId &&
+        cartItem.selectedSize === size &&
+        cartItem.selectedColor.hex === colorHex
+          ? { ...cartItem, quantity: newQuantity }
+          : cartItem
       );
       cartItemsRef.current = updatedItems;
       return updatedItems;
@@ -459,6 +489,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         cartShippingTotal,
         cartTaxTotal,
         cartDiscountTotal,
+        isCartMutating,
         favoriteProductIds,
         favoriteCount,
         toggleFavorite,

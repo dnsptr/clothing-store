@@ -13,6 +13,7 @@ export default function FavoritesClient() {
   const { products } = useCatalog();
   const {
     addToCart,
+    isCartMutating,
     favoriteProductIds,
     removeFavorite,
   } = useCart();
@@ -120,6 +121,8 @@ export default function FavoritesClient() {
                         quantity: 1,
                       })
                     }
+                    disabled={isCartMutating}
+                    aria-busy={isCartMutating}
                   >
                     Добавить в корзину
                   </button>
