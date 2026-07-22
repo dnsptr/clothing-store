@@ -1,4 +1,24 @@
-http://{$BACKEND_HOST} {
+{$BACKEND_HOST} {
 	encode zstd gzip
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	@admin path /app* /auth/user/*
+	basic_auth @admin {
+		admin {$ADMIN_BASIC_AUTH_HASH}
+	}
+
 	reverse_proxy 127.0.0.1:9000
 }

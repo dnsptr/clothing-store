@@ -36,7 +36,7 @@ PostgreSQL uses host port `5433` to avoid conflicting with a native PostgreSQL i
 
 ```bash
 DATABASE_URL=postgres://medusa:medusa@localhost:5433/medusa_backend
-REDIS_URL=redis://localhost:6379
+REDIS_URL=redis://:medusa@localhost:6379
 STORE_CORS=http://localhost:3000
 ADMIN_CORS=http://localhost:5173,http://localhost:9000
 AUTH_CORS=http://localhost:5173,http://localhost:9000,http://localhost:3000

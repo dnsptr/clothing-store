@@ -4,9 +4,9 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_DIR}/.env.production"
-BACKEND_HOST="${BACKEND_HOST:-5-42-97-122.sslip.io}"
-PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-http://${BACKEND_HOST}}"
-STOREFRONT_URL="${STOREFRONT_URL:-http://localhost:3000}"
+BACKEND_HOST="${BACKEND_HOST:?BACKEND_HOST is required, e.g. 1-2-3-4.sslip.io or your domain}"
+PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-https://${BACKEND_HOST}}"
+STOREFRONT_URL="${STOREFRONT_URL:?STOREFRONT_URL is required, e.g. https://your-storefront.vercel.app}"
 
 cd "${PROJECT_DIR}"
 
@@ -21,9 +21,12 @@ JWT_SECRET=$(openssl rand -hex 32)
 COOKIE_SECRET=$(openssl rand -hex 32)
 AUTH_MFA_ENCRYPTION_KEY=$(openssl rand -hex 32)
 
-STORE_CORS=http://localhost:3000,${STOREFRONT_URL}
+# Generate with: docker run --rm caddy:2-alpine caddy hash-password --plaintext '<password>'
+# ADMIN_BASIC_AUTH_HASH=replace-with-caddy-hash-password-output
+
+STORE_CORS=${STOREFRONT_URL}
 ADMIN_CORS=${PUBLIC_BACKEND_URL}
-AUTH_CORS=http://localhost:3000,${STOREFRONT_URL},${PUBLIC_BACKEND_URL}
+AUTH_CORS=${STOREFRONT_URL},${PUBLIC_BACKEND_URL}
 EOF
 fi
 
