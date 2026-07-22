@@ -10,6 +10,13 @@ This folder contains a first Medusa backend prototype generated with `create-med
 - PostgreSQL and Redis run in Docker with persistent local volumes.
 - Initial Medusa migrations and starter seed data have been applied.
 
+## Redis Infrastructure Modules
+
+- `medusa-config.ts` registers the Redis-backed Event Bus, Workflow Engine, Cache, and Locking (Redis provider, set as default) modules, all driven by `REDIS_URL`.
+- This replaces Medusa's in-memory defaults (the "Local Event Bus" and in-memory locking), which lose queued events on restart and race under concurrent operations.
+- `REDIS_URL` is now **required in production**: the config throws a clear error when `NODE_ENV=production` and `REDIS_URL` is unset.
+- In development the Redis modules are only registered when `REDIS_URL` is present; without it the backend still boots on the in-memory defaults.
+
 ## Local Prerequisites
 
 - Node.js 20+
