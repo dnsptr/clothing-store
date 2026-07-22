@@ -49,7 +49,7 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
   const { products, source } = useCatalog();
   const product = products.find((item) => item.id === initialProduct.id) ?? initialProduct;
   const isMedusaProductLoaded = source === "mock" || products.some((item) => item.id === initialProduct.id);
-  const { addToCart } = useCart();
+  const { addToCart, isCartMutating } = useCart();
   const colorValues = product.options.find((option) => option.title === "Цвет")?.values ?? [];
   const colors = colorValues.map(
     (name) => product.colors.find((color) => color.name === name) ?? { name, hex: "#808080" },
@@ -233,7 +233,7 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
               {error && <p className={styles.error}>{error}</p>}
             </section>
 
-            <button type="button" className={styles.addToCartBtn} onClick={handleAddToCart}>
+            <button type="button" className={styles.addToCartBtn} onClick={handleAddToCart} disabled={isCartMutating} aria-busy={isCartMutating}>
               Добавить в корзину
             </button>
 

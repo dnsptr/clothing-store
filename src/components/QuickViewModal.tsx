@@ -24,7 +24,7 @@ interface SelectionState {
 }
 
 export default function QuickViewModal({ product, onClose }: QuickViewModalProps) {
-  const { addToCart } = useCart();
+  const { addToCart, isCartMutating } = useCart();
   const [selection, setSelection] = useState<SelectionState | null>(null);
   useBodyScrollLock(Boolean(product));
   useOverlayDismiss(Boolean(product), onClose);
@@ -174,7 +174,7 @@ export default function QuickViewModal({ product, onClose }: QuickViewModalProps
           </div>
 
           {/* Add to Cart Button */}
-          <button className={styles.addToCartBtn} onClick={handleAddToCart}>
+          <button className={styles.addToCartBtn} onClick={handleAddToCart} disabled={isCartMutating} aria-busy={isCartMutating}>
             Добавить в корзину
           </button>
         </div>

@@ -70,6 +70,7 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
+      ADMIN_BASIC_AUTH_HASH: ${ADMIN_BASIC_AUTH_HASH:?ADMIN_BASIC_AUTH_HASH is required}
     network_mode: host
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -78,13 +79,26 @@ services:
     depends_on:
       - medusa
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
+  pg_backup:
+    image: postgres:15-alpine
     restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:9000"]
     network_mode: host
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
     depends_on:
-      - medusa
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          pg_dump -h 127.0.0.1 -U medusa medusa_backend | gzip > /backups/medusa_$$(date +%Y%m%d_%H%M%S).sql.gz
+          find /backups -name '*.sql.gz' -mtime +7 -delete
+          sleep 86400
+        done
 
 networks:
   backend:

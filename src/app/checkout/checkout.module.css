@@ -451,6 +451,22 @@ textarea.formInput {
   margin-top: 12px;
 }
 
+.fieldError {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: #c0392b;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.formInputError {
+  border-color: #c0392b;
+}
+
+.formInputError:focus {
+  border-color: #c0392b;
+}
+
 /* ── Empty cart ── */
 .empty {
   text-align: center;

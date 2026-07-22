@@ -17,6 +17,7 @@ export default function CartDrawer() {
     toggleCart,
     removeFromCart,
     updateQuantity,
+    isCartMutating,
     cartTotal,
     cartCount,
     setIsCartOpen,
@@ -110,6 +111,8 @@ export default function CartDrawer() {
                           removeFromCart(item.product.id, item.selectedSize, item.selectedColor.hex)
                         }
                         aria-label="Удалить товар"
+                        disabled={isCartMutating}
+                        aria-busy={isCartMutating}
                       >
                         Удалить
                       </button>
@@ -142,6 +145,8 @@ export default function CartDrawer() {
                           )
                         }
                         aria-label="Уменьшить количество"
+                        disabled={isCartMutating}
+                        aria-busy={isCartMutating}
                       >
                         &minus;
                       </button>
@@ -157,6 +162,8 @@ export default function CartDrawer() {
                           )
                         }
                         aria-label="Увеличить количество"
+                        disabled={isCartMutating}
+                        aria-busy={isCartMutating}
                       >
                         +
                       </button>

@@ -35,6 +35,7 @@ export default function CartPageClient() {
     addToCart,
     removeFromCart,
     updateQuantity,
+    isCartMutating,
     isFavorite,
     toggleFavorite,
   } = useCart();
@@ -88,6 +89,8 @@ export default function CartPageClient() {
                           ? removeFromCart(item.product.id, item.selectedSize, item.selectedColor.hex)
                           : updateQuantity(item.product.id, item.selectedSize, item.selectedColor.hex, item.quantity - 1)}
                         aria-label="Уменьшить количество"
+                        disabled={isCartMutating}
+                        aria-busy={isCartMutating}
                       >
                         −
                       </button>
@@ -96,6 +99,8 @@ export default function CartPageClient() {
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.selectedSize, item.selectedColor.hex, item.quantity + 1)}
                         aria-label="Увеличить количество"
+                        disabled={isCartMutating}
+                        aria-busy={isCartMutating}
                       >
                         +
                       </button>
@@ -107,6 +112,8 @@ export default function CartPageClient() {
                       className={styles.removeButton}
                       onClick={() => removeFromCart(item.product.id, item.selectedSize, item.selectedColor.hex)}
                       aria-label={`Удалить ${item.product.name} из корзины`}
+                      disabled={isCartMutating}
+                      aria-busy={isCartMutating}
                     >
                       <RemoveIcon />
                     </button>
@@ -183,6 +190,8 @@ export default function CartPageClient() {
                             quantity: 1,
                           })
                         }
+                        disabled={isCartMutating}
+                        aria-busy={isCartMutating}
                       >
                         Добавить
                       </button>
