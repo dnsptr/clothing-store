@@ -63,6 +63,28 @@ Medusa through Caddy.
 
 The generated `.env.production` contains secrets and must never be committed.
 
+## Re-running the catalog import
+
+The catalog import is idempotent and safe to re-run against a populated
+database. Products are matched by their `handle` (`mario-mikke-<id>`) and
+variants by their `sku`; existing records are updated in place, so their Medusa
+product and variant IDs — and the stock levels already set on existing
+variants — are preserved. Only newly added variants receive the starting stock
+level. (Re-running the import is what a future 1С sync will rely on, so the
+matching keys `handle`/`sku` must stay stable — see ADR-001 §4.)
+
+Consequences worth knowing before you re-import:
+
+- Catalog-owned fields are overwritten from the catalog file on every run:
+  product title, images, thumbnail, status, category, collection, sales channel
+  and `metadata`. Edit these in `apps/backend/src/scripts/data/mario-mikke-catalog.ts`,
+  not in the admin, or your admin changes will be replaced on the next import.
+- Fields the catalog does not manage (for example a product `description`
+  edited in the admin) are left untouched.
+- Products or variants removed from the catalog file are **not** deleted
+  automatically — they are left in place so their order links and stock
+  survive. Pruning them is a deliberate manual action in the admin.
+
 ## HTTPS
 
 Caddy serves `https://<BACKEND_HOST>` and requests a Let's Encrypt certificate
