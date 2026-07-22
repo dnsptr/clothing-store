@@ -77,8 +77,14 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
   }
 
   const currentCurrencies = store.supported_currencies || [];
+  // Keep RUB tax-inclusive here too: the catalog import is a documented, stand-
+  // alone entrypoint (`npm run backend:catalog`). Re-asserting is_tax_inclusive
+  // guarantees the gross-price contract even if the import runs without the
+  // seed, and updatePricePreferencesAsArrayStep resolves the flag as
+  // `is_tax_inclusive ?? prevEntry.is_tax_inclusive`, so it never downgrades an
+  // already tax-inclusive RUB preference set by the seed.
   const supportedCurrencies = [
-    { currency_code: "rub", is_default: true },
+    { currency_code: "rub", is_default: true, is_tax_inclusive: true },
     ...currentCurrencies
       .filter(
         (currency): currency is NonNullable<typeof currency> =>
