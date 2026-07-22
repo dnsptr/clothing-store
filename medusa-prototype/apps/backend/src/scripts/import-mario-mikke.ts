@@ -43,6 +43,18 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     process.env.STOREFRONT_URL || "http://localhost:3000"
   ).replace(/\/$/, "");
 
+  if (
+    process.env.NODE_ENV === "production" &&
+    storefrontUrl.includes("localhost")
+  ) {
+    throw new Error(
+      `STOREFRONT_URL must point to the public storefront URL before running ` +
+        `catalog import in production. Offending value: "${storefrontUrl}". ` +
+        `Set STOREFRONT_URL to your production storefront address (e.g. ` +
+        `https://your-store.example.com) and re-run the import.`,
+    );
+  }
+
   logger.info("Preparing Mario Mikke demo catalog...");
 
   const { data: stores } = await query.graph({
