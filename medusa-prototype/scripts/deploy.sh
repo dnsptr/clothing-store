@@ -14,6 +14,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   umask 077
   cat > "${ENV_FILE}" <<EOF
 BACKEND_HOST=${BACKEND_HOST}
+STOREFRONT_URL=${STOREFRONT_URL}
 
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 REDIS_PASSWORD=$(openssl rand -hex 24)
@@ -28,6 +29,10 @@ STORE_CORS=${STOREFRONT_URL}
 ADMIN_CORS=${PUBLIC_BACKEND_URL}
 AUTH_CORS=${STOREFRONT_URL},${PUBLIC_BACKEND_URL}
 EOF
+fi
+
+if ! grep -q '^STOREFRONT_URL=' "${ENV_FILE}"; then
+  printf '\nSTOREFRONT_URL=%s\n' "${STOREFRONT_URL}" >> "${ENV_FILE}"
 fi
 
 docker compose --env-file "${ENV_FILE}" -f compose.production.yml up -d --build
