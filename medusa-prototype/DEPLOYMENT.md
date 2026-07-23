@@ -3,16 +3,16 @@
 The demo backend runs from `/opt/mario-mikke` on the Timeweb Cloud server.
 Docker Compose starts Medusa, PostgreSQL, Redis, Caddy, and a daily PostgreSQL
 backup job. PostgreSQL and Redis listen only on `127.0.0.1` and are not exposed
-to the internet. Caddy terminates HTTPS with a Let's Encrypt certificate that is
-issued automatically the first time it starts.
+to the internet. The Timeweb Load Balancer terminates HTTPS and forwards HTTP
+requests to Caddy, which protects the admin routes and proxies Medusa.
 
 ## Prerequisites
 
-- A public hostname that resolves to the server. An `<SERVER-IP>.sslip.io`
-  name is enough for demos because it satisfies the Let's Encrypt HTTP-01
-  challenge over port 80; a real domain works the same way.
-- TCP ports `80` and `443` must be open to the internet so Caddy can obtain and
-  serve the certificate. Port `9000` (Medusa) must stay closed — see Firewall.
+- `api.mariomikke.shop` delegated to Timeweb DNS.
+- A Timeweb Load Balancer with public IP `82.97.250.147`, automatic SSL, and
+  `HTTP:80 -> HTTP:80` plus `HTTPS:443 -> HTTP:80` forwarding rules.
+- TCP port `80` must accept traffic from the load balancer. Port `9000`
+  (Medusa) must stay closed — see Firewall.
 
 ## Firewall
 
@@ -24,13 +24,18 @@ first deployment:
 ```bash
 ufw allow 22/tcp
 ufw allow 80/tcp
-ufw allow 443/tcp
 ufw deny 9000/tcp
 ufw enable
 ```
 
-Only SSH and the Caddy HTTP/HTTPS ports stay open; all public traffic reaches
-Medusa through Caddy.
+Only SSH and the Caddy HTTP origin port stay open; all public HTTPS traffic
+reaches Medusa through the load balancer and Caddy. Restrict port `80` to the
+load balancer network when its source range is available in the Timeweb panel.
+
+Timeweb Cloud Firewall is a separate network layer from UFW. If a cloud
+firewall group is attached to the server, its inbound allowlist must include
+TCP `22` for SSH and TCP `80` for the load balancer. Port `9000` must not be
+published.
 
 ## First deployment
 
@@ -42,8 +47,8 @@ Medusa through Caddy.
    value in production will cause the import script to abort:
 
    ```bash
-   export BACKEND_HOST=<SERVER-IP>.sslip.io   # or your domain
-   export STOREFRONT_URL=https://your-storefront.vercel.app
+   export BACKEND_HOST=api.mariomikke.shop
+   export STOREFRONT_URL=https://www.mariomikke.shop
    ```
 
 4. Run `bash scripts/deploy.sh` as root. On the first run it generates
@@ -87,14 +92,26 @@ Consequences worth knowing before you re-import:
 
 ## HTTPS
 
-Caddy serves `https://<BACKEND_HOST>` and requests a Let's Encrypt certificate
-automatically on first start. This requires ports `80` and `443` to be open
-(see Firewall) and `BACKEND_HOST` to resolve to the server. Point the storefront
-and CORS variables at the `https://` backend URL:
+Timeweb terminates TLS on the load balancer. The DNS record
+`api.mariomikke.shop` points to `82.97.250.147`; Caddy listens on plain HTTP
+port `80` behind it and forwards requests to Medusa on `127.0.0.1:9000`.
+Caddy must not request its own certificate in this setup.
 
-- `PUBLIC_BACKEND_URL=https://<SERVER-IP>.sslip.io`
-- `ADMIN_CORS=https://<SERVER-IP>.sslip.io`
-- `AUTH_CORS=https://your-storefront.vercel.app,https://<SERVER-IP>.sslip.io`
+The production environment uses:
+
+- `BACKEND_HOST=api.mariomikke.shop`
+- `PUBLIC_BACKEND_URL=https://api.mariomikke.shop`
+- `ADMIN_CORS=https://api.mariomikke.shop`
+- `STORE_CORS=https://mariomikke.shop,https://www.mariomikke.shop`
+- `AUTH_CORS=https://mariomikke.shop,https://www.mariomikke.shop,https://api.mariomikke.shop`
+
+After changing `NEXT_PUBLIC_MEDUSA_BACKEND_URL` in Vercel, trigger a new
+deployment. The storefront uses a static export, so public environment
+variables are embedded at build time.
+
+If HTTPS fails, verify the load balancer certificate and forwarding rules first.
+If the backend is marked unhealthy, verify TCP port `80`, Caddy, and
+`curl -H 'Host: api.mariomikke.shop' http://127.0.0.1/health` on the server.
 
 ## Admin basic auth
 
@@ -144,4 +161,5 @@ durability but is out of scope for this prototype.
 ```bash
 docker compose --env-file .env.production -f compose.production.yml ps
 curl http://127.0.0.1:9000/health
+curl https://api.mariomikke.shop/health
 ```

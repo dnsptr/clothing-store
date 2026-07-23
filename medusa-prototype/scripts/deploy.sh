@@ -4,7 +4,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_DIR}/.env.production"
-BACKEND_HOST="${BACKEND_HOST:?BACKEND_HOST is required, e.g. 1-2-3-4.sslip.io or your domain}"
+BACKEND_HOST="${BACKEND_HOST:?BACKEND_HOST is required, e.g. api.example.com}"
 PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-https://${BACKEND_HOST}}"
 STOREFRONT_URL="${STOREFRONT_URL:?STOREFRONT_URL is required, e.g. https://your-storefront.vercel.app}"
 
