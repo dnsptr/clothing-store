@@ -8,7 +8,7 @@ The repository contains the Mario Mikke Next.js storefront and a Medusa backend 
 | --- | --- | --- |
 | Local storefront | `mock` or `medusa` from `.env.local` | Local Medusa or the public Timeweb endpoint |
 | GitHub Pages | `mock` demo | None; checkout is unavailable |
-| Vercel | `medusa` | `https://api.mariomikke.shop` |
+| Vercel | `medusa` at `https://www.mariomikke.shop` | `https://api.mariomikke.shop` |
 | Timeweb Cloud | Medusa production | Load Balancer, Caddy, PostgreSQL, Redis, and daily backups |
 
 The stable backend endpoint is `https://api.mariomikke.shop`. A Timeweb Load

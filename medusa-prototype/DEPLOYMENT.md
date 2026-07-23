@@ -48,7 +48,7 @@ published.
 
    ```bash
    export BACKEND_HOST=api.mariomikke.shop
-   export STOREFRONT_URL=https://your-storefront.vercel.app
+   export STOREFRONT_URL=https://www.mariomikke.shop
    ```
 
 4. Run `bash scripts/deploy.sh` as root. On the first run it generates
@@ -102,7 +102,8 @@ The production environment uses:
 - `BACKEND_HOST=api.mariomikke.shop`
 - `PUBLIC_BACKEND_URL=https://api.mariomikke.shop`
 - `ADMIN_CORS=https://api.mariomikke.shop`
-- `AUTH_CORS=https://your-storefront.vercel.app,https://api.mariomikke.shop`
+- `STORE_CORS=https://mariomikke.shop,https://www.mariomikke.shop`
+- `AUTH_CORS=https://mariomikke.shop,https://www.mariomikke.shop,https://api.mariomikke.shop`
 
 After changing `NEXT_PUBLIC_MEDUSA_BACKEND_URL` in Vercel, trigger a new
 deployment. The storefront uses a static export, so public environment
