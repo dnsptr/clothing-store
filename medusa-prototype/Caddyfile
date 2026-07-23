@@ -1,4 +1,4 @@
-{$BACKEND_HOST} {
+http://{$BACKEND_HOST} {
 	encode zstd gzip
 
 	log {
@@ -20,5 +20,7 @@
 		admin {$ADMIN_BASIC_AUTH_HASH}
 	}
 
-	reverse_proxy 127.0.0.1:9000
+	reverse_proxy 127.0.0.1:9000 {
+		header_up X-Forwarded-Proto https
+	}
 }
