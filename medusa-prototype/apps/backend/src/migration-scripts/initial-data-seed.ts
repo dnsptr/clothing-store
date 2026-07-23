@@ -10,6 +10,7 @@ import {
   createSalesChannelsWorkflow,
   createStockLocationsWorkflow,
   createStoresWorkflow,
+  createTaxRatesWorkflow,
   createTaxRegionsWorkflow,
   linkSalesChannelsToApiKeyWorkflow,
   linkSalesChannelsToStockLocationWorkflow,
@@ -101,12 +102,21 @@ export default async function initial_data_seed({
     fields: ["id"],
   });
   const existingStore = existingStores[0];
+  // ADR-001 §2: all catalog prices are entered and stored WITH VAT (gross,
+  // tax-inclusive). In Medusa 2.17 tax-inclusivity is a pricing-module "price
+  // preference" (attribute + value + is_tax_inclusive), never a per-price flag.
+  // Passing is_tax_inclusive on a supported currency makes create/updateStores
+  // upsert a `currency_code`=`rub` price preference via
+  // updatePricePreferencesAsArrayStep. That upsert resolves the flag as
+  // `is_tax_inclusive ?? prevEntry.is_tax_inclusive`, so it is idempotent and
+  // never downgrades an already tax-inclusive currency on re-runs.
   const storeInput = {
     name: "Default Store",
     supported_currencies: [
       {
         currency_code: "rub",
         is_default: true,
+        is_tax_inclusive: true,
       },
     ],
     default_sales_channel_id: defaultSalesChannel.id,
@@ -147,6 +157,11 @@ export default async function initial_data_seed({
             currency_code: "rub",
             countries,
             payment_providers: ["pp_system_default"],
+            // Region tax lines are computed by Medusa automatically. This is the
+            // Region module default (automatic_taxes = boolean().default(true)),
+            // set explicitly so the RU-first tax contract is self-evident and
+            // stays correct even if the upstream default ever changes.
+            automatic_taxes: true,
           },
         ],
       },
@@ -175,6 +190,50 @@ export default async function initial_data_seed({
     });
   }
   logger.info("Finished seeding tax regions.");
+
+  // Provision the single default VAT rate for the RU tax region. Catalog prices
+  // are gross / tax-inclusive (see storeInput above), so Medusa derives the tax
+  // portion as gross * rate / (100 + rate) = gross * 5 / 105 rather than adding
+  // it on top. The rate is created only when the RU tax region has no `vat5`
+  // rate yet, keeping the seed idempotent; the TaxRate model also enforces a
+  // single default rate per region (unique index IDX_single_default_region).
+  // Note: is_combinable is intentionally left at its model default (false) — it
+  // is not part of CreateTaxRateDTO in 2.17 and a lone flat rate must not stack.
+  logger.info("Seeding default VAT tax rate...");
+  const { data: taxRegionsWithRates } = await query.graph({
+    entity: "tax_region",
+    fields: [
+      "id",
+      "country_code",
+      "tax_rates.id",
+      "tax_rates.code",
+      "tax_rates.is_default",
+    ],
+  });
+  const ruTaxRegion = taxRegionsWithRates.find(
+    (taxRegion) => taxRegion.country_code === "ru",
+  );
+
+  if (ruTaxRegion) {
+    const hasVat5Rate = (ruTaxRegion.tax_rates || []).some(
+      (taxRate) => taxRate?.code === "vat5",
+    );
+
+    if (!hasVat5Rate) {
+      await createTaxRatesWorkflow(container).run({
+        input: [
+          {
+            tax_region_id: ruTaxRegion.id,
+            name: "НДС 5%",
+            code: "vat5",
+            rate: 5,
+            is_default: true,
+          },
+        ],
+      });
+    }
+  }
+  logger.info("Finished seeding default VAT tax rate.");
 
   logger.info("Seeding stock location data...");
   const { data: existingStockLocations } = await query.graph({

@@ -81,9 +81,36 @@ Import or refresh the Mario Mikke demo catalog from the repository root:
 npm run backend:catalog
 ```
 
-The import is repeatable. It replaces only products previously imported by this script and the original Medusa starter products. Manually created admin products are preserved.
+The import is repeatable: catalog products are upserted by `handle`/`sku`
+(IMPORT-001), so re-running it preserves Medusa product/variant IDs and existing
+stock levels. Manually created admin products are preserved. See
+`DEPLOYMENT.md` → «Re-running the catalog import» for the details.
 
 The script also configures RUB as the default store currency, creates a Russian sales region, and adds inventory for every size/color variant. Russian shipping options are intentionally left for the CDEK or Yandex Delivery integration stage.
+
+## Tax & Pricing (RU: НДС 5%, tax-inclusive)
+
+Per ADR-001 §2 the backend is the single source of truth for prices, taxes, and
+totals, and every catalog price is entered and stored **with VAT (gross /
+tax-inclusive)**.
+
+- **Rate.** The RU tax region has one default rate — name «НДС 5%», code `vat5`,
+  `rate: 5`, `is_default: true` — provisioned idempotently by
+  `src/migration-scripts/initial-data-seed.ts` (re-running the seed does not
+  create a second rate). The region's `automatic_taxes` is `true` (the Medusa
+  Region-module default, set explicitly), so tax lines are computed
+  automatically.
+- **Tax-inclusive.** In Medusa 2.17 tax-inclusivity is a Pricing-module *price
+  preference* (`attribute` + `value` + `is_tax_inclusive`), not a per-price
+  flag. The seed marks the `rub` store currency `is_tax_inclusive: true`, which
+  upserts a `currency_code = rub` price preference; the catalog import
+  re-asserts the same flag.
+- **Calculation.** Medusa derives the tax portion from the gross amount as
+  `gross × 5 / 105`, rounded to the kopeck. Example: a 4900 ₽ item ⇒
+  `tax_total = 4900 × 5 / 105 = 233.33 ₽`, while the line/item total stays
+  **4900 ₽** (it is *not* 4900 + 245 = 5145).
+- **Frontend.** The storefront renders `item.total` / `cart.tax_total` from the
+  Store API as-is; it must never add or recompute VAT.
 
 ## Next Prototype Tasks
 

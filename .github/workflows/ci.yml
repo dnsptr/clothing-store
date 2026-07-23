@@ -75,3 +75,76 @@ jobs:
       - name: Build backend
         run: npm run build
         working-directory: medusa-prototype
+
+  backend-tests:
+    name: Backend (unit + integration tests)
+    runs-on: ubuntu-latest
+
+    # @medusajs/test-utils spins up a real Postgres for each suite (it creates and
+    # drops throwaway databases via pg-god), and the backend registers the Redis
+    # event bus / workflow engine / cache / locking modules whenever REDIS_URL is
+    # set — so the integration tests run against Postgres + Redis, matching production.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: medusa-prototype/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: medusa-prototype
+
+      - name: Run unit tests
+        run: npm run test:unit
+        working-directory: medusa-prototype/apps/backend
+
+      # Integration smoke tests: seed idempotency, catalog import idempotency
+      # (ADR-001 upsert contract) and the Store API. @medusajs/test-utils reads the
+      # DB_* variables to build its connection and to create/drop the per-suite test
+      # databases on the Postgres service above.
+      - name: Run integration tests
+        run: npm run test:integration:http
+        working-directory: medusa-prototype/apps/backend
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_TEMP_NAME: medusa_integration_tests
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa_integration_tests
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret
+          COOKIE_SECRET: test-cookie-secret
+          STORE_CORS: http://localhost:3000
+          ADMIN_CORS: http://localhost:9000
+          AUTH_CORS: http://localhost:3000,http://localhost:9000
