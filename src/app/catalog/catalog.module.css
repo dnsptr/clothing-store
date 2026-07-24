@@ -274,6 +274,70 @@
   line-height: 18px;
 }
 
+.retryButton {
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0 24px;
+  border: 1px solid var(--text-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.retryButton:hover {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.skeletonCard {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 4px;
+}
+
+.skeletonImage {
+  aspect-ratio: 2 / 3;
+  background: var(--bg-secondary);
+}
+
+.skeletonLine {
+  height: 12px;
+  width: 78%;
+  background: var(--bg-secondary);
+}
+
+.skeletonLineShort {
+  width: 40%;
+}
+
+.skeletonImage,
+.skeletonLine {
+  border-radius: 2px;
+  animation: catalogSkeletonPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes catalogSkeletonPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonImage,
+  .skeletonLine {
+    animation: none;
+  }
+}
+
 .loading {
   padding: 100px 0;
   color: var(--text-primary);
