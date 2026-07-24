@@ -30,6 +30,14 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   // on mount it is already the initial state, and setting state synchronously
   // inside an effect violates react-hooks/set-state-in-effect. The manual
   // refetch (an event handler, where sync setState is fine) sets it instead.
+  //
+  // FE-004: the global context intentionally loads only the FIRST page (24). It
+  // powers the home page, recommendations and favorites — all of which resolve
+  // products from this list. With the current catalog (12 products) the first
+  // page covers everything. KNOWN LIMITATION: once the catalog exceeds 24
+  // products, favorites/recommendations that reference later products won't
+  // resolve here; scaling those to fetch by id is a separate task. The catalog
+  // page (FE-004 A3) does its own paginated fetch and does not depend on this.
   const loadProducts = useCallback(() => {
     if (storefrontDataMode === "mock" || !isMedusaConfigured) return;
 
@@ -37,8 +45,8 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    fetchMedusaProducts(controller.signal)
-      .then((nextProducts) => {
+    fetchMedusaProducts({ limit: 24, offset: 0 }, controller.signal)
+      .then(({ products: nextProducts }) => {
         if (controller.signal.aborted) return;
         setProducts(nextProducts);
         setStatus("ready");
