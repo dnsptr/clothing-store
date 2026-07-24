@@ -292,6 +292,42 @@
   color: var(--bg-primary);
 }
 
+/* FE-004 A3: "Показать ещё" row. Negative top margin tucks it under the grid,
+   whose own 90px bottom margin would otherwise leave an oversized gap. */
+.loadMore {
+  display: flex;
+  justify-content: center;
+  margin: -74px 0 90px;
+}
+
+.loadMoreButton {
+  min-height: 48px;
+  padding: 0 40px;
+  border: 1px solid var(--text-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.loadMoreButton:hover {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.loadMoreStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .skeletonCard {
   display: flex;
   min-width: 0;
@@ -404,6 +440,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 22px 0;
     margin-bottom: 64px;
+  }
+
+  .loadMore {
+    margin: -48px 0 64px;
   }
 
 }

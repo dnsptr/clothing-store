@@ -73,6 +73,18 @@ interface MedusaStoreProduct {
 
 interface MedusaProductsResponse {
   products?: MedusaStoreProduct[];
+  count?: number;
+}
+
+interface MedusaCategoriesResponse {
+  product_categories?: { id: string; name?: string | null; handle?: string | null }[];
+}
+
+/** Minimal category shape the storefront needs to map a URL slug to a server filter. */
+export interface MedusaCategory {
+  id: string;
+  name: string;
+  handle: string;
 }
 
 interface MedusaRegionsResponse {
@@ -149,6 +161,13 @@ function expectArray(value: unknown, endpoint: string, field: string): unknown[]
 function expectString(value: unknown, endpoint: string, field: string): string {
   if (typeof value !== "string") {
     throw new MedusaContractError(endpoint, field, "is not a string");
+  }
+  return value;
+}
+
+function expectNumber(value: unknown, endpoint: string, field: string): number {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    throw new MedusaContractError(endpoint, field, "is not a number");
   }
   return value;
 }
@@ -300,7 +319,19 @@ function parseProductsResponse(data: unknown, endpoint: string): MedusaProductsR
     expectString(product.title, endpoint, `products[${index}].title`);
     expectString(product.handle, endpoint, `products[${index}].handle`);
   });
+  // Pagination relies on the total count Medusa reports alongside the page.
+  expectNumber(root.count, endpoint, "count");
   return data as MedusaProductsResponse;
+}
+
+function parseCategoriesResponse(data: unknown, endpoint: string): MedusaCategoriesResponse {
+  const root = expectRecord(data, endpoint, "$");
+  const categories = expectArray(root.product_categories, endpoint, "product_categories");
+  categories.forEach((item, index) => {
+    const category = expectRecord(item, endpoint, `product_categories[${index}]`);
+    expectString(category.id, endpoint, `product_categories[${index}].id`);
+  });
+  return data as MedusaCategoriesResponse;
 }
 
 function parseRegionsResponse(data: unknown, endpoint: string): MedusaRegionsResponse {
@@ -445,26 +476,105 @@ async function getRussianRegionId(signal?: AbortSignal) {
   return response.regions?.find((region) => region.currency_code === "rub")?.id;
 }
 
-export async function fetchMedusaProducts(signal?: AbortSignal) {
-  const regionId = await getRussianRegionId(signal);
-  const params = new URLSearchParams({
-    limit: "100",
-    fields: "*variants.calculated_price,*variants.options,+variants.inventory_quantity,*options,*options.values,*categories,*images,+metadata",
-  });
+const PRODUCT_FIELDS =
+  "*variants.calculated_price,*variants.options,+variants.inventory_quantity,*options,*options.values,*categories,*images,+metadata";
 
-  if (regionId) params.set("region_id", regionId);
-
-  const response = await medusaRequest(`/store/products?${params.toString()}`, {
-    signal,
-    parse: parseProductsResponse,
-  });
-
-  return (response.products || [])
+function mapProductsPage(products: MedusaStoreProduct[]): Product[] {
+  return products
     .flatMap((product) => {
       const mapped = mapMedusaProduct(product);
       return mapped ? [mapped] : [];
     })
+    // Keep a stable numeric order within the page (parity with the pre-pagination client).
     .sort((first, second) => Number(first.id) - Number(second.id));
+}
+
+export interface FetchMedusaProductsParams {
+  limit: number;
+  offset: number;
+  categoryId?: string;
+}
+
+export interface MedusaProductsPage {
+  products: Product[];
+  count: number;
+}
+
+/**
+ * Fetch a single page of catalog products. Returns the mapped products for the
+ * page plus the total `count` Medusa reports (used to drive "load more" until the
+ * catalog is exhausted). Sorting by Number(id) is applied within the page only.
+ */
+export async function fetchMedusaProducts(
+  params: FetchMedusaProductsParams,
+  signal?: AbortSignal,
+): Promise<MedusaProductsPage> {
+  const regionId = await getRussianRegionId(signal);
+  const query = new URLSearchParams({
+    limit: String(params.limit),
+    offset: String(params.offset),
+    fields: PRODUCT_FIELDS,
+  });
+
+  if (regionId) query.set("region_id", regionId);
+  // Medusa v2 accepts repeated/array category filters via `category_id[]`.
+  if (params.categoryId) query.set("category_id[]", params.categoryId);
+
+  const response = await medusaRequest(`/store/products?${query.toString()}`, {
+    signal,
+    parse: parseProductsResponse,
+  });
+
+  return {
+    products: mapProductsPage(response.products || []),
+    count: typeof response.count === "number" ? response.count : 0,
+  };
+}
+
+/**
+ * Fetch one product by its Medusa handle (e.g. `mario-mikke-12`). Used by the PDP
+ * to resolve a product that is not present in the (paginated) global catalog
+ * context. Returns null when no product matches or the match has no priced
+ * variant. Reuses the same fields + parser + mapper as the list fetch.
+ */
+export async function fetchMedusaProductByHandle(
+  handle: string,
+  signal?: AbortSignal,
+): Promise<Product | null> {
+  const regionId = await getRussianRegionId(signal);
+  const query = new URLSearchParams({
+    handle,
+    limit: "1",
+    fields: PRODUCT_FIELDS,
+  });
+
+  if (regionId) query.set("region_id", regionId);
+
+  const response = await medusaRequest(`/store/products?${query.toString()}`, {
+    signal,
+    parse: parseProductsResponse,
+  });
+
+  const [product] = response.products || [];
+  return product ? mapMedusaProduct(product) : null;
+}
+
+/**
+ * Fetch store product categories so the catalog can translate a URL slug (which
+ * equals the Medusa category handle) into a category id for server-side filtering.
+ */
+export async function fetchMedusaCategories(signal?: AbortSignal): Promise<MedusaCategory[]> {
+  const query = new URLSearchParams({ limit: "100", fields: "id,name,handle" });
+  const response = await medusaRequest(
+    `/store/product-categories?${query.toString()}`,
+    { signal, parse: parseCategoriesResponse },
+  );
+
+  return (response.product_categories || []).flatMap((category) =>
+    typeof category.name === "string" && typeof category.handle === "string"
+      ? [{ id: category.id, name: category.name, handle: category.handle }]
+      : [],
+  );
 }
 
 export async function createMedusaCart() {

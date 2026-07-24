@@ -1,12 +1,14 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import ProductCard from "../../components/ProductCard";
+import type { Product } from "../../data/mockData";
 import { useCatalog } from "../../context/CatalogContext";
+import { fetchMedusaCategories, fetchMedusaProducts } from "../../lib/medusa";
 import {
   CATALOG_PRIMARY_NAV,
   CLOTHING_SECTION_CATEGORY_SLUGS,
@@ -28,8 +30,17 @@ const AVAILABILITY_FILTERS = [
   { value: "sold-out", label: "Нет в наличии" },
 ];
 
+// FE-004 A3: products fetched per page in medusa mode.
+const CATALOG_PAGE_SIZE = 24;
+
 function CatalogContent() {
-  const { products, status, refetch } = useCatalog();
+  const {
+    products: contextProducts,
+    source,
+    status: contextStatus,
+    refetch: contextRefetch,
+  } = useCatalog();
+  const isMedusa = source === "medusa";
   const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
@@ -42,6 +53,127 @@ function CatalogContent() {
 
   const [sortBy, setSortBy] = useState("default");
   const [openFacet, setOpenFacet] = useState<string | null>(null);
+
+  // --- FE-004 A3/A5: catalog data source -----------------------------------
+  // Mock mode keeps the previous behaviour: the global context holds the full
+  // mock list and every filter runs client-side. Medusa mode instead fetches the
+  // catalog a page at a time with its OWN request (independent of the global
+  // context), filters categories server-side, and reveals more via "Показать
+  // ещё" until Medusa's reported count is exhausted.
+  const [categoryMap, setCategoryMap] = useState<Map<string, string> | null>(null);
+  const [pageData, setPageData] = useState<{ key: string; products: Product[]; count: number } | null>(null);
+  const [pageErrorKey, setPageErrorKey] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
+
+  // Slug (== Medusa category handle) → id, resolved for server-side filtering.
+  const categoryId = categoryParam ? categoryMap?.get(categoryParam) : undefined;
+  const queryKey = categoryParam ?? "__all__";
+  const categoriesReady = categoryMap !== null;
+  const hasPageForKey = pageData?.key === queryKey;
+  const pageErroredForKey = pageErrorKey === queryKey;
+
+  // Load categories once (medusa only), cached in state for slug→id mapping.
+  useEffect(() => {
+    if (!isMedusa) return;
+    const controller = new AbortController();
+    fetchMedusaCategories(controller.signal)
+      .then((categories) => {
+        if (controller.signal.aborted) return;
+        setCategoryMap(
+          new Map(categories.map((category): [string, string] => [category.handle, category.id])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("Не удалось загрузить категории каталога.", error);
+        // Empty map = degrade to client-side category filtering over loaded pages.
+        setCategoryMap(new Map());
+      });
+    return () => controller.abort();
+  }, [isMedusa]);
+
+  // Load the first page whenever the selected category changes. Loading/error are
+  // DERIVED below from whether pageData matches queryKey, so this effect never
+  // sets state synchronously (keeps react-hooks/set-state-in-effect satisfied).
+  useEffect(() => {
+    if (!isMedusa) return;
+    if (categoryParam && !categoriesReady) return; // wait for the slug→id map
+    if (hasPageForKey || pageErroredForKey) return;
+
+    const controller = new AbortController();
+    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset: 0, categoryId }, controller.signal)
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setPageData({ key: queryKey, products: page.products, count: page.count });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("Не удалось загрузить страницу каталога.", error);
+        setPageErrorKey(queryKey);
+      });
+    return () => controller.abort();
+  }, [isMedusa, categoryParam, categoriesReady, hasPageForKey, pageErroredForKey, categoryId, queryKey]);
+
+  // Abort any in-flight "load more" on unmount.
+  useEffect(() => () => loadMoreAbortRef.current?.abort(), []);
+
+  const handleLoadMore = () => {
+    if (!isMedusa || !pageData || isLoadingMore) return;
+    if (pageData.products.length >= pageData.count) return;
+
+    loadMoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadMoreAbortRef.current = controller;
+    const keyAtRequest = pageData.key;
+    const offset = pageData.products.length;
+
+    setIsLoadingMore(true);
+    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset, categoryId }, controller.signal)
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setPageData((previous) => {
+          // Ignore the response if the category changed while it was in flight.
+          if (!previous || previous.key !== keyAtRequest) return previous;
+          const seen = new Set(previous.products.map((item) => item.id));
+          const merged = [
+            ...previous.products,
+            ...page.products.filter((item) => !seen.has(item.id)),
+          ];
+          return { key: previous.key, products: merged, count: page.count };
+        });
+        setIsLoadingMore(false);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("Не удалось загрузить ещё товары.", error);
+        setIsLoadingMore(false);
+      });
+  };
+
+  const retry = () => {
+    if (isMedusa) {
+      // Clearing the error for this key lets the first-page effect refetch.
+      setPageErrorKey((previous) => (previous === queryKey ? null : previous));
+      return;
+    }
+    contextRefetch();
+  };
+
+  // Unified view over the two data sources.
+  const medusaPage = hasPageForKey ? pageData : null;
+  const products = isMedusa ? medusaPage?.products ?? [] : contextProducts;
+  const status: "error" | "loading" | "ready" = isMedusa
+    ? pageErroredForKey
+      ? "error"
+      : medusaPage
+        ? "ready"
+        : "loading"
+    : contextStatus;
+  const hasMore = Boolean(isMedusa && medusaPage && medusaPage.products.length < medusaPage.count);
   const colorFilters = Array.from(
     new Map(
       products.flatMap((product) =>
@@ -55,8 +187,16 @@ function CatalogContent() {
 
   const category = categoryParam ? getCategoryBySlug(categoryParam) : undefined;
   const material = materialParam ? getMaterialBySlug(materialParam) : undefined;
+  // FE-004 A3 — KNOWN LIMITATION: in medusa mode only the category tab is applied
+  // server-side (via category_id). Every filter below — the section/material
+  // narrowing here and the size/color/price/availability facets in the next
+  // .filter() — runs CLIENT-SIDE over the products already loaded into the page.
+  // With today's catalog (12 products, a single page of 24) this is exact; once
+  // the catalog grows beyond one page these would need to move server-side.
   const filteredProducts = products.filter((product) => {
     if (categoryParam) {
+      // Server already narrowed by category id — accept the loaded page as-is.
+      if (isMedusa && categoryId) return true;
       return category
         ? product.categorySlug === category.slug
         : product.category === categoryParam;
@@ -353,7 +493,7 @@ function CatalogContent() {
               <p className={styles.emptyText}>
                 Не удалось загрузить товары. Проверьте подключение и попробуйте ещё раз.
               </p>
-              <button type="button" className={styles.retryButton} onClick={refetch}>
+              <button type="button" className={styles.retryButton} onClick={retry}>
                 Повторить
               </button>
             </div>
@@ -404,6 +544,22 @@ function CatalogContent() {
                   {filteredProducts.map((product) => (
                     <ProductCard key={product.id} product={product} />
                   ))}
+                </div>
+              )}
+
+              {/* FE-004 A3: paginate the medusa catalog until count is exhausted.
+                  Compact indicator while the next page loads; button otherwise. */}
+              {isMedusa && (hasMore || isLoadingMore) && (
+                <div className={styles.loadMore}>
+                  {isLoadingMore ? (
+                    <span className={styles.loadMoreStatus} role="status" aria-live="polite">
+                      Загрузка…
+                    </span>
+                  ) : (
+                    <button type="button" className={styles.loadMoreButton} onClick={handleLoadMore}>
+                      Показать ещё
+                    </button>
+                  )}
                 </div>
               )}
             </>

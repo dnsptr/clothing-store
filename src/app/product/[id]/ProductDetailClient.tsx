@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Product } from "../../../data/mockData";
@@ -9,6 +9,7 @@ import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
 import { withBasePath } from "../../../lib/assets";
 import { formatPrice } from "../../../lib/format";
+import { fetchMedusaProductByHandle, isMedusaConfigured } from "../../../lib/medusa";
 import styles from "./product.module.css";
 
 const PRODUCT_PANELS = [
@@ -100,9 +101,58 @@ function ProductUnavailable() {
 export default function ProductDetailClient({ product: initialProduct }: { product: Product }) {
   const { products, source, status } = useCatalog();
   const medusaProduct = products.find((item) => item.id === initialProduct.id);
+
+  // FE-004 A2: the global catalog context only holds the FIRST page of products,
+  // so a product beyond that page is absent from `products`. Rather than showing
+  // "Товар недоступен" immediately, the PDP resolves its own product by handle.
+  // State is keyed by product id so a stale result never leaks across navigations
+  // (and so we can derive loading without a set-state-in-effect violation).
+  const [selfResult, setSelfResult] = useState<{ id: string; product: Product | null } | null>(null);
+  const [selfErrorId, setSelfErrorId] = useState<string | null>(null);
+
+  const resolvedForThisId = selfResult?.id === initialProduct.id;
+  const erroredForThisId = selfErrorId === initialProduct.id;
+  // Only fall back to a self-fetch once the context has settled (not still loading
+  // its first page) and the product truly isn't there. Gated on isMedusaConfigured
+  // so we never fire a doomed request in mock/misconfigured modes.
+  const shouldSelfFetch =
+    isMedusaConfigured && !medusaProduct && status !== "loading";
+  const isSelfLoading = shouldSelfFetch && !resolvedForThisId && !erroredForThisId;
+
+  useEffect(() => {
+    if (!shouldSelfFetch || resolvedForThisId || erroredForThisId) return;
+
+    const controller = new AbortController();
+    // The handle convention mirrors the mock/import mapping: `mario-mikke-<id>`.
+    fetchMedusaProductByHandle(`mario-mikke-${initialProduct.id}`, controller.signal)
+      .then((found) => {
+        if (controller.signal.aborted) return;
+        setSelfResult({ id: initialProduct.id, product: found });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("[PDP] Не удалось загрузить товар по handle.", error);
+        setSelfErrorId(initialProduct.id);
+      });
+
+    return () => controller.abort();
+  }, [shouldSelfFetch, resolvedForThisId, erroredForThisId, initialProduct.id]);
+
   // Mock mode: the static shell IS the real product. Medusa mode: render ONLY a
   // product built from Medusa data — never the mock shell (FE-002 / ADR-001 §6).
-  const product = source === "mock" ? initialProduct : medusaProduct ?? null;
+  if (source === "mock") {
+    return (
+      <>
+        <Breadcrumbs productName={initialProduct.name} />
+        <ProductView product={initialProduct} />
+      </>
+    );
+  }
+
+  const product =
+    medusaProduct ??
+    (selfResult && selfResult.id === initialProduct.id ? selfResult.product : null);
 
   if (product) {
     return (
@@ -116,7 +166,7 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
   return (
     <>
       <Breadcrumbs />
-      {status === "loading" ? <ProductSkeleton /> : <ProductUnavailable />}
+      {status === "loading" || isSelfLoading ? <ProductSkeleton /> : <ProductUnavailable />}
     </>
   );
 }
@@ -129,6 +179,14 @@ function ProductView({ product }: { product: Product }) {
     (name) => product.colors.find((color) => color.name === name) ?? { name, hex: "#808080" },
   );
   const sizes = product.options.find((option) => option.title === "Размер")?.values ?? [];
+
+  // FE-006 B3: a product with exactly one size (incl. "One Size") has no real
+  // size choice — auto-select it, present the size as a static badge, and never
+  // demand "выберите размер". `requiresSizeChoice` gates the interactive grid.
+  const isSingleSize = sizes.length === 1;
+  const soleSize = sizes[0] ?? "";
+  const requiresSizeChoice = sizes.length > 1;
+
   const defaultColor =
     colors.find((color) =>
       product.variants.some(
@@ -136,20 +194,26 @@ function ProductView({ product }: { product: Product }) {
       ),
     ) ?? colors[0] ?? null;
   const [selectedColor, setSelectedColor] = useState(defaultColor);
-  const [selectedSize, setSelectedSize] = useState("");
+  const [selectedSize, setSelectedSize] = useState(isSingleSize ? soleSize : "");
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
-  const [error, setError] = useState("");
   const [savedPhotoIndexes, setSavedPhotoIndexes] = useState<number[]>([]);
   const [openPanels, setOpenPanels] = useState<Record<string, boolean>>({});
 
   const lookProducts = products.filter((item) => item.id !== product.id).slice(0, 2);
+
+  // The selected variant matches only along the dimensions this product actually
+  // has (a product may lack a size or a colour axis).
   const selectedVariant = product.variants.find(
     (variant) =>
       variant.available &&
-      variant.options.Размер === selectedSize &&
-      variant.options.Цвет === selectedColor?.name,
+      (sizes.length === 0 || variant.options.Размер === selectedSize) &&
+      (colorValues.length === 0 || variant.options.Цвет === selectedColor?.name),
   );
 
+  // FE-006 B1/B2: cross availability. A size/colour is offered only when at least
+  // one AVAILABLE variant exists for it given the current opposite-axis choice.
+  // Combinations that are out of stock OR that don't exist at all resolve to
+  // "unavailable" and are rendered disabled (never hidden).
   const isColorAvailable = (colorName: string) =>
     product.variants.some(
       (variant) =>
@@ -166,23 +230,42 @@ function ProductView({ product }: { product: Product }) {
         (!selectedColor || variant.options.Цвет === selectedColor.name),
     );
 
+  // FE-006 B4: the primary action is enabled only for a fully-selected, existing
+  // and available combination (and while the cart isn't mutating).
+  const canAddToCart = Boolean(selectedVariant && selectedColor) && !isCartMutating;
+
+  // FE-006 B3/B5: guidance shown only when a real size choice is still pending
+  // AND at least one size is actually available (so a fully sold-out product does
+  // not nudge the shopper toward a choice they can't make). Russian copy, muted
+  // style — never shown for single-size products.
+  const sizeHint =
+    requiresSizeChoice && !selectedSize && sizes.some(isSizeAvailable)
+      ? "Выберите размер"
+      : "";
+
+  const handleSelectColor = (color: { name: string; hex: string }) => {
+    setSelectedColor(color);
+    // Keep the selection coherent: if the chosen colour has no available variant
+    // for the currently picked size, drop the size so the UI can never hold an
+    // unavailable combination (single-size products stay auto-selected).
+    if (
+      selectedSize &&
+      !product.variants.some(
+        (variant) =>
+          variant.available &&
+          variant.options.Цвет === color.name &&
+          variant.options.Размер === selectedSize,
+      )
+    ) {
+      setSelectedSize(isSingleSize ? soleSize : "");
+    }
+  };
+
   const handleAddToCart = () => {
-    if (!selectedSize) {
-      setError("Пожалуйста, выберите размер");
-      return;
-    }
+    // Guarded by the disabled button (B4); this is a defensive no-op for
+    // keyboard/programmatic activation of an incomplete selection.
+    if (!selectedVariant || !selectedColor) return;
 
-    if (!selectedColor) {
-      setError("Пожалуйста, выберите цвет");
-      return;
-    }
-
-    if (!selectedVariant) {
-      setError("Выбранного варианта нет в наличии");
-      return;
-    }
-
-    setError("");
     addToCart({
       product,
       selectedSize,
@@ -247,63 +330,85 @@ function ProductView({ product }: { product: Product }) {
               </h2>
               <div className={styles.colorList}>
                 {colors.map((color) => {
-                  const isSelected = selectedColor?.name === color.name;
                   const isDisabled = !isColorAvailable(color.name);
+                  const isSelected = !isDisabled && selectedColor?.name === color.name;
 
                   return (
                     <button
                       type="button"
                       key={color.name}
-                      className={`${styles.colorDot} ${isSelected ? styles.colorDotActive : ""}`}
+                      className={`${styles.colorDot} ${isSelected ? styles.colorDotActive : ""} ${
+                        isDisabled ? styles.colorDotDisabled : ""
+                      }`}
                       style={{ backgroundColor: color.hex }}
                       onClick={() => {
-                        setSelectedColor(color);
-                        setError("");
+                        if (isDisabled) return;
+                        handleSelectColor(color);
                       }}
                       aria-label={`Выбрать цвет ${color.name}`}
                       aria-pressed={isSelected}
-                      disabled={isDisabled}
+                      aria-disabled={isDisabled}
                     />
                   );
                 })}
               </div>
             </section>
 
-            <section className={styles.optionSection} aria-labelledby="size-title">
-              <div className={styles.sizeSectionHeader}>
-                <h2 className={styles.optionTitle} id="size-title">
-                  Размер
-                </h2>
-                <button type="button" className={styles.sizeGuideLink} onClick={() => setIsSizeGuideOpen(true)}>
-                  Таблица размеров
-                </button>
-              </div>
-              <div className={styles.sizeList} role="group" aria-label="Выбор размера">
-                {sizes.map((size) => {
-                  const isSelected = selectedSize === size;
-                  const isDisabled = !isSizeAvailable(size);
+            {sizes.length > 0 && (
+              <section className={styles.optionSection} aria-labelledby="size-title">
+                <div className={styles.sizeSectionHeader}>
+                  <h2 className={styles.optionTitle} id="size-title">
+                    Размер
+                  </h2>
+                  <button type="button" className={styles.sizeGuideLink} onClick={() => setIsSizeGuideOpen(true)}>
+                    Таблица размеров
+                  </button>
+                </div>
+                {requiresSizeChoice ? (
+                  <div className={styles.sizeList} role="group" aria-label="Выбор размера">
+                    {sizes.map((size) => {
+                      const isDisabled = !isSizeAvailable(size);
+                      const isSelected = !isDisabled && selectedSize === size;
 
-                  return (
-                    <button
-                      type="button"
-                      key={size}
-                      className={`${styles.sizeBtn} ${isSelected ? styles.sizeBtnActive : ""}`}
-                      onClick={() => {
-                        setSelectedSize(size);
-                        setError("");
-                      }}
-                      aria-pressed={isSelected}
-                      disabled={isDisabled}
-                    >
-                      {size}
-                    </button>
-                  );
-                })}
-              </div>
-              {error && <p className={styles.error}>{error}</p>}
-            </section>
+                      return (
+                        <button
+                          type="button"
+                          key={size}
+                          className={`${styles.sizeBtn} ${isSelected ? styles.sizeBtnActive : ""} ${
+                            isDisabled ? styles.sizeBtnDisabled : ""
+                          }`}
+                          onClick={() => {
+                            if (isDisabled) return;
+                            setSelectedSize(size);
+                          }}
+                          aria-pressed={isSelected}
+                          aria-disabled={isDisabled}
+                        >
+                          {size}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  // FE-006 B3: single size → inactive badge, no size prompt.
+                  <span
+                    className={styles.sizeBadge}
+                    aria-label={`Единственный доступный размер: ${soleSize}`}
+                  >
+                    {soleSize}
+                  </span>
+                )}
+                {sizeHint && <p className={styles.selectionHint}>{sizeHint}</p>}
+              </section>
+            )}
 
-            <button type="button" className={styles.addToCartBtn} onClick={handleAddToCart} disabled={isCartMutating} aria-busy={isCartMutating}>
+            <button
+              type="button"
+              className={styles.addToCartBtn}
+              onClick={handleAddToCart}
+              disabled={!canAddToCart}
+              aria-busy={isCartMutating}
+            >
               Добавить в корзину
             </button>
 
