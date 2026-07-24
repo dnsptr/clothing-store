@@ -29,7 +29,7 @@ const AVAILABILITY_FILTERS = [
 ];
 
 function CatalogContent() {
-  const { products } = useCatalog();
+  const { products, status, refetch } = useCatalog();
   const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
@@ -332,45 +332,81 @@ function CatalogContent() {
         </div>
 
         <section className={styles.shell} aria-label="Товары">
-          {hasActiveFilters && (
-            <div className={styles.activeFilters} aria-label="Активные фильтры">
-              {activeFilterChips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  className={styles.filterChip}
-                  onClick={() => clearCatalogParams([chip.key])}
-                >
-                  {chip.label}
-                  <span aria-hidden="true">×</span>
-                </button>
+          {status === "loading" ? (
+            <div
+              className={styles.grid}
+              role="status"
+              aria-busy="true"
+              aria-label="Загрузка товаров"
+            >
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className={styles.skeletonCard} aria-hidden="true">
+                  <div className={styles.skeletonImage} />
+                  <div className={styles.skeletonLine} />
+                  <div className={`${styles.skeletonLine} ${styles.skeletonLineShort}`} />
+                </div>
               ))}
-              <button
-                type="button"
-                className={styles.clearFilters}
-                onClick={() => clearCatalogParams(["size", "color", "price", "availability"])}
-              >
-                Сбросить фильтры
+            </div>
+          ) : status === "error" ? (
+            <div className={styles.emptyState} role="alert">
+              <h2 className={styles.emptyTitle}>Каталог временно недоступен</h2>
+              <p className={styles.emptyText}>
+                Не удалось загрузить товары. Проверьте подключение и попробуйте ещё раз.
+              </p>
+              <button type="button" className={styles.retryButton} onClick={refetch}>
+                Повторить
               </button>
             </div>
-          )}
-
-          {filteredProducts.length === 0 ? (
+          ) : products.length === 0 ? (
             <div className={styles.emptyState}>
-              <h2 className={styles.emptyTitle}>Категория пуста</h2>
+              <h2 className={styles.emptyTitle}>Товары не найдены</h2>
               <p className={styles.emptyText}>
-                Сейчас в этом разделе нет товаров. Вернитесь ко всему каталогу или выберите другую категорию.
+                В каталоге пока нет товаров. Загляните позже — мы обновляем ассортимент.
               </p>
-              <Link href="/catalog" className={styles.emptyLink}>
-                Смотреть все
-              </Link>
             </div>
           ) : (
-            <div className={styles.grid}>
-              {filteredProducts.map((product) => (
-                <ProductCard key={product.id} product={product} />
-              ))}
-            </div>
+            <>
+              {hasActiveFilters && (
+                <div className={styles.activeFilters} aria-label="Активные фильтры">
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      className={styles.filterChip}
+                      onClick={() => clearCatalogParams([chip.key])}
+                    >
+                      {chip.label}
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className={styles.clearFilters}
+                    onClick={() => clearCatalogParams(["size", "color", "price", "availability"])}
+                  >
+                    Сбросить фильтры
+                  </button>
+                </div>
+              )}
+
+              {filteredProducts.length === 0 ? (
+                <div className={styles.emptyState}>
+                  <h2 className={styles.emptyTitle}>Категория пуста</h2>
+                  <p className={styles.emptyText}>
+                    Сейчас в этом разделе нет товаров. Вернитесь ко всему каталогу или выберите другую категорию.
+                  </p>
+                  <Link href="/catalog" className={styles.emptyLink}>
+                    Смотреть все
+                  </Link>
+                </div>
+              ) : (
+                <div className={styles.grid}>
+                  {filteredProducts.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </section>
       </main>

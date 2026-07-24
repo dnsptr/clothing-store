@@ -45,10 +45,84 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
   );
 }
 
+function Breadcrumbs({ productName }: { productName?: string }) {
+  return (
+    <div className={styles.breadcrumbs}>
+      <Link href="/">Главная</Link>
+      <span>/</span>
+      <span>Каталог</span>
+      <span>/</span>
+      <span>{productName ?? "Товар"}</span>
+    </div>
+  );
+}
+
+function ProductSkeleton() {
+  return (
+    <div
+      className={styles.productGrid}
+      role="status"
+      aria-busy="true"
+      aria-label="Загрузка товара"
+    >
+      <div className={styles.gallery} aria-hidden="true">
+        {Array.from({ length: 2 }).map((_, index) => (
+          <div key={index} className={styles.skeletonImage} />
+        ))}
+      </div>
+      <aside className={styles.sidebar} aria-hidden="true">
+        <div className={styles.details}>
+          <div className={`${styles.skeletonLine} ${styles.skeletonLineShort}`} />
+          <div className={`${styles.skeletonLine} ${styles.skeletonLineWide}`} />
+          <div className={styles.skeletonLine} />
+          <div className={styles.skeletonBlock} />
+          <div className={styles.skeletonButton} />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function ProductUnavailable() {
+  return (
+    <div className={styles.unavailable} role="status">
+      <h1 className={styles.unavailableTitle}>Товар недоступен</h1>
+      <p className={styles.unavailableText}>
+        Этого товара нет в каталоге или он больше не продаётся. Посмотрите другие модели в нашем каталоге.
+      </p>
+      <Link href="/catalog" className={styles.unavailableLink}>
+        Вернуться в каталог
+      </Link>
+    </div>
+  );
+}
+
 export default function ProductDetailClient({ product: initialProduct }: { product: Product }) {
-  const { products, source } = useCatalog();
-  const product = products.find((item) => item.id === initialProduct.id) ?? initialProduct;
-  const isMedusaProductLoaded = source === "mock" || products.some((item) => item.id === initialProduct.id);
+  const { products, source, status } = useCatalog();
+  const medusaProduct = products.find((item) => item.id === initialProduct.id);
+  // Mock mode: the static shell IS the real product. Medusa mode: render ONLY a
+  // product built from Medusa data — never the mock shell (FE-002 / ADR-001 §6).
+  const product = source === "mock" ? initialProduct : medusaProduct ?? null;
+
+  if (product) {
+    return (
+      <>
+        <Breadcrumbs productName={product.name} />
+        <ProductView product={product} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Breadcrumbs />
+      {status === "loading" ? <ProductSkeleton /> : <ProductUnavailable />}
+    </>
+  );
+}
+
+function ProductView({ product }: { product: Product }) {
+  const { products } = useCatalog();
   const { addToCart, isCartMutating } = useCart();
   const colorValues = product.options.find((option) => option.title === "Цвет")?.values ?? [];
   const colors = colorValues.map(
@@ -93,10 +167,6 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
     );
 
   const handleAddToCart = () => {
-    if (!isMedusaProductLoaded) {
-      setError("Товар загружается из Medusa. Повторите попытку через несколько секунд.");
-      return;
-    }
     if (!selectedSize) {
       setError("Пожалуйста, выберите размер");
       return;

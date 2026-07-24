@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { MOCK_PRODUCTS } from "../../../data/mockData";
 import ProductDetailClient from "./ProductDetailClient";
 import Header from "../../../components/Header";
@@ -31,15 +30,6 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
 
       <main className={styles.pageWrapper}>
         <div className={styles.shell}>
-          {/* Breadcrumbs */}
-          <div className={styles.breadcrumbs}>
-            <Link href="/">Главная</Link>
-            <span>/</span>
-            <span>Каталог</span>
-            <span>/</span>
-            <span>{product.name}</span>
-          </div>
-
           <ProductDetailClient product={product} />
         </div>
       </main>
