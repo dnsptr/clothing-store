@@ -17,14 +17,6 @@ function MenuIcon({ isOpen }: { isOpen: boolean }) {
   );
 }
 
-function SearchIcon() {
-  return (
-    <svg className={styles.icon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" d="m20 20-4.6-4.6M18 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
-    </svg>
-  );
-}
-
 function BookmarkIcon() {
   return (
     <svg className={styles.icon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -45,14 +37,6 @@ function UserIcon() {
   return (
     <svg className={styles.icon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" d="M12 12.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.8 20.25a7.4 7.4 0 0 1 14.4 0" />
-    </svg>
-  );
-}
-
-function LocationIcon() {
-  return (
-    <svg className={styles.locationIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" d="m5 12 14-7-7 14-1.7-6.3L5 12Z" />
     </svg>
   );
 }
@@ -118,14 +102,10 @@ export default function Header() {
           />
         </Link>
 
+        {/* Выбор города и поиск убраны до реализации: кнопки не имели
+            обработчиков вообще. Кнопка города при этом обещала выбор региона
+            доставки, которого нет ни в витрине, ни в Medusa. */}
         <div className={styles.actions}>
-          <button className={styles.locationButton} aria-label="Город Москва">
-            <LocationIcon />
-            <span>Москва</span>
-          </button>
-          <button className={styles.iconButton} aria-label="Поиск">
-            <SearchIcon />
-          </button>
           <Link href="/favorites" className={styles.iconButton} aria-label="Избранное">
             <BookmarkIcon />
             {favoriteCount > 0 && <span className={styles.cartBadge}>{favoriteCount}</span>}

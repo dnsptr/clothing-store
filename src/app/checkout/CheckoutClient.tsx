@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
-import { withBasePath } from "../../lib/assets";
-import { formatPrice } from "../../lib/format";
+import { productImageSrc } from "../../lib/assets";
+import { formatPrice, formatPriceOrUnknown } from "../../lib/format";
+import { isCheckoutEnabled, type MedusaShippingOption } from "../../lib/medusa";
 import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
 import styles from "./checkout.module.css";
 
@@ -42,9 +43,14 @@ type FormErrors = Record<string, string>;
 
 /**
  * Validate all relevant fields. Returns an errors object; empty means valid.
- * deliveryIsPickup — when true, city/zip/address are not required.
+ *
+ * Адрес обязателен всегда. Раньше его требование снималось для варианта
+ * «Самовывоз», которого не существовало ни в одной опции доставки Medusa: в
+ * результате заказ уходил на бэкенд с пустыми городом, улицей и индексом — и
+ * при этом с курьерским способом доставки. Исполнить такой заказ нельзя.
+ * Появится настоящая опция самовывоза — вернётся и ветка без адреса.
  */
-function validateForm(form: FormFields, deliveryIsPickup: boolean): FormErrors {
+function validateForm(form: FormFields): FormErrors {
   const errors: FormErrors = {};
 
   if (!form.firstName.trim()) {
@@ -67,27 +73,25 @@ function validateForm(form: FormFields, deliveryIsPickup: boolean): FormErrors {
     errors.phone = "Введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX";
   }
 
-  if (!deliveryIsPickup) {
-    if (!form.city.trim()) {
-      errors.city = "Введите город";
-    }
+  if (!form.city.trim()) {
+    errors.city = "Введите город";
+  }
 
-    if (!form.zip.trim()) {
-      errors.zip = "Введите индекс";
-    } else if (!/^\d{6}$/.test(form.zip)) {
-      errors.zip = "Индекс — 6 цифр";
-    }
+  if (!form.zip.trim()) {
+    errors.zip = "Введите индекс";
+  } else if (!/^\d{6}$/.test(form.zip)) {
+    errors.zip = "Индекс — 6 цифр";
+  }
 
-    if (!form.address.trim()) {
-      errors.address = "Введите адрес";
-    }
+  if (!form.address.trim()) {
+    errors.address = "Введите адрес";
   }
 
   return errors;
 }
 
 /** Validate a single field on blur, returning an error string or "". */
-function validateField(name: keyof FormFields, value: string, deliveryIsPickup: boolean): string {
+function validateField(name: keyof FormFields, value: string): string {
   switch (name) {
     case "firstName":
       return value.trim() ? "" : "Введите имя";
@@ -100,14 +104,11 @@ function validateField(name: keyof FormFields, value: string, deliveryIsPickup: 
       if (!value.trim()) return "Введите телефон";
       return normalizePhone(value) !== null ? "" : "Введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX";
     case "city":
-      if (deliveryIsPickup) return "";
       return value.trim() ? "" : "Введите город";
     case "zip":
-      if (deliveryIsPickup) return "";
       if (!value.trim()) return "Введите индекс";
       return /^\d{6}$/.test(value) ? "" : "Индекс — 6 цифр";
     case "address":
-      if (deliveryIsPickup) return "";
       return value.trim() ? "" : "Введите адрес";
     default:
       return "";
@@ -118,9 +119,26 @@ function validateField(name: keyof FormFields, value: string, deliveryIsPickup: 
 
 export default function CheckoutClient() {
   const { products } = useCatalog();
-  const { cartItems, cartShippingTotal, cartTotal, addToCart, completeCheckout, prepareCheckout, updateQuantity, removeFromCart } = useCart();
+  const {
+    cartItems,
+    cartShippingTotal,
+    cartTotal,
+    addToCart,
+    completeCheckout,
+    getShippingOptions,
+    prepareCheckout,
+    updateQuantity,
+    removeFromCart,
+  } = useCart();
 
-  const [delivery, setDelivery] = useState<"courier" | "pickup" | "post">("courier");
+  // Способы доставки приходят из Medusa. Раньше здесь были три захардкоженные
+  // радиокнопки («Курьером», «Самовывоз», «Почтой России»), не связанные ни с
+  // одной реальной опцией: выбор покупателя никуда не уходил, а в заказ всегда
+  // подставлялась единственная существующая опция.
+  const [shippingOptions, setShippingOptions] = useState<MedusaShippingOption[] | null>(null);
+  const [shippingOptionsFailed, setShippingOptionsFailed] = useState(false);
+  const [selectedShippingOptionId, setSelectedShippingOptionId] = useState("");
+  const [hasConsented, setHasConsented] = useState(false);
   const [form, setForm] = useState<FormFields>({
     firstName: "",
     lastName: "",
@@ -142,6 +160,33 @@ export default function CheckoutClient() {
   const cartIds = cartItems.map((i) => i.product.id);
   const recommendations = products.filter((p) => !cartIds.includes(p.id)).slice(0, 3);
 
+  const hasCartItems = cartItems.length > 0;
+  const needsShippingOptions =
+    isCheckoutEnabled && hasCartItems && shippingOptions === null && !shippingOptionsFailed;
+
+  useEffect(() => {
+    if (!needsShippingOptions) return;
+
+    let isActive = true;
+    getShippingOptions()
+      .then((options) => {
+        if (!isActive) return;
+        setShippingOptions(options);
+        // Предвыбор единственного варианта: заставлять выбирать из одного
+        // пункта незачем, но и молча подставлять один из нескольких нельзя.
+        if (options.length === 1) setSelectedShippingOptionId(options[0].id);
+      })
+      .catch((error: unknown) => {
+        if (!isActive) return;
+        console.error("[Checkout] Не удалось загрузить способы доставки.", error);
+        setShippingOptionsFailed(true);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [needsShippingOptions, getShippingOptions]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -153,7 +198,7 @@ export default function CheckoutClient() {
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    const error = validateField(name as keyof FormFields, value, delivery === "pickup");
+    const error = validateField(name as keyof FormFields, value);
     setErrors((prev) => ({ ...prev, [name]: error }));
   };
 
@@ -161,7 +206,13 @@ export default function CheckoutClient() {
     e.preventDefault();
 
     // Run full validation
-    const newErrors = validateForm(form, delivery === "pickup");
+    const newErrors = validateForm(form);
+    if (!selectedShippingOptionId) {
+      newErrors.shippingOption = "Выберите способ доставки";
+    }
+    if (!hasConsented) {
+      newErrors.consent = "Подтвердите согласие, чтобы оформить заказ";
+    }
     if (Object.values(newErrors).some(Boolean)) {
       setErrors(newErrors);
       return;
@@ -178,6 +229,7 @@ export default function CheckoutClient() {
       address: form.address.trim(),
       apartment: form.apartment.trim(),
       zip: form.zip,
+      shippingOptionId: selectedShippingOptionId,
       comment: form.comment,
     };
 
@@ -194,11 +246,30 @@ export default function CheckoutClient() {
     }
   };
 
+  // Пока платёжный провайдер не подключён, форму заказа показывать нельзя:
+  // встроенный провайдер Medusa авторизует любой платёж, поэтому заказ
+  // создался бы без оплаты, зарезервировал остаток и остался бы без чека.
+  if (!isCheckoutEnabled) {
+    return (
+      <div className={styles.empty}>
+        <h2 className={styles.emptyTitle}>Оформление заказа временно недоступно</h2>
+        <p className={styles.emptyText}>
+          Мы заканчиваем подключение онлайн-оплаты. Товары останутся в корзине —
+          оформить заказ можно будет сразу после запуска приёма платежей.
+        </p>
+        <Link href="/cart" className={styles.emptyLink}>Вернуться в корзину</Link>
+      </div>
+    );
+  }
+
   if (orderId) {
     return (
       <div className={`${styles.empty} ${styles.emptySubmitted}`}>
         <h2 className={styles.emptyTitle}>Заказ оформлен</h2>
-        <p className={styles.emptyText}>Тестовый заказ №{orderId} создан в Medusa.</p>
+        <p className={styles.emptyText}>
+          Номер заказа — №{orderId}. Мы отправили подтверждение на {form.email} и
+          свяжемся с вами по указанному телефону.
+        </p>
         <Link href="/" className={styles.emptyLink}>Вернуться на главную</Link>
       </div>
     );
@@ -229,7 +300,7 @@ export default function CheckoutClient() {
                 {/* Thumbnail */}
                 <div className={styles.orderItemImage}>
                   <Image
-                    src={withBasePath(item.product.images[0])}
+                    src={productImageSrc(item.product.images)}
                     alt={item.product.name}
                     fill
                     sizes="90px"
@@ -298,7 +369,7 @@ export default function CheckoutClient() {
                     <Link href={`/product/${product.id}`}>
                       <div className={styles.recommendImage}>
                         <Image
-                          src={withBasePath(product.images[0])}
+                          src={productImageSrc(product.images)}
                           alt={product.name}
                           fill
                           sizes="200px"
@@ -366,11 +437,11 @@ export default function CheckoutClient() {
             ))}
             <div className={styles.summaryRow}>
               <span>Доставка</span>
-              <span>{cartShippingTotal === 0 ? "Бесплатно" : formatPrice(cartShippingTotal)}</span>
+              <span>{cartShippingTotal === 0 ? "Бесплатно" : formatPriceOrUnknown(cartShippingTotal)}</span>
             </div>
             <div className={styles.summaryTotal}>
               <span>Итого</span>
-              <span>{formatPrice(cartTotal)}</span>
+              <span>{formatPriceOrUnknown(cartTotal)}</span>
             </div>
           </div>
 
@@ -442,87 +513,105 @@ export default function CheckoutClient() {
 
             <p className={`${styles.sectionTitle} ${styles.sectionTitleSpaced}`}>Доставка</p>
 
-            <div className={styles.deliveryOptions}>
-              {[
-                { id: "courier", label: "Курьером", sub: "Тестовая доставка Medusa" },
-                { id: "pickup", label: "Самовывоз из магазина", sub: "Бесплатно" },
-                { id: "post", label: "Почтой России", sub: "Тестовая доставка Medusa" },
-              ].map((opt) => (
-                <label key={opt.id} className={styles.deliveryOption}>
-                  <input
-                    type="radio"
-                    name="delivery"
-                    value={opt.id}
-                    checked={delivery === opt.id}
-                    onChange={() => setDelivery(opt.id as typeof delivery)}
-                  />
-                  <span>
-                    <strong className={styles.deliveryLabel}>{opt.label}</strong>
-                    <span className={styles.deliverySub}>{opt.sub}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            {delivery !== "pickup" && (
-              <>
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Город *</label>
+            {shippingOptionsFailed ? (
+              <p className={styles.fieldError} role="alert">
+                Не удалось загрузить способы доставки. Обновите страницу и попробуйте ещё раз.
+              </p>
+            ) : shippingOptions === null ? (
+              <p className={styles.deliverySub} role="status" aria-live="polite">
+                Загружаем способы доставки…
+              </p>
+            ) : shippingOptions.length === 0 ? (
+              <p className={styles.fieldError} role="alert">
+                Для этого заказа нет доступных способов доставки. Напишите нам — подберём вариант.
+              </p>
+            ) : (
+              <div className={styles.deliveryOptions}>
+                {shippingOptions.map((option) => (
+                  <label key={option.id} className={styles.deliveryOption}>
                     <input
-                      name="city"
-                      required
-                      maxLength={100}
-                      className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
-                      placeholder="Москва"
-                      value={form.city}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
+                      type="radio"
+                      name="shippingOption"
+                      value={option.id}
+                      checked={selectedShippingOptionId === option.id}
+                      onChange={() => {
+                        setSelectedShippingOptionId(option.id);
+                        setErrors((prev) => ({ ...prev, shippingOption: "" }));
+                      }}
                     />
-                    {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
-                  </div>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Индекс *</label>
-                    <input
-                      name="zip"
-                      required
-                      inputMode="numeric"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
-                      placeholder="123456"
-                      value={form.zip}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                    />
-                    {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
-                  </div>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Адрес *</label>
-                  <input
-                    name="address"
-                    required
-                    className={`${styles.formInput}${errors.address ? ` ${styles.formInputError}` : ""}`}
-                    placeholder="ул. Тверская, д. 1"
-                    value={form.address}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                  />
-                  {errors.address && <span className={styles.fieldError}>{errors.address}</span>}
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Квартира / офис</label>
-                  <input
-                    name="apartment"
-                    className={styles.formInput}
-                    placeholder="кв. 42"
-                    value={form.apartment}
-                    onChange={handleChange}
-                  />
-                </div>
-              </>
+                    <span>
+                      <strong className={styles.deliveryLabel}>{option.name}</strong>
+                      <span className={styles.deliverySub}>
+                        {typeof option.amount === "number"
+                          ? option.amount === 0
+                            ? "Бесплатно"
+                            : formatPrice(option.amount)
+                          : "Стоимость рассчитается после ввода адреса"}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             )}
+            {errors.shippingOption && (
+              <span className={styles.fieldError}>{errors.shippingOption}</span>
+            )}
+
+            <div className={styles.formRow}>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Город *</label>
+                <input
+                  name="city"
+                  required
+                  maxLength={100}
+                  className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
+                  placeholder="Москва"
+                  value={form.city}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                />
+                {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Индекс *</label>
+                <input
+                  name="zip"
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
+                  placeholder="123456"
+                  value={form.zip}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                />
+                {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
+              </div>
+            </div>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Адрес *</label>
+              <input
+                name="address"
+                required
+                className={`${styles.formInput}${errors.address ? ` ${styles.formInputError}` : ""}`}
+                placeholder="ул. Тверская, д. 1"
+                value={form.address}
+                onChange={handleChange}
+                onBlur={handleBlur}
+              />
+              {errors.address && <span className={styles.fieldError}>{errors.address}</span>}
+            </div>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Квартира / офис</label>
+              <input
+                name="apartment"
+                className={styles.formInput}
+                placeholder="кв. 42"
+                value={form.apartment}
+                onChange={handleChange}
+              />
+            </div>
 
             <div className={styles.formGroup}>
               <label className={styles.formLabel}>Комментарий к заказу</label>
@@ -536,13 +625,32 @@ export default function CheckoutClient() {
               />
             </div>
 
+            {/* Согласие фиксируется отдельным действием покупателя, а не
+                надписью под кнопкой: подтверждать согласие с документом нужно
+                осознанно, а сам факт согласия — доказуемо. */}
+            <label className={styles.consent}>
+              <input
+                type="checkbox"
+                checked={hasConsented}
+                onChange={(event) => {
+                  setHasConsented(event.target.checked);
+                  if (event.target.checked) setErrors((prev) => ({ ...prev, consent: "" }));
+                }}
+              />
+              <span>
+                Я соглашаюсь с{" "}
+                <Link href="/info/privacy" target="_blank">
+                  политикой обработки персональных данных
+                </Link>{" "}
+                и условиями продажи.
+              </span>
+            </label>
+            {errors.consent && <span className={styles.fieldError}>{errors.consent}</span>}
+
             <button type="submit" className={styles.submitBtn} disabled={isSubmitting}>
               {isSubmitting ? "Оформляем..." : "Подтвердить заказ"}
             </button>
-            {submitMessage && <p className={styles.formNote}>{submitMessage}</p>}
-            <p className={styles.formNote}>
-              Нажимая кнопку, вы соглашаетесь с условиями обработки персональных данных и публичной офертой.
-            </p>
+            {submitMessage && <p className={styles.formNote} role="alert">{submitMessage}</p>}
           </form>
         </div>
       </div>

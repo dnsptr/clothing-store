@@ -152,3 +152,18 @@
   }
 
 }
+
+/* Товары образа не загрузились. Место занимает сообщение, а не demo-карточки:
+   у них своя цена и наличие, и покупатель принял бы их за настоящие. */
+.outfitUnavailable {
+  padding: 48px 0;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.outfitUnavailable a {
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--text-primary);
+}

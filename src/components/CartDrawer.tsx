@@ -6,8 +6,9 @@ import Image from "next/image";
 import { useCart } from "../context/CartContext";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
-import { withBasePath } from "../lib/assets";
-import { formatPrice } from "../lib/format";
+import { productImageSrc } from "../lib/assets";
+import { formatPrice, formatPriceOrUnknown } from "../lib/format";
+import { isCheckoutEnabled } from "../lib/medusa";
 import styles from "./CartDrawer.module.css";
 
 export default function CartDrawer() {
@@ -92,7 +93,7 @@ export default function CartDrawer() {
                 {/* Product Thumbnail */}
                 <div className={styles.imageWrapper}>
                   <Image
-                    src={withBasePath(item.product.images[0])}
+                    src={productImageSrc(item.product.images)}
                     alt={item.product.name}
                     fill
                     sizes="80px"
@@ -185,15 +186,21 @@ export default function CartDrawer() {
           <div className={styles.footer}>
             <div className={styles.summaryRow}>
               <span className={styles.summaryLabel}>Итого</span>
-              <span className={styles.summaryValue}>{formatPrice(cartTotal)}</span>
+              <span className={styles.summaryValue}>{formatPriceOrUnknown(cartTotal)}</span>
             </div>
-            <Link
-              href="/checkout"
-              className={styles.checkoutBtn}
-              onClick={() => setIsCartOpen(false)}
-            >
-              Оформить заказ
-            </Link>
+            {isCheckoutEnabled ? (
+              <Link
+                href="/checkout"
+                className={styles.checkoutBtn}
+                onClick={() => setIsCartOpen(false)}
+              >
+                Оформить заказ
+              </Link>
+            ) : (
+              <p className={styles.checkoutUnavailable}>
+                Онлайн-оплата ещё подключается — оформить заказ пока нельзя.
+              </p>
+            )}
           </div>
         )}
       </div>

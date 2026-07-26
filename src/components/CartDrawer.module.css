@@ -290,3 +290,13 @@
 .checkoutBtn:hover {
   background-color: var(--accent-hover);
 }
+
+/* Оплата ещё не подключена — вместо кнопки честное объяснение. */
+.checkoutUnavailable {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}

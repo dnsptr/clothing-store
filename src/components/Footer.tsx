@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "@/hooks/useOverlayDismiss";
@@ -31,21 +31,11 @@ const footerColumns = [
 
 export default function Footer() {
   const [isSubscribeModalOpen, setIsSubscribeModalOpen] = useState(false);
-  const [email, setEmail] = useState("");
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const closeSubscribeModal = () => setIsSubscribeModalOpen(false);
 
   useBodyScrollLock(isSubscribeModalOpen);
   useOverlayDismiss(isSubscribeModalOpen, closeSubscribeModal);
-
-  const handleSubscribe = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!isEmailValid) return;
-
-    setIsSubscribed(true);
-  };
 
   return (
     <footer className={styles.footer}>
@@ -76,10 +66,7 @@ export default function Footer() {
               <button
                 type="button"
                 className={styles.submitBtn}
-                onClick={() => {
-                  setIsSubscribed(false);
-                  setIsSubscribeModalOpen(true);
-                }}
+                onClick={() => setIsSubscribeModalOpen(true)}
               >
                 Хочу
               </button>
@@ -128,47 +115,24 @@ export default function Footer() {
               <span aria-hidden="true" />
             </button>
 
-            {isSubscribed ? (
-              <div className={styles.subscribeSuccess}>
-                <h2 id="subscribe-modal-title" className={styles.modalTitle}>
-                  Спасибо за подписку
-                </h2>
-                <p className={styles.modalSuccessText}>Мы добавили {email} в список рассылки.</p>
-                <button type="button" className={styles.modalSubmitBtn} onClick={closeSubscribeModal}>
-                  Готово
-                </button>
-              </div>
-            ) : (
-              <>
-                <h2 id="subscribe-modal-title" className={styles.modalTitle}>
-                  Подписка на рассылку
-                </h2>
-                <form className={styles.modalForm} onSubmit={handleSubscribe}>
-                  <label className={styles.visuallyHidden} htmlFor="subscribe-email">
-                    Эл. почта
-                  </label>
-                  <input
-                    id="subscribe-email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="Эл. почта"
-                    className={styles.modalInput}
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                  />
-                  <button type="submit" className={styles.modalSubmitBtn} disabled={!isEmailValid}>
-                    Подписаться
-                  </button>
-                  <p className={styles.legalText}>
-                    Нажимая на кнопку «Подписаться», вы подтверждаете, что ознакомились с{" "}
-                    <Link href="/info/privacy">политикой конфиденциальности</Link>, и даете согласие на получение
-                    рассылки, в том числе рекламной.
-                  </p>
-                </form>
-              </>
-            )}
+            {/* Форма подписки убрана до появления рассылки.
+                Она показывала «Спасибо за подписку» и «Мы добавили <email> в
+                список рассылки», не сделав ни одного сетевого запроса: адрес
+                никуда не сохранялся, а согласие на рекламную рассылку при этом
+                фиксировалось. Собирать e-mail, которому некуда деться, нельзя
+                ни с точки зрения покупателя, ни с точки зрения 152-ФЗ. */}
+            <div className={styles.subscribeSuccess}>
+              <h2 id="subscribe-modal-title" className={styles.modalTitle}>
+                Рассылка ещё готовится
+              </h2>
+              <p className={styles.modalSuccessText}>
+                Мы настраиваем письма о новинках и специальных предложениях.
+                Подписка появится здесь, как только мы её запустим.
+              </p>
+              <button type="button" className={styles.modalSubmitBtn} onClick={closeSubscribeModal}>
+                Понятно
+              </button>
+            </div>
           </section>
         </div>
       )}

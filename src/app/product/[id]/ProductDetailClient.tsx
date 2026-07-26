@@ -7,7 +7,7 @@ import type { Product } from "../../../data/mockData";
 import { useCatalog } from "../../../context/CatalogContext";
 import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
-import { withBasePath } from "../../../lib/assets";
+import { productImageSrc, withBasePath } from "../../../lib/assets";
 import { formatPrice } from "../../../lib/format";
 import { fetchMedusaProductByHandle, isMedusaConfigured } from "../../../lib/medusa";
 import styles from "./product.module.css";
@@ -489,7 +489,7 @@ function ProductView({ product }: { product: Product }) {
           {lookProducts.map((item) => (
             <article className={styles.outfitCard} key={item.id}>
               <Link href={`/product/${item.id}`} className={styles.outfitImageLink} aria-label={item.name}>
-                <Image src={withBasePath(item.images[0])} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
+                <Image src={productImageSrc(item.images)} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
               </Link>
               <Link href={`/product/${item.id}`} className={styles.outfitName}>
                 {item.name}

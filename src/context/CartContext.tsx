@@ -12,7 +12,9 @@ import {
   isMedusaConfigured,
   initializeMedusaPaymentSession,
   listMedusaShippingOptions,
-  MVP_SHIPPING_OPTION_CODE,
+  mapCartLineToProduct,
+  type MedusaShippingOption,
+  type MedusaCartLine,
   removeMedusaCartLineItem,
   retrieveMedusaCart,
   storefrontDataMode,
@@ -40,6 +42,15 @@ export interface CheckoutDetails {
   address: string;
   apartment: string;
   zip: string;
+  /**
+   * Идентификатор выбранной опции доставки Medusa.
+   *
+   * Раньше выбор способа доставки жил только в состоянии формы и не доходил до
+   * бэкенда: любой заказ уезжал с единственной захардкоженной опцией
+   * «MVP доставка по России», независимо от того, что выбрал покупатель.
+   */
+  shippingOptionId: string;
+  comment: string;
 }
 
 interface CartContextType {
@@ -50,16 +61,21 @@ interface CartContextType {
   removeFromCart: (productId: string, size: string, colorHex: string) => Promise<void>;
   updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
   prepareCheckout: (details: CheckoutDetails) => Promise<void>;
+  getShippingOptions: () => Promise<MedusaShippingOption[]>;
   completeCheckout: () => Promise<{ id: string; displayId?: number | null }>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
-  cartTotal: number;
-  cartSubtotal: number;
-  cartShippingTotal: number;
-  cartTaxTotal: number;
-  cartDiscountTotal: number;
+  /** `null` — сумма неизвестна: сервер не ответил. Показывать её нельзя. */
+  cartTotal: number | null;
+  cartSubtotal: number | null;
+  cartShippingTotal: number | null;
+  cartTaxTotal: number | null;
+  cartDiscountTotal: number | null;
   isCartMutating: boolean;
+  /** Последняя неудавшаяся операция с корзиной, текстом для покупателя. */
+  cartError: string | null;
+  dismissCartError: () => void;
   favoriteProductIds: string[];
   favoriteCount: number;
   toggleFavorite: (productId: string) => void;
@@ -102,21 +118,88 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [serverCartTotal, setServerCartTotal] = useState<number | null>(null);
   const [serverCartTotals, setServerCartTotals] = useState({ subtotal: 0, shipping: 0, tax: 0, discount: 0 });
   const [mutationCount, setMutationCount] = useState(0);
+  const [cartError, setCartError] = useState<string | null>(null);
   const cartItemsRef = useRef<CartItem[]>([]);
   const mutationQueue = useRef(Promise.resolve());
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
-  const cartTotal = isMedusaConfigured && serverCartTotal !== null
-    ? serverCartTotal
-    : cartItems.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const isCartMutating = mutationCount > 0;
   const favoriteCount = favoriteProductIds.length;
-  const cartSubtotal = isMedusaConfigured && serverCartTotal !== null ? serverCartTotals.subtotal : cartTotal;
-  const cartShippingTotal = isMedusaConfigured && serverCartTotal !== null ? serverCartTotals.shipping : 0;
-  const cartTaxTotal = isMedusaConfigured && serverCartTotal !== null ? serverCartTotals.tax : 0;
-  const cartDiscountTotal = isMedusaConfigured && serverCartTotal !== null ? serverCartTotals.discount : 0;
+
+  // Кто считает деньги.
+  //
+  // В mock-режиме считать больше некому, поэтому сумма собирается на клиенте.
+  // В medusa-режиме единственный источник — ответ сервера (ADR-001 §5: цена,
+  // скидка, налог и итог подтверждаются backend). Раньше при недоступной
+  // корзине код тихо переключался на локальную сумму, посчитанную по ценам из
+  // localStorage — а они могли быть записаны когда угодно раньше и не
+  // проверялись ни на возраст, ни на версию схемы. Покупателю показывалась
+  // уверенная цифра, не имеющая отношения к тому, что спишет банк. Теперь
+  // неизвестная сумма так и остаётся неизвестной: `null` — это «не знаем», и
+  // интерфейс обязан показать именно это.
+  const isServerPricedCart = storefrontDataMode === "medusa";
+  const localCartTotal = cartItems.reduce(
+    (acc, item) => acc + item.product.price * item.quantity,
+    0,
+  );
+  const hasServerTotals = serverCartTotal !== null;
+  const cartTotal = isServerPricedCart ? serverCartTotal : localCartTotal;
+  const cartSubtotal = isServerPricedCart
+    ? (hasServerTotals ? serverCartTotals.subtotal : null)
+    : localCartTotal;
+  const cartShippingTotal = isServerPricedCart
+    ? (hasServerTotals ? serverCartTotals.shipping : null)
+    : 0;
+  const cartTaxTotal = isServerPricedCart
+    ? (hasServerTotals ? serverCartTotals.tax : null)
+    : 0;
+  const cartDiscountTotal = isServerPricedCart
+    ? (hasServerTotals ? serverCartTotals.discount : null)
+    : 0;
 
   // Shop Navigation
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  /**
+   * Опознать позицию серверной корзины, перебирая источники от самого полного
+   * к самому скудному.
+   *
+   * Порядок важен. Каталог даёт настоящую карточку с палитрой и размерной
+   * сеткой, поэтому идёт первым — и позиция, собранная раньше из строки
+   * Medusa, повышается до полноценной, как только каталог догрузился. Строка
+   * корзины идёт последней и НИКОГДА не приводит к отбрасыванию позиции: до
+   * этой правки товар за пределами первой страницы каталога просто исчезал из
+   * корзины, хотя серверный `total` продолжал его учитывать.
+   */
+  const resolveCartLine = (remoteItem: MedusaCartLine, currentItems: CartItem[]): CartItem => {
+    const product = products.find((candidate) =>
+      candidate.variants.some((variant) => variant.variantId === remoteItem.variant_id),
+    );
+    const variant = product?.variants.find((candidate) => candidate.variantId === remoteItem.variant_id);
+
+    if (product && variant) {
+      const colorName = variant.options.Цвет ?? "";
+      return {
+        product,
+        selectedSize: variant.options.Размер ?? "",
+        selectedColor:
+          product.colors.find((color) => color.name === colorName) ?? { name: colorName, hex: "#808080" },
+        variantId: variant.variantId,
+        quantity: remoteItem.quantity,
+      };
+    }
+
+    const existingItem = currentItems.find((item) => item.variantId === remoteItem.variant_id);
+    if (existingItem) return existingItem;
+
+    const lineProduct = mapCartLineToProduct(remoteItem);
+    return {
+      product: lineProduct,
+      selectedSize: lineProduct.availableSizes[0] ?? "",
+      selectedColor: { name: "", hex: "#808080" },
+      variantId: remoteItem.variant_id ?? remoteItem.id,
+      quantity: remoteItem.quantity,
+    };
+  };
 
   const syncRemoteCart = (cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
     setServerCartTotal(typeof cart.total === "number" ? cart.total : null);
@@ -128,30 +211,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     });
     const items = cart.items || [];
     setCartItems((currentItems) => {
-      const nextItems = items.flatMap((remoteItem) => {
-        const existingItem = currentItems.find((item) => item.variantId === remoteItem.variant_id);
-        if (existingItem) {
-          return [{ ...existingItem, lineItemId: remoteItem.id, quantity: remoteItem.quantity, unitPrice: remoteItem.unit_price, lineTotal: remoteItem.total }];
-        }
-
-        const product = products.find((candidate) =>
-          candidate.variants.some((variant) => variant.variantId === remoteItem.variant_id),
-        );
-        const variant = product?.variants.find((candidate) => candidate.variantId === remoteItem.variant_id);
-        if (!product || !variant) return [];
-
-        const colorName = variant.options.Цвет ?? "";
-        return [{
-          product,
-          selectedSize: variant.options.Размер ?? "",
-          selectedColor: product.colors.find((color) => color.name === colorName) ?? { name: colorName, hex: "#808080" },
-          variantId: variant.variantId,
-          lineItemId: remoteItem.id,
-          quantity: remoteItem.quantity,
-          unitPrice: remoteItem.unit_price,
-          lineTotal: remoteItem.total,
-        }];
-      });
+      const nextItems = items.map((remoteItem) => ({
+        ...resolveCartLine(remoteItem, currentItems),
+        lineItemId: remoteItem.id,
+        quantity: remoteItem.quantity,
+        unitPrice: remoteItem.unit_price,
+        lineTotal: remoteItem.total,
+      }));
       cartItemsRef.current = nextItems;
       return nextItems;
     });
@@ -271,7 +337,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return next;
   };
 
-  const addToCart = (newItem: CartItem) => enqueueCartMutation(async () => {
+  /**
+   * Обёртка для операций, которые вызываются как «нажал и забыл».
+   *
+   * Все двенадцать мест вызова `addToCart`/`updateQuantity`/`removeFromCart`
+   * игнорировали возвращаемый промис, поэтому 401 из-за ключа, 400 из-за
+   * остатка или обрыв сети выглядели как «кнопка не работает» и не оставляли
+   * следа: ни сообщения покупателю, ни записи в консоли. Здесь отказ
+   * превращается в состояние, которое интерфейс обязан показать.
+   */
+  const dismissCartError = () => setCartError(null);
+
+  const runCartMutation = (operation: () => Promise<void>, failureMessage: string) => {
+    setCartError(null);
+    return enqueueCartMutation(operation).catch((error: unknown) => {
+      console.error(`[Cart] ${failureMessage}`, error);
+      setCartError(failureMessage);
+    });
+  };
+
+  const addToCart = (newItem: CartItem) => runCartMutation(async () => {
     if (storefrontDataMode === "medusa" && !isMedusaConfigured) {
       throw new Error("Medusa mode requires a backend URL and publishable API key.");
     }
@@ -311,9 +396,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       cartItemsRef.current = updatedItems;
       return updatedItems;
     });
-  });
+  }, "Не удалось добавить товар в корзину. Попробуйте ещё раз.");
 
-  const removeFromCart = (productId: string, size: string, colorHex: string) => enqueueCartMutation(async () => {
+  const removeFromCart = (productId: string, size: string, colorHex: string) => runCartMutation(async () => {
     const item = cartItemsRef.current.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
     );
@@ -352,14 +437,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       cartItemsRef.current = updatedItems;
       return updatedItems;
     });
-  });
+  }, "Не удалось удалить товар из корзины. Попробуйте ещё раз.");
 
   const updateQuantity = (
     productId: string,
     size: string,
     colorHex: string,
     newQuantity: number
-  ) => enqueueCartMutation(async () => {
+  ) => runCartMutation(async () => {
     if (newQuantity < 1) return;
     const item = cartItemsRef.current.find(
       (cartItem) => cartItem.product.id === productId && cartItem.selectedSize === size && cartItem.selectedColor.hex === colorHex,
@@ -398,11 +483,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       cartItemsRef.current = updatedItems;
       return updatedItems;
     });
-  });
+  }, "Не удалось изменить количество. Попробуйте ещё раз.");
 
   const prepareCheckout = (details: CheckoutDetails) => enqueueCartMutation(async () => {
     if (!isMedusaConfigured) {
       throw new Error("Checkout requires Medusa mode with a configured Store API.");
+    }
+
+    if (!details.shippingOptionId) {
+      throw new Error("Не выбран способ доставки.");
     }
 
     const cartId = await getMedusaCartId();
@@ -418,28 +507,38 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         country_code: "ru",
         postal_code: details.zip,
       },
+      // Комментарий раньше терялся: он лежал в объекте деталей, но в тело
+      // запроса не попадал, а excess property check его не ловил, потому что
+      // передавалась переменная. Логист узнавал о пожеланиях покупателя ниоткуда.
+      ...(details.comment.trim() ? { metadata: { customer_note: details.comment.trim() } } : {}),
     });
+
+    // Способ доставки выбирает покупатель. Витрина больше не подставляет
+    // единственную известную ей опцию: список приходит из Medusa, и в заказ
+    // уходит ровно то, что выбрано в форме.
     const shippingOptions = await listMedusaShippingOptions(cartId);
-    let shippingOption = shippingOptions.find(
-      (option) => option.type?.code === MVP_SHIPPING_OPTION_CODE,
-    );
+    const shippingOption = shippingOptions.find((option) => option.id === details.shippingOptionId);
     if (!shippingOption) {
-      // Переходный фолбэк для баз, где опция создана до того, как импорт
-      // каталога начал проставлять type.code существующим опциям.
-      shippingOption = shippingOptions.find(
-        (option) => option.name === "MVP доставка по России",
+      throw new Error(
+        "Выбранный способ доставки больше не доступен для этого адреса. Выберите другой.",
       );
-      if (shippingOption) {
-        console.warn(
-          `[cart] shipping option resolved by display name; run catalog import to stamp type.code=${MVP_SHIPPING_OPTION_CODE}`,
-        );
-      }
     }
-    if (!shippingOption) {
-      throw new Error("No manual shipping option is available for this address.");
-    }
+
     syncRemoteCart(await addMedusaCartShippingMethod(cartId, shippingOption.id));
   });
+
+  /**
+   * Способы доставки, доступные для текущей корзины.
+   *
+   * Живёт в контексте, потому что идентификатор корзины Medusa создаётся и
+   * хранится здесь же — форме чекаута незачем знать про localStorage.
+   */
+  const getShippingOptions = async () => {
+    if (!isMedusaConfigured) {
+      throw new Error("Checkout requires Medusa mode with a configured Store API.");
+    }
+    return listMedusaShippingOptions(await getMedusaCartId());
+  };
 
   const completeCheckout = () => enqueueCartMutation(async () => {
     if (!isMedusaConfigured) {
@@ -494,6 +593,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         removeFromCart,
         updateQuantity,
         prepareCheckout,
+        getShippingOptions,
         completeCheckout,
         toggleCart,
         setIsCartOpen,
@@ -504,6 +604,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         cartTaxTotal,
         cartDiscountTotal,
         isCartMutating,
+        cartError,
+        dismissCartError,
         favoriteProductIds,
         favoriteCount,
         toggleFavorite,

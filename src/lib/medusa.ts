@@ -98,13 +98,31 @@ export interface MedusaCart {
   tax_total?: number | null;
   discount_total?: number | null;
   shipping_total?: number | null;
-  items?: {
-    id: string;
-    variant_id?: string | null;
-    quantity: number;
-    unit_price?: number | null;
-    total?: number | null;
-  }[];
+  items?: MedusaCartLine[];
+}
+
+/**
+ * Строка корзины Medusa.
+ *
+ * Помимо идентификаторов и сумм строка несёт достаточно данных о товаре
+ * (`title`, `thumbnail`, `product_handle`, `variant_title`), чтобы отрисовать
+ * позицию, даже если товара нет в загруженной странице каталога. Это и есть
+ * условие того, что корзина никогда не теряет строку, за которую сервер
+ * продолжает считать деньги.
+ */
+export interface MedusaCartLine {
+  id: string;
+  title?: string | null;
+  thumbnail?: string | null;
+  variant_id?: string | null;
+  variant_sku?: string | null;
+  variant_title?: string | null;
+  product_id?: string | null;
+  product_title?: string | null;
+  product_handle?: string | null;
+  quantity: number;
+  unit_price?: number | null;
+  total?: number | null;
 }
 
 interface MedusaCartResponse {
@@ -115,12 +133,16 @@ interface MedusaLineItemDeleteResponse {
   parent: MedusaCart;
 }
 
+export interface MedusaShippingOption {
+  id: string;
+  name: string;
+  /** Стоимость доставки в рублях; отсутствует у опций с расчётом на стороне провайдера. */
+  amount?: number | null;
+  type?: { code?: string | null } | null;
+}
+
 interface MedusaShippingOptionsResponse {
-  shipping_options?: {
-    id: string;
-    name: string;
-    type?: { code?: string | null } | null;
-  }[];
+  shipping_options?: MedusaShippingOption[];
 }
 
 interface MedusaPaymentCollectionResponse {
@@ -157,6 +179,84 @@ export const storefrontDataMode =
     : "mock";
 export const isMedusaConfigured =
   storefrontDataMode === "medusa" && Boolean(backendUrl && publishableKey);
+
+/**
+ * Встроенный провайдер Medusa. Он всегда авторизует платёж, не обращаясь ни к
+ * какому банку, — то есть завершает корзину и создаёт заказ, за который никто
+ * не заплатил, и по которому не пробит чек. В production он допустим только как
+ * значение по умолчанию, которое витрина обязана распознать и отвергнуть.
+ */
+export const SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID = "pp_system_default";
+
+// Идентификатор платёжного провайдера и производный от него флаг оформления
+// заказа читаются ТОЛЬКО из NEXT_PUBLIC_-переменной — в отличие от каталога,
+// который резолвится server-first.
+//
+// Причина в том, где выполняется код. Каталог читается на сервере, поэтому
+// server-first резолюция даёт выигрыш: смена переменной применяется без
+// пересборки бандла. Оформление же заказа целиком живёт в браузере
+// (CartContext дёргает Store API напрямую), а страница `/checkout`
+// пререндерится. Если серверное и клиентское значения разойдутся, пререндер
+// покажет одну форму, а гидратация — другую. Единственный источник значения
+// исключает этот класс расхождений.
+export const medusaPaymentProviderId =
+  process.env.NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID?.trim() || "";
+
+// Аварийный выход для локальной разработки и e2e: позволяет пройти весь путь
+// оформления на встроенном провайдере. Намеренно не действует в production —
+// иначе одна забытая переменная возвращает ровно тот риск, ради которого
+// написан весь этот блок.
+const isTestCheckoutAllowed =
+  process.env.NODE_ENV !== "production" &&
+  process.env.NEXT_PUBLIC_ALLOW_TEST_CHECKOUT === "true";
+
+/**
+ * Можно ли показывать покупателю оформление заказа.
+ *
+ * Ложен, пока не подключён боевой платёжный провайдер (задача «Оплата и касса»
+ * роадмапа). Пока он ложен, витрина не показывает форму заказа, а
+ * `completeCheckout` отказывается работать: без провайдера заказ создаётся без
+ * оплаты, резервирует остаток и не сопровождается фискальным чеком (54-ФЗ).
+ */
+export const isCheckoutEnabled =
+  medusaPaymentProviderId !== "" &&
+  (medusaPaymentProviderId !== SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID || isTestCheckoutAllowed);
+
+// --- Конфигурационные предохранители ----------------------------------------
+// Оба срабатывают только на сервере. В браузере бросать на уровне модуля нельзя:
+// импорт этого файла есть в каждом клиентском компоненте, и исключение оставит
+// покупателя с белым экраном вместо контролируемого состояния ошибки, которое
+// уже реализовано в CatalogContext и на карточке товара.
+const isServer = typeof window === "undefined";
+
+// ADR-001 §6: production не маскирует ошибку конфигурации демо-каталогом.
+// Раньше отсутствие ключа просто делало `isMedusaConfigured` ложным, и витрина
+// тихо переключалась на 12 demo-товаров с выдуманными ценами — под HTTP 200 и с
+// canonical, то есть с попаданием в индекс. Теперь это останавливает сборку или
+// старт сервера с внятным сообщением.
+if (isServer && process.env.NODE_ENV === "production" && storefrontDataMode === "medusa" && !isMedusaConfigured) {
+  throw new Error(
+    "DATA_MODE=medusa, но MEDUSA_BACKEND_URL и/или MEDUSA_PUBLISHABLE_KEY не заданы. " +
+      "Витрина не запускается, чтобы не показать покупателю demo-каталог вместо боевого.",
+  );
+}
+
+// Режим данных должен быть один. Раньше серверное и клиентское значения
+// считались независимо, и конфигурация вида `DATA_MODE=medusa` +
+// `NEXT_PUBLIC_DATA_MODE=mock` давала расщеплённую витрину: карточка товара из
+// Medusa, каталог из моков, чекаут с ошибкой «Checkout requires Medusa mode».
+// Расхождение видно только на сервере — там его и ловим.
+if (isServer && process.env.DATA_MODE && process.env.NEXT_PUBLIC_DATA_MODE) {
+  const serverMode = process.env.DATA_MODE === "medusa" ? "medusa" : "mock";
+  const clientMode = process.env.NEXT_PUBLIC_DATA_MODE === "medusa" ? "medusa" : "mock";
+  if (serverMode !== clientMode) {
+    throw new Error(
+      `Режим данных задан противоречиво: DATA_MODE=${process.env.DATA_MODE}, ` +
+        `NEXT_PUBLIC_DATA_MODE=${process.env.NEXT_PUBLIC_DATA_MODE}. ` +
+        "Серверный рендеринг и браузер работали бы с разными источниками данных.",
+    );
+  }
+}
 
 function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -326,6 +426,71 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
   };
 }
 
+/**
+ * Соглашение скрипта импорта каталога: handle товара в Medusa —
+ * `mario-mikke-<frontend id>`. Держится в одном месте, потому что по нему
+ * товар резолвят и карточка, и страница образа, и строка корзины.
+ */
+export const PRODUCT_HANDLE_PREFIX = "mario-mikke-";
+
+export const handleForFrontendId = (id: string) => `${PRODUCT_HANDLE_PREFIX}${id}`;
+
+export function frontendIdFromHandle(handle: string | null | undefined, fallback: string) {
+  if (typeof handle === "string" && handle.startsWith(PRODUCT_HANDLE_PREFIX)) {
+    const id = handle.slice(PRODUCT_HANDLE_PREFIX.length);
+    if (id) return id;
+  }
+  return fallback;
+}
+
+/**
+ * Собрать `Product` из строки корзины Medusa.
+ *
+ * Нужен, когда товара нет в каталоге, загруженном в браузер: каталожный
+ * контекст держит только первую страницу, а серверная корзина знает обо всех
+ * позициях. Раньше такая строка просто отбрасывалась — при этом `total`
+ * сервера продолжал её учитывать, то есть покупатель платил за товар, которого
+ * не видел в корзине.
+ *
+ * Данных строки хватает на честную отрисовку: название, миниатюра, цена и
+ * количество приходят с сервера. Полей, которых в строке нет (категория,
+ * материалы, палитра), здесь нет и не выдумывается — позиция остаётся
+ * минимальной, но настоящей.
+ */
+export function mapCartLineToProduct(line: MedusaCartLine): Product {
+  const productId = line.product_id || line.id;
+  const id = frontendIdFromHandle(line.product_handle, productId);
+  const name = line.product_title?.trim() || line.title?.trim() || "Товар";
+  const price = typeof line.unit_price === "number" ? line.unit_price : 0;
+  const variantTitle = line.variant_title?.trim() || "";
+  const thumbnail = line.thumbnail?.trim();
+
+  return {
+    id,
+    productId,
+    handle: line.product_handle || handleForFrontendId(id),
+    name,
+    price,
+    category: "Каталог",
+    categorySlug: "catalog",
+    materialSlugs: [],
+    availableSizes: variantTitle ? [variantTitle] : [],
+    images: thumbnail ? [normalizeImageUrl(thumbnail)] : [],
+    colors: [],
+    options: [],
+    variants: line.variant_id
+      ? [{
+          variantId: line.variant_id,
+          sku: line.variant_sku ?? null,
+          options: {},
+          price,
+          available: true,
+        }]
+      : [],
+    available: true,
+  };
+}
+
 // --- Response parsers (FE-003) ---------------------------------------------
 // Validate the fields the storefront actually consumes. Optional fields that
 // mapMedusaProduct / CartContext already read defensively are intentionally not
@@ -393,6 +558,9 @@ function parseShippingOptionsResponse(
     const option = expectRecord(item, endpoint, `shipping_options[${index}]`);
     expectString(option.id, endpoint, `shipping_options[${index}].id`);
     expectString(option.name, endpoint, `shipping_options[${index}].name`);
+    if (option.amount !== undefined && option.amount !== null) {
+      expectNumber(option.amount, endpoint, `shipping_options[${index}].amount`);
+    }
     if (option.type !== undefined && option.type !== null) {
       const type = expectRecord(option.type, endpoint, `shipping_options[${index}].type`);
       if (type.code !== undefined && type.code !== null) {
@@ -605,6 +773,27 @@ export async function fetchMedusaProductByHandle(
 }
 
 /**
+ * Разрешить несколько товаров по их handle одним серверным вызовом на товар.
+ *
+ * Запросы идут параллельно и по одному, а не одним фильтром-массивом: список
+ * заведомо короткий (образ — это 3-4 позиции), ответы кэшируются тем же ISR,
+ * что и карточка товара, а поведение не зависит от синтаксиса
+ * массивных фильтров Store API.
+ *
+ * Порядок результата повторяет порядок `handles`; ненайденные и невалидные
+ * товары выпадают — вызывающий код сам решает, что показать вместо них.
+ */
+export async function fetchMedusaProductsByHandles(
+  handles: string[],
+  revalidate?: number,
+): Promise<Product[]> {
+  const results = await Promise.all(
+    handles.map((handle) => fetchMedusaProductByHandle(handle, undefined, revalidate)),
+  );
+  return results.filter((product): product is Product => product !== null);
+}
+
+/**
  * Fetch store product categories so the catalog can translate a URL slug (which
  * equals the Medusa category handle) into a category id for server-side filtering.
  */
@@ -680,7 +869,9 @@ export async function updateMedusaCart(cartId: string, body: Record<string, unkn
 export const MVP_SHIPPING_OPTION_CODE = "mvp-ru";
 
 export async function listMedusaShippingOptions(cartId: string) {
-  const fields = encodeURIComponent("id,name,type.code");
+  // `amount` нужен, чтобы показать цену доставки ДО того, как способ выбран и
+  // применён к корзине: иначе покупатель выбирает вслепую.
+  const fields = encodeURIComponent("id,name,amount,type.code");
   const response = await medusaRequest(
     `/store/shipping-options?cart_id=${encodeURIComponent(cartId)}&fields=${fields}`,
     { parse: parseShippingOptionsResponse },
@@ -706,10 +897,22 @@ export async function createMedusaPaymentCollection(cartId: string) {
   return response.payment_collection;
 }
 
+/**
+ * Последний рубеж перед созданием заказа: без настроенного провайдера сюда
+ * доходить нечему, но если UI-гейт когда-нибудь обойдут, отказ произойдёт
+ * здесь, а не в виде неоплаченного заказа в админке.
+ */
 export async function initializeMedusaPaymentSession(paymentCollectionId: string) {
+  if (!isCheckoutEnabled) {
+    throw new Error(
+      "Оплата не настроена: NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID не задан " +
+        `или указывает на встроенный провайдер ${SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID}.`,
+    );
+  }
+
   await medusaRequest(`/store/payment-collections/${paymentCollectionId}/payment-sessions`, {
     method: "POST",
-    body: { provider_id: "pp_system_default" },
+    body: { provider_id: medusaPaymentProviderId },
   });
 }
 
