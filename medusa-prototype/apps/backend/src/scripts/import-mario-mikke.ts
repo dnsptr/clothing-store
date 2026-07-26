@@ -197,9 +197,12 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     fields: ["id", "name", "service_zone_id", "type.code"],
   });
 
-  const ruShippingOption = shippingOptions.find(
-    (option) => option.name === "MVP доставка по России",
-  );
+  // Сначала по машинному коду: display name редактируется в Admin, и поиск
+  // только по нему после переименования создал бы дубликат опции с тем же
+  // type.code (витрина выбирает по коду и могла бы молча получить дубль).
+  const ruShippingOption =
+    shippingOptions.find((option) => option.type?.code === "mvp-ru") ??
+    shippingOptions.find((option) => option.name === "MVP доставка по России");
 
   if (!ruShippingOption) {
     await createShippingOptionsWorkflow(container).run({
