@@ -41,6 +41,23 @@ public values — moving them behind a route handler is a separate task.
 Backend deployment, firewall, HTTPS, and recovery procedures are documented in
 [`medusa-prototype/DEPLOYMENT.md`](medusa-prototype/DEPLOYMENT.md).
 
+## Documentation
+
+Two directories, and the difference between them is whether the question is
+settled:
+
+- [`docs/adr/`](docs/adr) — accepted decisions, numbered and effectively
+  immutable. An ADR is amended only to clarify what it already decided;
+  reversing a decision means writing the next ADR, not editing the old one.
+- [`docs/design/`](docs/design) — work that is not a decision yet: integration
+  studies, trade-offs still open, implementation orders. A design document is
+  expected to change while its open questions are open, and may be promoted to
+  an ADR once they close.
+
+Roadmap and task IDs live in
+[`PROJECT_ROADMAP.md`](PROJECT_ROADMAP.md); both kinds of document reference
+those IDs rather than restating the plan.
+
 ## Local Development
 
 1. Start PostgreSQL and Redis:
