@@ -139,6 +139,29 @@ const paymentModule =
  */
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 
+/**
+ * Почта (SMTP).
+ *
+ * Провайдер добавляется, только когда заданы все четыре обязательные
+ * переменные: его `validateOptions` бросает на любой пустой, и бэкенд не
+ * стартовал бы там, где почтового ящика ещё нет — в разработке, в CI, на сборке.
+ *
+ * Канал в модуле уведомлений может обслуживать ровно один провайдер: загрузчик
+ * падает с «Multiple providers are configured for the same channel». Поэтому
+ * `email` переходит от `local` к SMTP-провайдеру, когда тот настроен, а `local`
+ * сужается до `feed`. Без переменных всё остаётся как было: `local` держит оба
+ * канала и пишет письма в лог, так что цепочка «заказ → письмо» проверяется без
+ * почтового хостинга.
+ */
+const SMTP_HOST = process.env.SMTP_HOST
+const SMTP_USER = process.env.SMTP_USER
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD
+const SMTP_FROM = process.env.SMTP_FROM
+const SMTP_PORT = process.env.SMTP_PORT
+const SMTP_SECURE = process.env.SMTP_SECURE
+
+const HAS_SMTP = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM)
+
 const notificationModule = [
   {
     resolve: '@medusajs/medusa/notification',
@@ -147,8 +170,28 @@ const notificationModule = [
         {
           resolve: '@medusajs/medusa/notification-local',
           id: 'local',
-          options: { channels: ['email', 'feed'] },
+          options: { channels: HAS_SMTP ? ['feed'] : ['email', 'feed'] },
         },
+        ...(HAS_SMTP
+          ? [
+              {
+                resolve: './src/modules/email-smtp',
+                id: 'email-smtp',
+                options: {
+                  channels: ['email'],
+                  host: SMTP_HOST,
+                  // Порт и режим TLS не угадываются: у Unisender, Mail.ru и
+                  // Яндекса они разные. Пустое значение оставляем пустым —
+                  // провайдер сам возьмёт 587 и выведет TLS из порта.
+                  port: SMTP_PORT ? Number(SMTP_PORT) : undefined,
+                  secure: SMTP_SECURE ? SMTP_SECURE === 'true' : undefined,
+                  user: SMTP_USER,
+                  password: SMTP_PASSWORD,
+                  from: SMTP_FROM,
+                },
+              },
+            ]
+          : []),
         ...(TELEGRAM_BOT_TOKEN
           ? [
               {

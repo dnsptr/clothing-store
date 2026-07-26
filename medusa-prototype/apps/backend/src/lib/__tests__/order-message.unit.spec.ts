@@ -1,5 +1,6 @@
 import {
   buildNewOrderMessage,
+  formatAddress,
   formatAmount,
   orderNumber,
   type OrderForMessage,
@@ -51,6 +52,23 @@ describe("formatAmount", () => {
     expect(formatAmount("15990", "rub")).toBe("15 990 ₽");
   });
 
+  it("понимает BigNumber, которым Medusa отдаёт тоталы заказа", () => {
+    // В DTO заказа суммы приходят объектами: у них есть valueOf(), но typeof —
+    // object. Без этого любая сумма из retrieveOrder стала бы прочерком.
+    const bigNumber = { numeric: 19490, valueOf: () => 19490 };
+    expect(formatAmount(bigNumber, "rub")).toBe("19 490 ₽");
+  });
+
+  it("понимает сырое представление суммы", () => {
+    expect(formatAmount({ value: "19490.50", precision: 20 } as never, "rub")).toBe(
+      "19 490,50 ₽",
+    );
+  });
+
+  it("объект без числа внутри — прочерк, а не ноль", () => {
+    expect(formatAmount({} as never, "rub")).toBe("—");
+  });
+
   it.each([null, undefined, "", "не число", NaN])(
     "отсутствующая сумма (%s) даёт прочерк, а не ноль",
     (value) => {
@@ -73,6 +91,23 @@ describe("orderNumber", () => {
 
   it("падает обратно на внутренний id", () => {
     expect(orderNumber({ ...ORDER, display_id: null })).toBe("order_01JABCDEF");
+  });
+});
+
+describe("formatAddress", () => {
+  it("собирает адрес от индекса до квартиры", () => {
+    // Квартиру витрина спрашивает отдельным полем: без неё курьеру некуда ехать.
+    expect(formatAddress({ ...ORDER.shipping_address, address_2: "кв. 5" })).toBe(
+      "125009, Москва, ул. Тверская, 1, кв. 5",
+    );
+  });
+
+  it("пропускает незаполненное, не оставляя запятых подряд", () => {
+    expect(formatAddress({ city: "Москва", address_1: "", postal_code: "  " })).toBe("Москва");
+  });
+
+  it.each([null, undefined, {}])("без адреса (%s) говорит об этом словами", (address) => {
+    expect(formatAddress(address as never)).toBe("адрес не указан");
   });
 });
 

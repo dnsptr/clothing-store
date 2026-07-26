@@ -11,29 +11,68 @@
  * сколько денег ждать. Покупателю — подтверждение, что заказ принят.
  */
 
+/**
+ * Деньги так, как их отдаёт Medusa.
+ *
+ * В DTO заказа суммы приходят не числами, а экземплярами `BigNumber`: у них
+ * есть `valueOf()`, но `typeof` — `object`. Сырое представление
+ * (`{ value: "18990", precision }`) встречается в тех же полях после
+ * сериализации. Тип перечисляет всё это явно, чтобы форматирование денег не
+ * зависело от того, каким путём заказ доехал до уведомления.
+ */
+export type MoneyValue =
+  | number
+  | string
+  | { value?: string | number; valueOf(): unknown }
+  | null
+  | undefined;
+
+/** Адрес доставки в объёме, который нужен уведомлениям. */
+export type AddressForMessage = {
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  city?: string | null;
+  address_1?: string | null;
+  /** Квартира/офис: витрина спрашивает её отдельным полем. */
+  address_2?: string | null;
+  postal_code?: string | null;
+};
+
 /** Минимум полей заказа, от которого зависит текст. */
 export type OrderForMessage = {
   id: string;
   display_id?: number | null;
   email?: string | null;
   currency_code?: string | null;
-  total?: number | string | null;
+  total?: MoneyValue;
   items?: Array<{
     title?: string | null;
     variant_title?: string | null;
     quantity?: number | null;
-    unit_price?: number | string | null;
+    unit_price?: MoneyValue;
   }> | null;
-  shipping_address?: {
-    first_name?: string | null;
-    last_name?: string | null;
-    phone?: string | null;
-    city?: string | null;
-    address_1?: string | null;
-    postal_code?: string | null;
-  } | null;
+  shipping_address?: AddressForMessage | null;
   shipping_methods?: Array<{ name?: string | null }> | null;
 };
+
+/**
+ * Число из денежного поля Medusa.
+ *
+ * `Number()` умеет и строку, и `BigNumber` (у него есть `valueOf()`), но не
+ * умеет сырое `{ value: "18990" }` — его разбираем отдельно. Без этого любая
+ * сумма из `retrieveOrder` превращалась бы в прочерк: там лежат объекты, а не
+ * числа.
+ */
+function toNumeric(value: MoneyValue): number {
+  if (typeof value === "object" && value !== null) {
+    const raw = (value as { value?: string | number }).value;
+    if (typeof raw === "string" || typeof raw === "number") {
+      return Number(raw);
+    }
+  }
+  return Number(value);
+}
 
 /**
  * Сумма к показу.
@@ -43,12 +82,9 @@ export type OrderForMessage = {
  * заказ. Отсутствие суммы — это отсутствие суммы, и менеджер должен увидеть
  * именно его.
  */
-export function formatAmount(
-  value: number | string | null | undefined,
-  currency = "RUB",
-): string {
+export function formatAmount(value: MoneyValue, currency = "RUB"): string {
   if (value === null || value === undefined || value === "") return "—";
-  const numeric = typeof value === "string" ? Number(value) : value;
+  const numeric = toNumeric(value);
   if (!Number.isFinite(numeric)) return "—";
 
   const symbol = currency.toUpperCase() === "RUB" ? "₽" : currency.toUpperCase();
@@ -69,24 +105,37 @@ export function orderNumber(order: OrderForMessage): string {
   return order.display_id ? `№${order.display_id}` : order.id;
 }
 
-function customerName(order: OrderForMessage): string {
+/** Имя покупателя из адреса доставки; прочерк, если его не оставили. */
+export function customerName(order: OrderForMessage): string {
   const address = order.shipping_address;
   const parts = [address?.first_name, address?.last_name].filter(Boolean);
   return parts.length > 0 ? parts.join(" ") : "—";
 }
 
-function deliveryLine(order: OrderForMessage): string {
-  const address = order.shipping_address;
-  const method = order.shipping_methods?.[0]?.name?.trim();
-
-  // Адрес собирается из того, что реально заполнено. Пустые поля не
-  // превращаются в запятые подряд: логист должен видеть, что данных нет, а не
-  // разбирать пунктуацию.
-  const addressParts = [address?.postal_code, address?.city, address?.address_1]
+/**
+ * Адрес одной строкой.
+ *
+ * Собирается из того, что реально заполнено. Пустые поля не превращаются в
+ * запятые подряд: логист должен видеть, что данных нет, а не разбирать
+ * пунктуацию. Квартира (`address_2`) входит в адрес: без неё курьеру некуда
+ * ехать, а витрина спрашивает её отдельным полем.
+ */
+export function formatAddress(address: AddressForMessage | null | undefined): string {
+  const parts = [
+    address?.postal_code,
+    address?.city,
+    address?.address_1,
+    address?.address_2,
+  ]
     .map((part) => part?.trim())
     .filter((part): part is string => Boolean(part));
 
-  const destination = addressParts.length > 0 ? addressParts.join(", ") : "адрес не указан";
+  return parts.length > 0 ? parts.join(", ") : "адрес не указан";
+}
+
+function deliveryLine(order: OrderForMessage): string {
+  const method = order.shipping_methods?.[0]?.name?.trim();
+  const destination = formatAddress(order.shipping_address);
   return method ? `${method} — ${destination}` : destination;
 }
 
