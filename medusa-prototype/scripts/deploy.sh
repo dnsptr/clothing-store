@@ -40,7 +40,16 @@ fi
 if ! grep -q '^ADMIN_BASIC_AUTH_HASH=' "${ENV_FILE}"; then
   ADMIN_PASSWORD="$(openssl rand -base64 24)"
   ADMIN_HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "${ADMIN_PASSWORD}")"
-  printf '\nADMIN_BASIC_AUTH_HASH=%s\n' "${ADMIN_HASH}" >> "${ENV_FILE}"
+
+  # `$` в значении обязан быть удвоен: compose раскрывает `$VAR` в файле,
+  # переданном через `--env-file`, а bcrypt-хеш всегда имеет вид
+  # `$2a$14$<соль+хеш>`. Часть после третьего `$` — синтаксически корректное
+  # имя переменной, поэтому compose подставлял вместо неё пустую строку, и в
+  # Caddy уходил обрубок: `$2a$14$e4td…/f65tVcyCy6i` → `$2a$14/f65tVcyCy6i`.
+  # Хеш переставал быть валидным bcrypt, и пароль, который скрипт печатает
+  # ниже как «сохраните прямо сейчас», не подходил никогда. Обнаружено на
+  # restore drill 2026-07-27, проверено чтением переменной изнутри контейнера.
+  printf '\nADMIN_BASIC_AUTH_HASH=%s\n' "${ADMIN_HASH//\$/\$\$}" >> "${ENV_FILE}"
 
   echo
   echo "======================================================================"

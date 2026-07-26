@@ -70,3 +70,31 @@ esac
 
 echo "Restore finished. Restart the backend so it picks up the restored schema:"
 echo "  docker compose --env-file ${ENV_FILE} -f compose.production.yml restart medusa"
+
+# Восстановление завершается перезапуском, а НЕ деплоем. `scripts/deploy.sh`
+# вызывает `medusa db:migrate`, а та выполняет не только миграции схемы, но и
+# migration scripts — обычный код, который пишет в данные.
+#
+# Учёт выполненных скриптов ведётся по имени файла ВМЕСТЕ С РАСШИРЕНИЕМ:
+# `getPendingMigrations` в @medusajs/framework сравнивает `basename(script)`.
+# Скрипт, отработавший через ts-node (`initial-data-seed.ts`), и он же из
+# сборки (`initial-data-seed.js`) — две разные записи, поэтому в базе, поднятой
+# из дампа другого окружения, сид считается невыполненным и запускается снова.
+#
+# На restore drill 2026-07-27 это стоило данных: `supported_currencies` магазина
+# схлопнулись с трёх валют до одной, появился дубликат склада со своим адресом и
+# привязками, добавилась налоговая ставка. Проверка ниже — предупреждающая, она
+# не меняет базу и не влияет на код возврата восстановления.
+STALE_SCRIPTS="$(compose exec -T postgres psql -U medusa -d medusa_backend -tAc \
+  "select string_agg(script_name, ', ') from script_migrations where script_name like '%.ts'" \
+  2>/dev/null | tr -d '\r' || true)"
+
+if [[ -n "${STALE_SCRIPTS// /}" ]]; then
+  echo
+  echo "ВНИМАНИЕ: в script_migrations есть записи с расширением .ts:" >&2
+  echo "  ${STALE_SCRIPTS}" >&2
+  echo "Дамп снят с окружения, где migration scripts выполнялись через ts-node." >&2
+  echo "Сборка регистрирует их как .js, поэтому 'medusa db:migrate' сочтёт их" >&2
+  echo "невыполненными и запустит повторно — по восстановленным данным." >&2
+  echo "Не запускайте deploy.sh на этой базе, пока не сверите script_migrations." >&2
+fi
