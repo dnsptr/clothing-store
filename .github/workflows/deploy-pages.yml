@@ -44,8 +44,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # BUILD_TARGET=pages is what turns on `output: "export"`. Without it this
+      # job would produce a server build and upload an empty ./out.
       - name: Build static export
-        run: npm run build
+        run: npm run build:pages
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
 

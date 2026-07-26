@@ -7,7 +7,7 @@ import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
 import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
-import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
+import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
 import styles from "./checkout.module.css";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
@@ -288,9 +288,10 @@ export default function CheckoutClient() {
               <p className={styles.sectionTitle}>Дополните заказ</p>
               <div className={styles.recommendGrid}>
               {recommendations.map((product) => {
-                  const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
+                  const sizes = selectableSizes(product);
                   const selectedSize = recommendationSizes[product.id] ??
                     (sizes.includes(DEFAULT_RECOMMENDATION_SIZE) ? DEFAULT_RECOMMENDATION_SIZE : sizes[0]);
+                  const addableVariant = findAddableVariant(product, { size: selectedSize });
 
                   return (
                   <div key={product.id} className={styles.recommendCard}>
@@ -328,18 +329,19 @@ export default function CheckoutClient() {
                       ))}
                     </div>
                     <button
+                      type="button"
                       className={styles.addBtn}
-                      onClick={() =>
+                      onClick={() => {
+                        if (!addableVariant) return;
                         addToCart({
-                            product,
-                            selectedSize,
-                            selectedColor: product.colors[0],
-                            variantId: product.variants.find(
-                              (variant) => variant.options.Размер === selectedSize,
-                            )?.variantId ?? "",
-                            quantity: 1,
-                        })
-                      }
+                          product,
+                          selectedSize,
+                          selectedColor: product.colors[0],
+                          variantId: addableVariant.variantId,
+                          quantity: 1,
+                        });
+                      }}
+                      disabled={!addableVariant}
                     >
                       Добавить
                     </button>

@@ -6,7 +6,7 @@ import ProductImageGallery from "../../components/ProductImageGallery";
 import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
 import { formatPrice } from "../../lib/format";
-import { AVAILABLE_SIZES } from "../../lib/shop";
+import { findAddableVariant, selectableSizes } from "../../lib/shop";
 import styles from "./favorites.module.css";
 
 export default function FavoritesClient() {
@@ -53,9 +53,13 @@ export default function FavoritesClient() {
 
         <section className={styles.grid} aria-label="Избранные товары">
           {favoriteProducts.map((product) => {
-            const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
+            const sizes = selectableSizes(product);
             const selectedSize = selectedSizes[product.id] ?? sizes[0];
             const selectedColor = product.colors[0];
+            const addableVariant = findAddableVariant(product, {
+              size: selectedSize,
+              colorName: selectedColor?.name,
+            });
 
             return (
               <article key={product.id} className={styles.card}>
@@ -108,20 +112,17 @@ export default function FavoritesClient() {
                   <button
                     type="button"
                     className={styles.addButton}
-                    onClick={() =>
+                    onClick={() => {
+                      if (!addableVariant) return;
                       addToCart({
                         product,
                         selectedSize,
                         selectedColor,
-                        variantId: product.variants.find(
-                          (variant) =>
-                            variant.options.Размер === selectedSize &&
-                            variant.options.Цвет === selectedColor.name,
-                        )?.variantId ?? "",
+                        variantId: addableVariant.variantId,
                         quantity: 1,
-                      })
-                    }
-                    disabled={isCartMutating}
+                      });
+                    }}
+                    disabled={isCartMutating || !addableVariant}
                     aria-busy={isCartMutating}
                   >
                     Добавить в корзину

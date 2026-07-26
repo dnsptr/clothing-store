@@ -7,7 +7,7 @@ import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
 import { withBasePath } from "../../lib/assets";
 import { formatPrice } from "../../lib/format";
-import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
+import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
 import styles from "./cart.module.css";
 
 function BookmarkIcon({ active = false }: { active?: boolean }) {
@@ -127,10 +127,11 @@ export default function CartPageClient() {
                 <h2>Дополните заказ</h2>
                 <div className={styles.recommendGrid}>
                   {recommendations.map((product) => {
-                    const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
+                    const sizes = selectableSizes(product);
                     const selectedSize = recommendationSizes[product.id] ??
                       (sizes.includes(DEFAULT_RECOMMENDATION_SIZE) ? DEFAULT_RECOMMENDATION_SIZE : sizes[0]);
                     const isSaved = isFavorite(product.id);
+                    const addableVariant = findAddableVariant(product, { size: selectedSize });
 
                     return (
                     <article className={styles.recommendCard} key={product.id}>
@@ -179,18 +180,17 @@ export default function CartPageClient() {
                       <button
                         type="button"
                         className={styles.recommendCartButton}
-                        onClick={() =>
+                        onClick={() => {
+                          if (!addableVariant) return;
                           addToCart({
                             product,
                             selectedSize,
                             selectedColor: product.colors[0],
-                            variantId: product.variants.find(
-                              (variant) => variant.options.Размер === selectedSize,
-                            )?.variantId ?? "",
+                            variantId: addableVariant.variantId,
                             quantity: 1,
-                          })
-                        }
-                        disabled={isCartMutating}
+                          });
+                        }}
+                        disabled={isCartMutating || !addableVariant}
                         aria-busy={isCartMutating}
                       >
                         Добавить
