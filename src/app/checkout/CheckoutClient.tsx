@@ -638,11 +638,15 @@ export default function CheckoutClient() {
                 }}
               />
               <span>
-                Я соглашаюсь с{" "}
+                Оформляя заказ, я соглашаюсь с условиями{" "}
+                <Link href="/info/offer" target="_blank">
+                  публичной оферты
+                </Link>{" "}
+                и{" "}
                 <Link href="/info/privacy" target="_blank">
                   политикой обработки персональных данных
-                </Link>{" "}
-                и условиями продажи.
+                </Link>
+                .
               </span>
             </label>
             {errors.consent && <span className={styles.fieldError}>{errors.consent}</span>}

@@ -66,11 +66,18 @@ export default function CartPageClient() {
               {cartItems.map((item, index) => {
                 const itemKey = `${item.product.id}-${item.selectedSize}-${item.selectedColor.hex}-${index}`;
                 const lineTotal = item.lineTotal ?? item.product.price * item.quantity;
+                // Артикул строки — настоящий SKU варианта: он приходит из Medusa
+                // вместе с позицией корзины. Раньше номер собирался из id товара
+                // (`padStart(6, "0")`), то есть покупатель видел артикул, которого
+                // нет ни в складском учёте, ни в заказе. Нет SKU — строки нет.
+                const sku = item.product.variants
+                  .find((variant) => variant.variantId === item.variantId)
+                  ?.sku?.trim();
 
                 return (
                   <article className={styles.item} key={itemKey}>
                     <div className={styles.productCell}>
-                      <p className={styles.article}>Артикул: {item.product.id.padStart(6, "0")}</p>
+                      {sku && <p className={styles.article}>Артикул: {sku}</p>}
                       <Link href={`/product/${item.product.id}`} className={styles.productName}>
                         {item.product.name}
                       </Link>
@@ -210,7 +217,8 @@ export default function CartPageClient() {
                 информационные страницы. */}
             <nav className={styles.summaryLinks} aria-label="Информация о заказе">
               <Link href="/info/delivery">Условия доставки</Link>
-              <Link href="/info/returns">Условия обмена и возврата</Link>
+              <Link href="/info/returns">Условия возврата</Link>
+              <Link href="/info/offer">Публичная оферта</Link>
               <Link href="/info/faq">Вопросы и ответы</Link>
             </nav>
 
@@ -232,8 +240,12 @@ export default function CartPageClient() {
             {isCheckoutEnabled ? (
               <>
                 <Link href="/checkout" className={styles.checkoutButton}>Оплатить заказ</Link>
+                {/* Кнопка ведёт на страницу оформления, а не заключает договор:
+                    утверждать, что нажатием покупатель уже с чем-то согласился,
+                    нельзя. Согласие фиксируется отдельным чекбоксом в чекауте. */}
                 <p className={styles.summaryNote}>
-                  Нажимая на кнопку «Оплатить заказ», вы соглашаетесь с условиями обработки персональных данных и публичной офертой.
+                  Условия покупки — в публичной оферте. Согласие с офертой и политикой
+                  обработки персональных данных подтверждается на шаге оформления заказа.
                 </p>
               </>
             ) : (

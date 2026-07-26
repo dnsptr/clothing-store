@@ -181,7 +181,14 @@ export default function MenuDrawer() {
                 onMouseEnter={() => setActiveSubMenu(null)}
                 onClick={() => go("/info/delivery")}
               >
-                <span>Доставка и возврат</span>
+                <span>Доставка</span>
+              </li>
+              <li
+                className={`${styles.menuItem} ${styles.menuItemInfo}`}
+                onMouseEnter={() => setActiveSubMenu(null)}
+                onClick={() => go("/info/returns")}
+              >
+                <span>Условия возврата</span>
               </li>
             </ul>
           </div>
