@@ -4,11 +4,15 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { withBasePath } from "../lib/assets";
-import { HOME_RECOMMENDATIONS } from "../lib/catalog";
+import type { ContentSlide } from "../lib/content";
 import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./RecommendationsSlider.module.css";
 
-export default function RecommendationsSlider() {
+interface RecommendationsSliderProps {
+  items: ContentSlide[];
+}
+
+export default function RecommendationsSlider({ items }: RecommendationsSliderProps) {
   const sliderRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
@@ -40,6 +44,10 @@ export default function RecommendationsSlider() {
     if (draggedDistance > 5) e.preventDefault();
   };
 
+  // The client can empty this section from the admin. Rendering an empty
+  // slider would leave a band of whitespace where a row of cards used to be.
+  if (!items.length) return null;
+
   return (
     <section className={styles.section} aria-label="Разделы каталога">
       <div
@@ -50,18 +58,18 @@ export default function RecommendationsSlider() {
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
       >
-        {HOME_RECOMMENDATIONS.map((item) => (
+        {items.map((item) => (
           <Link
-            key={item.href}
-            href={item.href}
+            key={item.id}
+            href={item.href ?? "/catalog"}
             className={styles.card}
             draggable={false}
             onClick={handleLinkClick}
             {...cursorHandlers}
           >
             <Image
-              src={withBasePath(item.image)}
-              alt={item.label}
+              src={withBasePath(item.media.url)}
+              alt={item.alt || item.title}
               fill
               sizes="(max-width: 768px) 82vw, 25vw"
               className={styles.image}
@@ -69,8 +77,8 @@ export default function RecommendationsSlider() {
             />
             <div className={styles.overlay} />
             <div className={styles.info}>
-              <span className={styles.eyebrow}>{item.eyebrow}</span>
-              <h2 className={styles.title}>{item.label}</h2>
+              {item.eyebrow && <span className={styles.eyebrow}>{item.eyebrow}</span>}
+              <h2 className={styles.title}>{item.title}</h2>
             </div>
           </Link>
         ))}

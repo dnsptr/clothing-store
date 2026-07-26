@@ -6,34 +6,39 @@ import PromoBanner from "@/components/PromoBanner";
 import MaterialsSlider from "@/components/MaterialsSlider";
 import StoresSlider from "@/components/StoresSlider";
 import Footer from "@/components/Footer";
+import { fetchHomeContent } from "@/lib/content";
 import styles from "./page.module.css";
 
-export default function Home() {
+// Must be a literal: Next requires the segment value to be statically
+// analysable. Matches CATALOG_REVALIDATE_SECONDS in lib/medusa.ts, so an edit
+// made in the admin appears within the same window as a catalog change.
+export const revalidate = 300;
+
+export default async function Home() {
+  const content = await fetchHomeContent();
+
   return (
     <>
       <Header />
       <main className={styles.homeMain}>
         {/* Fullscreen Hero Campaign */}
-        <Hero />
+        <Hero slides={content.hero} />
 
         {/* Drag-to-scroll categories */}
-        <RecommendationsSlider />
-
-        {/* Own product cards */}
-        {/* <ProductGrid /> */}
+        <RecommendationsSlider items={content.shortcuts} />
 
         {/* Drag-to-scroll collections (Образы) */}
         <CollectionsSlider />
 
         {/* Fullscreen seasonal Promo Banner */}
-        <PromoBanner />
+        <PromoBanner promo={content.promo} />
 
         <div className={styles.afterPromo}>
           {/* Drag-to-scroll materials philosophy */}
-          <MaterialsSlider />
+          <MaterialsSlider items={content.materials} />
 
           {/* Drag-to-scroll retail stores */}
-          <StoresSlider />
+          <StoresSlider items={content.stores} />
         </div>
       </main>
       <Footer />
