@@ -153,14 +153,14 @@ T-Банк + онлайн-касса | СДЭК | Яндекс | Email/Telegram 
 
 ## 7. Roadmap
 
-Обозначения статусов: `TODO`, `BLOCKED`, `DONE`.
+Обозначения статусов: `TODO`, `BLOCKED`, `PARTIAL`, `DONE`.
 
 ### Этап A. Закрыть baseline и защитить staging
 
 | ID        | Зависит от | Микрозадача                                                 | Критерий приёмки                                                                               | Статус               |
 | --------- | ---------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------- |
 | GIT-001   | —          | Оформить `DEV-001` отдельным commit                         | В commit только `package.json` и `tsconfig.json`; lint/typecheck/build зелёные                 | TODO                 |
-| GIT-002   | GIT-001    | Определить судьбу `.npm-cache/` и `.opencode/`              | Локальные артефакты не попадают в commit; worktree предсказуем                                 | TODO                 |                                 | TODO                 |
+| GIT-002   | GIT-001    | Определить судьбу `.npm-cache/` и `.opencode/`              | Локальные артефакты не попадают в commit; worktree предсказуем                                 | TODO                 |
 | SEC-002   | —          | Сбросить раскрытый root-пароль в панели провайдера          | Новый пароль не передан в чат; SSH по ключу продолжает работать                                | TODO                 |
 | SEC-003   | SEC-002    | Проверить effective SSH policy                              | `PasswordAuthentication no`; root и deploy входят по ключам; новая сессия проверена до restart | TODO                 |
 | SEC-004   | SEC-001    | Ограничить доступ к Medusa Admin                            | Выбран VPN/allowlist/MFA сценарий; `/app` не является незащищённой публичной панелью           | TODO                 |
@@ -190,20 +190,20 @@ T-Банк + онлайн-касса | СДЭК | Яндекс | Email/Telegram 
 
 ### Этап C. Российская модель каталога, налогов и файлов
 
-| ID         | Зависит от           | Микрозадача                                       | Критерий приёмки                                                                                  | Статус |
-| ---------- | -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------ |
-| TAX-001    | ADR-001, BOOT-001    | Создать tax rate НДС 5%                           | Integration test: `Σ item_tax == order.tax_total`, расчёт по строке (ADR-001 §2)                  | TODO   |
-| CAT-001    | ADR-001              | Описать catalog schema                            | Зафиксированы product, variant, SKU, color, `ONE SIZE`, composition, country, care и measurements | TODO   |
-| CAT-002    | CAT-001              | Исправить demo taxonomy                           | Платья, юбки, обувь и аксессуары имеют корректные категории и материалы                           | TODO   |
-| CAT-003    | CAT-001              | Хранить реальные variant combinations             | UI/API не создают комбинации size/color, которых нет в Medusa                                     | TODO   |
-| FILE-001   | OPS-002              | Подключить российский S3 provider                 | Upload/read/delete работают; container recreation не теряет media                                 | TODO   |
-| IMPORT-001 | CAT-001              | Заменить delete/recreate на upsert                | Повторный import сохраняет product/variant IDs и ручные данные                                    | TODO   |
-| IMPORT-002 | IMPORT-001, FILE-001 | Перенести demo media в S3                         | Все product URLs стабильны и не зависят от Next `public`                                          | TODO   |
-| STORE-001  | CAT-001              | Получить реестр физических магазинов              | Есть code, address, timezone, working hours и pickup capability                                   | TODO   |
-| STORE-002  | STORE-001, BOOT-001  | Создать Medusa StockLocation для каждого магазина | Location codes совпадают с master data; online channel links корректны                            | TODO   |
-| STOCK-001  | STORE-002            | Реализовать inventory по location                 | Остаток варианта хранится отдельно для каждого магазина                                           | TODO   |
-| STOCK-002  | STOCK-001            | Зафиксировать allocation policy без split         | Один заказ резервируется в одной location; невозможный заказ отклоняется                          | TODO   |
-| API-001    | STOCK-001            | Добавить публичный availability contract          | API отдаёт sellable availability без раскрытия служебных данных                                   | TODO   |
+| ID         | Зависит от           | Микрозадача                                       | Критерий приёмки                                                                                  | Статус                                                         |
+| ---------- | -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| TAX-001    | ADR-001, BOOT-001    | Создать tax rate НДС 5%                           | Integration test: `Σ item_tax == order.tax_total`, расчёт по строке (ADR-001 §2)                  | PARTIAL: нет integration-теста `Σ item_tax == order.tax_total` |
+| CAT-001    | ADR-001              | Описать catalog schema                            | Зафиксированы product, variant, SKU, color, `ONE SIZE`, composition, country, care и measurements | TODO                                                           |
+| CAT-002    | CAT-001              | Исправить demo taxonomy                           | Платья, юбки, обувь и аксессуары имеют корректные категории и материалы                           | TODO                                                           |
+| CAT-003    | CAT-001              | Хранить реальные variant combinations             | UI/API не создают комбинации size/color, которых нет в Medusa                                     | TODO                                                           |
+| FILE-001   | OPS-002              | Подключить российский S3 provider                 | Upload/read/delete работают; container recreation не теряет media                                 | TODO                                                           |
+| IMPORT-001 | CAT-001              | Заменить delete/recreate на upsert                | Повторный import сохраняет product/variant IDs и ручные данные                                    | TODO                                                           |
+| IMPORT-002 | IMPORT-001, FILE-001 | Перенести demo media в S3                         | Все product URLs стабильны и не зависят от Next `public`                                          | TODO                                                           |
+| STORE-001  | CAT-001              | Получить реестр физических магазинов              | Есть code, address, timezone, working hours и pickup capability                                   | TODO                                                           |
+| STORE-002  | STORE-001, BOOT-001  | Создать Medusa StockLocation для каждого магазина | Location codes совпадают с master data; online channel links корректны                            | TODO                                                           |
+| STOCK-001  | STORE-002            | Реализовать inventory по location                 | Остаток варианта хранится отдельно для каждого магазина                                           | TODO                                                           |
+| STOCK-002  | STOCK-001            | Зафиксировать allocation policy без split         | Один заказ резервируется в одной location; невозможный заказ отклоняется                          | TODO                                                           |
+| API-001    | STOCK-001            | Добавить публичный availability contract          | API отдаёт sellable availability без раскрытия служебных данных                                   | TODO                                                           |
 
 ### Этап D. Завершить read-only интеграцию storefront
 
@@ -221,16 +221,16 @@ T-Банк + онлайн-касса | СДЭК | Яндекс | Email/Telegram 
 
 ### Этап E. Настоящая корзина и checkout
 
-| ID           | Зависит от          | Микрозадача                               | Критерий приёмки                                                         | Статус |
-| ------------ | ------------------- | ----------------------------------------- | ------------------------------------------------------------------------ | ------ |
-| CART-001     | FE-006, TAX-001     | Создать/resume Medusa cart                | Browser хранит cart ID; region и currency задаются backend               | TODO   |
-| CART-002     | CART-001            | Добавлять line item по `variant_id`       | Нельзя добавить несуществующую size/color комбинацию                     | TODO   |
-| CART-003     | CART-002, STOCK-002 | Проверять количество и остаток            | Backend отклоняет oversell и пересчитывает availability                  | TODO   |
-| CART-004     | CART-002            | Перенести totals на Medusa                | Цена, tax, discount и total не вычисляются как источник истины в browser | TODO   |
-| PROMO-001    | CART-004            | Подключить промокоды Medusa               | Валидный код меняет server totals; ошибки отображаются корректно         | TODO   |
-| PROMO-002    | PROMO-001           | Зафиксировать stacking policy             | Sale, promo и loyalty сочетаются только по утверждённым правилам         | TODO   |
-| CHECKOUT-001 | CART-004            | Отправлять contacts/address в Medusa cart | Validation происходит на backend; данные сохраняются в order snapshot    | TODO   |
-| CHECKOUT-002 | CHECKOUT-001        | Удалить fake submit                       | Экран успеха невозможен без созданного backend order                     | TODO   |
+| ID           | Зависит от          | Микрозадача                               | Критерий приёмки                                                         | Статус                                                           |
+| ------------ | ------------------- | ----------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| CART-001     | FE-006, TAX-001     | Создать/resume Medusa cart                | Browser хранит cart ID; region и currency задаются backend               | DONE (`df22a29`)                                                 |
+| CART-002     | CART-001            | Добавлять line item по `variant_id`       | Нельзя добавить несуществующую size/color комбинацию                     | DONE (`df22a29`)                                                 |
+| CART-003     | CART-002, STOCK-002 | Проверять количество и остаток            | Backend отклоняет oversell и пересчитывает availability                  | PARTIAL: нет теста отказа oversell и обработки ошибки на витрине |
+| CART-004     | CART-002            | Перенести totals на Medusa                | Цена, tax, discount и total не вычисляются как источник истины в browser | DONE (`8ada740`)                                                 |
+| PROMO-001    | CART-004            | Подключить промокоды Medusa               | Валидный код меняет server totals; ошибки отображаются корректно         | TODO                                                             |
+| PROMO-002    | PROMO-001           | Зафиксировать stacking policy             | Sale, promo и loyalty сочетаются только по утверждённым правилам         | TODO                                                             |
+| CHECKOUT-001 | CART-004            | Отправлять contacts/address в Medusa cart | Validation происходит на backend; данные сохраняются в order snapshot    | DONE (`b976ce5`)                                                 |
+| CHECKOUT-002 | CHECKOUT-001        | Удалить fake submit                       | Экран успеха невозможен без созданного backend order                     | DONE (`e8fd55c`)                                                 |
 
 ### Этап F. Доставка
 
