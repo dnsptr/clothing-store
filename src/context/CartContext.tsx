@@ -12,6 +12,7 @@ import {
   isMedusaConfigured,
   initializeMedusaPaymentSession,
   listMedusaShippingOptions,
+  MVP_SHIPPING_OPTION_CODE,
   removeMedusaCartLineItem,
   retrieveMedusaCart,
   storefrontDataMode,
@@ -418,9 +419,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         postal_code: details.zip,
       },
     });
-    const shippingOption = (await listMedusaShippingOptions(cartId)).find(
-      (option) => option.name === "MVP доставка по России",
+    const shippingOptions = await listMedusaShippingOptions(cartId);
+    let shippingOption = shippingOptions.find(
+      (option) => option.type?.code === MVP_SHIPPING_OPTION_CODE,
     );
+    if (!shippingOption) {
+      // Переходный фолбэк для баз, где опция создана до того, как импорт
+      // каталога начал проставлять type.code существующим опциям.
+      shippingOption = shippingOptions.find(
+        (option) => option.name === "MVP доставка по России",
+      );
+      if (shippingOption) {
+        console.warn(
+          `[cart] shipping option resolved by display name; run catalog import to stamp type.code=${MVP_SHIPPING_OPTION_CODE}`,
+        );
+      }
+    }
     if (!shippingOption) {
       throw new Error("No manual shipping option is available for this address.");
     }

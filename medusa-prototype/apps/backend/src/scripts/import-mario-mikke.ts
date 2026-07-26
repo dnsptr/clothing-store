@@ -194,7 +194,7 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
 
   const { data: shippingOptions } = await query.graph({
     entity: "shipping_option",
-    fields: ["id", "name", "service_zone_id"],
+    fields: ["id", "name", "service_zone_id", "type.code"],
   });
 
   const ruShippingOption = shippingOptions.find(
@@ -223,10 +223,31 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
         },
       ],
     });
-  } else if (ruShippingOption.service_zone_id !== ruServiceZoneId) {
-    await fulfillmentModuleService.updateShippingOptions(ruShippingOption.id, {
-      service_zone_id: ruServiceZoneId,
-    });
+  } else {
+    // Идемпотентный upsert атрибутов существующей опции. type.code = "mvp-ru" —
+    // машинный идентификатор, по которому витрина выбирает опцию доставки
+    // (display name редактируется в Admin и контрактом не является); базы,
+    // засеянные до появления кода, получают его здесь.
+    const optionUpdate: {
+      service_zone_id?: string;
+      type?: { label: string; description: string; code: string };
+    } = {};
+    if (ruShippingOption.service_zone_id !== ruServiceZoneId) {
+      optionUpdate.service_zone_id = ruServiceZoneId;
+    }
+    if (ruShippingOption.type?.code !== "mvp-ru") {
+      optionUpdate.type = {
+        label: "MVP доставка",
+        description: "Тестовая доставка для локального MVP.",
+        code: "mvp-ru",
+      };
+    }
+    if (Object.keys(optionUpdate).length > 0) {
+      await fulfillmentModuleService.updateShippingOptions(
+        ruShippingOption.id,
+        optionUpdate,
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------

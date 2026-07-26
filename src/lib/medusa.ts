@@ -116,7 +116,11 @@ interface MedusaLineItemDeleteResponse {
 }
 
 interface MedusaShippingOptionsResponse {
-  shipping_options?: { id: string; name: string }[];
+  shipping_options?: {
+    id: string;
+    name: string;
+    type?: { code?: string | null } | null;
+  }[];
 }
 
 interface MedusaPaymentCollectionResponse {
@@ -389,6 +393,12 @@ function parseShippingOptionsResponse(
     const option = expectRecord(item, endpoint, `shipping_options[${index}]`);
     expectString(option.id, endpoint, `shipping_options[${index}].id`);
     expectString(option.name, endpoint, `shipping_options[${index}].name`);
+    if (option.type !== undefined && option.type !== null) {
+      const type = expectRecord(option.type, endpoint, `shipping_options[${index}].type`);
+      if (type.code !== undefined && type.code !== null) {
+        expectString(type.code, endpoint, `shipping_options[${index}].type.code`);
+      }
+    }
   });
   return data as MedusaShippingOptionsResponse;
 }
@@ -664,9 +674,15 @@ export async function updateMedusaCart(cartId: string, body: Record<string, unkn
   return response.cart;
 }
 
+/** Машинный идентификатор MVP-опции доставки (type.code в Medusa). Витрина
+ * выбирает опцию по нему, а не по отображаемому имени: имя редактируется в
+ * Admin и не является контрактом. Код проставляется скриптом импорта каталога. */
+export const MVP_SHIPPING_OPTION_CODE = "mvp-ru";
+
 export async function listMedusaShippingOptions(cartId: string) {
+  const fields = encodeURIComponent("id,name,type.code");
   const response = await medusaRequest(
-    `/store/shipping-options?cart_id=${encodeURIComponent(cartId)}`,
+    `/store/shipping-options?cart_id=${encodeURIComponent(cartId)}&fields=${fields}`,
     { parse: parseShippingOptionsResponse },
   );
   return response.shipping_options || [];
