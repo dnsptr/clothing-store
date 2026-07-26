@@ -34,6 +34,7 @@ import type {
   GetPaymentStatusOutput,
   InitiatePaymentInput,
   InitiatePaymentOutput,
+  PaymentSessionStatus,
   ProviderWebhookPayload,
   RefundPaymentInput,
   RefundPaymentOutput,
@@ -248,15 +249,50 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   }
 
   /**
-   * Авторизация подтверждается нотификацией, а не вызовом. К моменту, когда
-   * Medusa спрашивает, состояние уже известно из `data`.
+   * Авторизация. Состояние выясняется живым `GetState`, а не полем `status` из
+   * данных сессии.
+   *
+   * Это не перестраховка. `data.status` пишется ровно один раз — в
+   * `initiatePayment`, из ответа `Init`, — то есть навсегда остаётся `NEW`.
+   * Обновить его некому: `getPaymentStatus` фреймворк 2.17.2 сам не вызывает, а
+   * нотификация приходит в наш роут, который данных сессии не трогает. Дальше
+   * протухшее `NEW` даёт `pending_authorization`, на нём
+   * `authorizePaymentSessionStep` возвращает `null`, `capturePaymentWorkflow`
+   * получает `payment_id: undefined` и падает — заказ остаётся неоплаченным
+   * навсегда, при списанных деньгах (аудит 2026-07-27).
+   *
+   * Поэтому здесь тот же путь, что и в `getPaymentStatus`: спросить банк и
+   * вернуть его ответ, сохранив свежий `Status` в `data`. Отвечая `captured` на
+   * `CONFIRMED`, мы попадаем в ветку автосписания модуля платежей — он сам
+   * создаёт `Payment` и закрывает списание.
+   *
+   * Банк может не ответить, и недоступность банка — не исход платежа. Падение
+   * здесь означало бы сорванное оформление на ровном месте, поэтому сетевая
+   * ошибка `GetState` не выпускается наружу: возвращается последнее известное
+   * состояние, сессия остаётся в ожидании, а исход доберут повторная
+   * нотификация и сверка (PAY-005) — та же дисциплина «не ронять», что в
+   * `cancelPayment`.
    */
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
-    return {
-      status: data.status ? toSessionStatus(data.status) : "pending_authorization",
-      data: input.data,
-    };
+
+    // Платежа в банке нет — спрашивать не о чем, и это не ошибка: сессия просто
+    // не дошла до `Init`. Прежнее поведение сохранено осознанно.
+    if (!data.paymentId) {
+      return { status: this.knownSessionStatus_(data), data: input.data };
+    }
+
+    try {
+      const result = await this.getPaymentStatus(input);
+      return { status: result.status, data: result.data };
+    } catch (error) {
+      this.logger_.warn(
+        `tbank: GetState при авторизации платежа ${data.paymentId} не прошёл (${
+          error instanceof Error ? error.message : String(error)
+        }), возвращено последнее известное состояние`,
+      );
+      return { status: this.knownSessionStatus_(data), data: input.data };
+    }
   }
 
   /**
@@ -334,6 +370,18 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
     await this.cancelPayment(input);
     return { data: input.data };
+  }
+
+  /**
+   * Последнее известное состояние сессии — ответ на случай, когда банк спросить
+   * не удалось.
+   *
+   * Пустой `status` означает «платёж ещё в пути», а не «платёж неуспешен»:
+   * `pending_authorization` оставляет сессию ожидающей и обратимой, тогда как
+   * `error` закрыл бы её отказом из-за проблем с сетью на нашей стороне.
+   */
+  private knownSessionStatus_(data: TBankSessionData): PaymentSessionStatus {
+    return data.status ? toSessionStatus(data.status) : "pending_authorization";
   }
 
   /**

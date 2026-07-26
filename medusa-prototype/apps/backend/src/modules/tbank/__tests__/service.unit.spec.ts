@@ -223,6 +223,104 @@ describe("getPaymentStatus", () => {
   });
 });
 
+describe("authorizePayment", () => {
+  /**
+   * Данные сессии в том виде, в каком они лежат в БД к моменту авторизации:
+   * `status` записан один раз в `initiatePayment` из ответа `Init` и с тех пор
+   * никем не обновлялся. Если верить ему, платёж навсегда останется `NEW`.
+   */
+  const session = {
+    paymentId: "3456789",
+    paymentUrl: "https://securepay.tinkoff.ru/xxx",
+    orderId: "payses_01JABCDEF",
+    status: "NEW",
+  };
+
+  it("спрашивает банк, а не протухший status из данных сессии", async () => {
+    const fetchMock = mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      Status: "AUTHORIZED",
+    });
+
+    const result = await makeService().authorizePayment({ data: { ...session } } as never);
+
+    expect(fetchMock.mock.calls[0][0]).toContain("/GetState");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.PaymentId).toBe("3456789");
+    expect(result.status).toBe("authorized");
+  });
+
+  it("на CONFIRMED возвращает captured", async () => {
+    mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      Status: "CONFIRMED",
+    });
+
+    const result = await makeService().authorizePayment({ data: { ...session } } as never);
+
+    // Ответ pending_authorization здесь означал бы payment_id: undefined в
+    // capturePaymentWorkflow и заказ, навсегда оставшийся неоплаченным.
+    expect(result.status).toBe("captured");
+  });
+
+  it("на REJECTED возвращает error", async () => {
+    mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      Status: "REJECTED",
+    });
+
+    const result = await makeService().authorizePayment({ data: { ...session } } as never);
+
+    expect(result.status).toBe("error");
+  });
+
+  it("сохраняет в данных сессии свежий Status банка", async () => {
+    mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      Status: "CONFIRMED",
+    });
+
+    const result = await makeService().authorizePayment({ data: { ...session } } as never);
+
+    const data = result.data as Record<string, unknown>;
+    expect(data.status).toBe("CONFIRMED");
+    expect(data.paymentId).toBe("3456789");
+    expect(data.orderId).toBe("payses_01JABCDEF");
+  });
+
+  it("не валит оформление, если банк не ответил", async () => {
+    global.fetch = jest
+      .fn()
+      .mockRejectedValue(new Error("socket hang up")) as unknown as typeof fetch;
+
+    const result = await makeService().authorizePayment({ data: { ...session } } as never);
+
+    // Недоступность банка — не исход платежа: сессия остаётся ожидающей, а
+    // исход доберут повторная нотификация и сверка.
+    expect(result.status).toBe("pending_authorization");
+    expect((result.data as Record<string, unknown>).status).toBe("NEW");
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("без PaymentId не обращается в банк", async () => {
+    const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
+
+    const result = await makeService().authorizePayment({ data: {} } as never);
+
+    // Платёж не создавался — спрашивать не о чем, и это не ошибка.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.status).toBe("pending_authorization");
+  });
+});
+
 describe("cancelPayment", () => {
   it("без PaymentId не обращается в банк", async () => {
     const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
