@@ -15,13 +15,18 @@ export function generateStaticParams() {
 }
 
 /**
- * Свои <title> и description для каждого документа.
+ * Свои <title>, description, canonical и og-теги для каждого документа.
  *
  * Раньше оферта, политика ПДн и реквизиты отдавали общий заголовок корневого
  * layout — в выдаче и в ссылке, отправленной в поддержку или банку, они были
  * неотличимы друг от друга. Титул склеивается вручную, потому что в
  * `app/layout.tsx` задана строка, а не `title.template`; формат суффикса — тот
  * же, что у карточки товара.
+ *
+ * `openGraph` не наследуется по полям: своя секция на странице полностью
+ * заменяет корневую, поэтому type/locale/siteName повторяются здесь — ровно так
+ * же, как в `app/product/[id]/page.tsx`. Относительный canonical разрешается
+ * от `metadataBase` корневого layout.
  */
 export async function generateMetadata({ params }: InfoPageProps): Promise<Metadata> {
   const { slug } = await params;
@@ -34,9 +39,20 @@ export async function generateMetadata({ params }: InfoPageProps): Promise<Metad
     return {};
   }
 
+  const title = `${page.title} | Mario Mikke`;
+  const description = page.summary;
+
   return {
-    title: `${page.title} | Mario Mikke`,
-    description: page.summary,
+    title,
+    description,
+    alternates: { canonical: `/info/${page.slug}` },
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      locale: "ru_RU",
+      siteName: "Mario Mikke",
+    },
   };
 }
 
