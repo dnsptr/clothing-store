@@ -86,8 +86,48 @@ function mediaRemotePatterns() {
   return [...patterns.values()];
 }
 
+/**
+ * Заголовки безопасности серверной цели.
+ *
+ * До этого витрина не отдавала ни одного: ни защиты от встраивания в чужой
+ * iframe, ни запрета MIME-sniffing, ни политики Referer — при том что через неё
+ * проходят адрес, телефон и e-mail покупателя.
+ *
+ * `frame-ancestors` задан именно через CSP: в отличие от `X-Frame-Options`, он
+ * работает во всех современных браузерах и не конфликтует с будущей полной
+ * политикой. Директивы `script-src`/`style-src` сюда осознанно не входят — без
+ * nonce они ломают инлайновые стили и скрипты Next; полноценная CSP требует
+ * middleware с nonce и делается отдельной задачей.
+ *
+ * `headers()` не поддерживается в статическом экспорте — там заголовки задаёт
+ * тот, кто раздаёт файлы (GitHub Pages), поэтому цель `pages` их не объявляет.
+ */
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
+  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+];
+
 const nextConfig: NextConfig = {
   ...(isPagesExport ? { output: "export" as const } : {}),
+  // Версия Next в заголовке ответа — бесплатная подсказка о том, какие CVE
+  // пробовать.
+  poweredByHeader: false,
+  ...(isPagesExport
+    ? {}
+    : {
+        async headers() {
+          return [{ source: "/:path*", headers: securityHeaders }];
+        },
+      }),
+  // Без этой строки весь механизм `route.node.ts` выше был мёртвым: константа
+  // вычислялась и никуда не передавалась, поэтому такой файл не стал бы роутом
+  // ни в одной из целей сборки. Обнаружить это можно было только по
+  // отсутствующему эндпоинту — комментарий рядом уверенно описывал работающее
+  // поведение.
+  pageExtensions,
   images: isPagesExport
     ? // No optimiser exists in a static export.
       { unoptimized: true }

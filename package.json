@@ -15,7 +15,7 @@
     "backend:lint": "npm --prefix medusa-prototype run lint"
   },
   "dependencies": {
-    "next": "16.2.10",
+    "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -24,7 +24,19 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.2.12",
     "typescript": "^5"
+  },
+  "_overrides_comment": [
+    "Next 16.2.12 (последний стабильный в ветке) пинит postcss 8.4.31 и sharp ^0.34.5 —",
+    "обе версии уязвимы, а стабильного релиза Next с исправленными пинами нет:",
+    "`npm audit fix` предлагает откатиться на next@9.3.3. sharp — рабочий оптимизатор",
+    "next/image, он обрабатывает картинки, скачанные с хостов из remotePatterns, поэтому",
+    "уязвимости libvips здесь не теоретические. Обе цели сборки проверены на этих версиях.",
+    "Снять overrides можно, когда Next поднимет пины сам."
+  ],
+  "overrides": {
+    "postcss": "^8.5.23",
+    "sharp": "^0.35.3"
   }
 }
