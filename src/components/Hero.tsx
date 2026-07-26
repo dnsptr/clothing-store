@@ -10,64 +10,16 @@ import {
   type KeyboardEvent,
 } from "react";
 import { withBasePath } from "../lib/assets";
-import { CATALOG_SECTIONS } from "../lib/catalog";
+import type { ContentSlide } from "../lib/content";
 import styles from "./Hero.module.css";
 
 const IMAGE_SLIDE_DURATION = 6500;
 
-type HeroMedia =
-  | { type: "image"; src: string }
-  | { type: "video"; src: string; poster: string };
-
-interface HeroSlide {
-  id: string;
-  media: HeroMedia;
-  alt: string;
-  eyebrow: string;
-  title: string;
-  href: string;
-  durationMs?: number;
-  objectPosition?: string;
+interface HeroProps {
+  slides: ContentSlide[];
 }
 
-const HERO_SLIDES: HeroSlide[] = [
-  {
-    id: "new-arrivals",
-    media: {
-      type: "video",
-      src: "/hero/new-arrivals.mp4",
-      poster: "/images/collection-women.png",
-    },
-    alt: "Новая коллекция женской одежды",
-    eyebrow: "Актуальное",
-    title: "Новинки",
-    href: CATALOG_SECTIONS.new.href,
-    durationMs: IMAGE_SLIDE_DURATION,
-    objectPosition: "50% 50%",
-  },
-  {
-    id: "clothing",
-    media: { type: "image", src: "/images/collection-women.png" },
-    alt: "Женская коллекция одежды",
-    eyebrow: "Каталог",
-    title: "Одежда",
-    href: CATALOG_SECTIONS.clothing.href,
-    durationMs: IMAGE_SLIDE_DURATION,
-    objectPosition: "50% 40%",
-  },
-  {
-    id: "sale",
-    media: { type: "image", src: "/hero/sale-campaign.png" },
-    alt: "Женские образы из специальной подборки",
-    eyebrow: "Специальное предложение",
-    title: "Sale до −50%",
-    href: "/catalog?section=sale",
-    durationMs: IMAGE_SLIDE_DURATION,
-    objectPosition: "50% 50%",
-  },
-];
-
-export default function Hero() {
+export default function Hero({ slides }: HeroProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [isHeroVisible, setIsHeroVisible] = useState(true);
@@ -78,10 +30,13 @@ export default function Hero() {
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const progressRef = useRef(0);
 
-  const currentSlide = HERO_SLIDES[activeIndex];
+  // May be undefined: the client can empty the hero from the admin, and every
+  // hook below has to keep running regardless, so the empty case is handled
+  // after the hooks rather than by an early return here.
+  const currentSlide = slides[activeIndex] as ContentSlide | undefined;
   const isPlaybackActive = isHeroVisible && isDocumentVisible;
-  const isCurrentVideoFailed = Boolean(failedVideos[currentSlide.id]);
-  const isTimedSlide = currentSlide.media.type === "image" || isCurrentVideoFailed;
+  const isCurrentVideoFailed = Boolean(currentSlide && failedVideos[currentSlide.id]);
+  const isTimedSlide = currentSlide?.media.type === "image" || isCurrentVideoFailed;
 
   const updateProgress = useCallback((value: number) => {
     const nextValue = Math.min(Math.max(value, 0), 1);
@@ -89,17 +44,21 @@ export default function Hero() {
     setProgress(nextValue);
   }, []);
 
+  const slideCount = slides.length;
+
   const nextSlide = useCallback(() => {
     progressRef.current = 0;
     setProgress(0);
-    setActiveIndex((index) => (index + 1) % HERO_SLIDES.length);
-  }, []);
+    setActiveIndex((index) => (slideCount ? (index + 1) % slideCount : 0));
+  }, [slideCount]);
 
   const previousSlide = useCallback(() => {
     progressRef.current = 0;
     setProgress(0);
-    setActiveIndex((index) => (index - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
-  }, []);
+    setActiveIndex((index) =>
+      slideCount ? (index - 1 + slideCount) % slideCount : 0,
+    );
+  }, [slideCount]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -129,18 +88,18 @@ export default function Hero() {
       if (!video) return;
       video.pause();
 
-      if (id === currentSlide.id) {
+      if (id === currentSlide?.id) {
         video.currentTime = 0;
       }
     });
-  }, [activeIndex, currentSlide.id]);
+  }, [activeIndex, currentSlide?.id]);
 
   useEffect(() => {
     Object.entries(videoRefs.current).forEach(([id, video]) => {
       if (!video) return;
 
       const shouldPlay =
-        id === currentSlide.id &&
+        id === currentSlide?.id &&
         currentSlide.media.type === "video" &&
         !failedVideos[id] &&
         isPlaybackActive;
@@ -151,10 +110,10 @@ export default function Hero() {
         video.pause();
       }
     });
-  }, [currentSlide.id, currentSlide.media.type, failedVideos, isPlaybackActive]);
+  }, [currentSlide?.id, currentSlide?.media.type, failedVideos, isPlaybackActive]);
 
   useEffect(() => {
-    if (!isTimedSlide || !isPlaybackActive) return;
+    if (!isTimedSlide || !isPlaybackActive || !currentSlide) return;
 
     const duration = currentSlide.durationMs ?? IMAGE_SLIDE_DURATION;
     const startedAt = performance.now() - progressRef.current * duration;
@@ -181,12 +140,17 @@ export default function Hero() {
     return () => cancelAnimationFrame(animationFrame);
   }, [
     activeIndex,
-    currentSlide.durationMs,
+    currentSlide,
     isPlaybackActive,
     isTimedSlide,
     nextSlide,
     updateProgress,
   ]);
+
+  // After every hook, so the rules of hooks hold when the client empties the
+  // section. A hero with no slides is simply absent rather than a blank
+  // full-screen block.
+  if (!currentSlide) return null;
 
   const handleKeyboardNavigation = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "ArrowLeft") {
@@ -209,9 +173,10 @@ export default function Hero() {
       onKeyDown={handleKeyboardNavigation}
     >
       <div className={styles.mediaStack} aria-hidden="true">
-        {HERO_SLIDES.map((slide, index) => {
+        {slides.map((slide, index) => {
           const isActive = index === activeIndex;
           const mediaFailed = Boolean(failedVideos[slide.id]);
+          const objectPosition = slide.objectPosition ?? undefined;
 
           return (
             <div
@@ -220,31 +185,36 @@ export default function Hero() {
             >
               {slide.media.type === "image" ? (
                 <Image
-                  src={withBasePath(slide.media.src)}
+                  src={withBasePath(slide.media.url)}
                   alt=""
                   fill
                   sizes="100vw"
                   loading={index === 1 ? "eager" : "lazy"}
                   className={styles.image}
-                  style={{ objectPosition: slide.objectPosition }}
+                  style={{ objectPosition }}
                 />
               ) : (
                 <>
-                  <Image
-                    src={withBasePath(slide.media.poster)}
-                    alt=""
-                    fill
-                    priority={index === 0}
-                    sizes="100vw"
-                    className={styles.image}
-                    style={{ objectPosition: slide.objectPosition }}
-                  />
+                  {/* A video may have no poster: the admin makes it optional,
+                      and without one there is simply nothing to show until the
+                      first frame decodes. */}
+                  {slide.media.posterUrl && (
+                    <Image
+                      src={withBasePath(slide.media.posterUrl)}
+                      alt=""
+                      fill
+                      priority={index === 0}
+                      sizes="100vw"
+                      className={styles.image}
+                      style={{ objectPosition }}
+                    />
+                  )}
                   {!mediaFailed && (
                     <video
                       ref={(node) => {
                         videoRefs.current[slide.id] = node;
                       }}
-                      src={withBasePath(slide.media.src)}
+                      src={withBasePath(slide.media.url)}
                       muted
                       playsInline
                       autoPlay={isActive}
@@ -253,7 +223,7 @@ export default function Hero() {
                       className={`${styles.video} ${
                         readyVideos[slide.id] ? styles.videoReady : ""
                       }`}
-                      style={{ objectPosition: slide.objectPosition }}
+                      style={{ objectPosition }}
                       onCanPlay={(event) => {
                         setReadyVideos((videos) =>
                           videos[slide.id] ? videos : { ...videos, [slide.id]: true },
@@ -290,16 +260,18 @@ export default function Hero() {
 
       <Link
         key={currentSlide.id}
-        href={currentSlide.href}
+        href={currentSlide.href ?? "/catalog"}
         className={styles.slideLink}
         aria-label={`Открыть раздел «${currentSlide.title}»`}
       >
         <div className={styles.content}>
-          <span className={styles.eyebrow}>{currentSlide.eyebrow}</span>
+          {currentSlide.eyebrow && (
+            <span className={styles.eyebrow}>{currentSlide.eyebrow}</span>
+          )}
           <h1 className={styles.title}>{currentSlide.title}</h1>
 
           <div className={styles.progress} aria-hidden="true">
-            {HERO_SLIDES.map((slide, index) => {
+            {slides.map((slide, index) => {
               const segmentProgress = index < activeIndex ? 1 : index === activeIndex ? progress : 0;
 
               return (

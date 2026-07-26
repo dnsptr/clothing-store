@@ -32,5 +32,10 @@
     ".medusa/admin",
     ".cache",
     "eslint.config.*",
+    // Admin extensions are browser ESM bundled by Vite against
+    // src/admin/tsconfig.json. Compiling them here too would typecheck React
+    // components as CommonJS Node code, which rejects `import.meta` and would
+    // keep producing errors that say nothing about the code being wrong.
+    "src/admin",
   ]
 }

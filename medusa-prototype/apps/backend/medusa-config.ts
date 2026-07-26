@@ -74,6 +74,65 @@ const redisModules = REDIS_URL
     ]
   : []
 
+/**
+ * Home page editorial content (hero slides, category shortcuts, material and
+ * store cards, the promo banner). Registered unconditionally — unlike the Redis
+ * modules it has no infrastructure prerequisite, and the storefront's home page
+ * depends on it in every environment.
+ */
+const contentModule = {
+  resolve: './src/modules/content',
+}
+
+const PUBLIC_BACKEND_URL = process.env.PUBLIC_BACKEND_URL
+
+/**
+ * Fail fast rather than accept uploads addressed as localhost. The value is
+ * baked into each file's stored url at upload time, so a wrong or missing one
+ * is repaired by a data migration, not by fixing the environment later.
+ */
+if (IS_PRODUCTION && !PUBLIC_BACKEND_URL && !IS_BUILD) {
+  throw new Error(
+    'PUBLIC_BACKEND_URL is required in production. Uploaded files store an ' +
+      'absolute url at upload time, so without it every upload would be ' +
+      'permanently addressed as http://localhost:9000. Set it to the public ' +
+      'origin of this backend (e.g. https://api.mariomikke.shop).'
+  )
+}
+
+/**
+ * Medusa already registers a File module by default, but it does so with NO
+ * provider options, which leaves the local provider's `backend_url` at its
+ * built-in `http://localhost:9000/static`. Declaring the module here overrides
+ * that default (user modules are appended after the defaults and win on key
+ * collision), so uploads carry the right origin from the very first one.
+ *
+ * The local provider is documented by its own authors as development only:
+ * files are served by the Node process, and nothing under `static/` is private
+ * — anything there is readable by whoever knows the filename. It is adequate
+ * while the client fills the home page with content and inadequate for the long
+ * run. Moving media to object storage (roadmap 4.1) means swapping the provider
+ * below for `@medusajs/medusa/file-s3`; content rows store the provider's file
+ * `key` next to the url precisely so that swap stays a configuration change.
+ */
+const fileModule = {
+  key: Modules.FILE,
+  resolve: '@medusajs/medusa/file',
+  options: {
+    providers: [
+      {
+        resolve: '@medusajs/medusa/file-local',
+        id: 'local',
+        options: {
+          // Must match how the files are actually served: Caddy proxies every
+          // path through to Medusa, which serves `static/` at `/static`.
+          backend_url: `${PUBLIC_BACKEND_URL ?? 'http://localhost:9000'}/static`,
+        },
+      },
+    ],
+  },
+}
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -86,5 +145,5 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET,
     }
   },
-  modules: redisModules,
+  modules: [...redisModules, fileModule, contentModule],
 })

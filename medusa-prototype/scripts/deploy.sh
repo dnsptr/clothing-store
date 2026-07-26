@@ -14,6 +14,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   umask 077
   cat > "${ENV_FILE}" <<EOF
 BACKEND_HOST=${BACKEND_HOST}
+PUBLIC_BACKEND_URL=${PUBLIC_BACKEND_URL}
 STOREFRONT_URL=${STOREFRONT_URL}
 
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
@@ -33,6 +34,14 @@ fi
 
 if ! grep -q '^STOREFRONT_URL=' "${ENV_FILE}"; then
   printf '\nSTOREFRONT_URL=%s\n' "${STOREFRONT_URL}" >> "${ENV_FILE}"
+fi
+
+# Backfill for servers whose .env.production predates this variable. The backend
+# refuses to boot in production without it: uploaded files record an absolute URL
+# at upload time, so a missing value would bake http://localhost:9000 into every
+# uploaded image and only a data migration could undo it.
+if ! grep -q '^PUBLIC_BACKEND_URL=' "${ENV_FILE}"; then
+  printf '\nPUBLIC_BACKEND_URL=%s\n' "${PUBLIC_BACKEND_URL}" >> "${ENV_FILE}"
 fi
 
 docker compose --env-file "${ENV_FILE}" -f compose.production.yml up -d --build
