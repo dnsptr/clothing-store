@@ -1,0 +1,1307 @@
+From 32ff000f5e1db7a29ac9b98448c4348dae028785 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 26 Jul 2026 06:10:20 +0000
+Subject: [PATCH] feat(storefront): SSR/ISR rendering model + variant-accurate
+ size selectors
+
+---
+ .env.template                                |  21 ++
+ .github/workflows/ci.yml                     |  14 +-
+ .github/workflows/deploy-pages.yml           |   4 +-
+ README.md                                    |  38 +++-
+ docs/adr/0002-storefront-rendering-model.md  |  83 ++++++++
+ next.config.ts                               |  77 ++++++-
+ package.json                                 |   1 +
+ src/app/cart/CartPageClient.tsx              |  18 +-
+ src/app/checkout/CheckoutClient.tsx          |  26 +--
+ src/app/favorites/FavoritesClient.tsx        |  23 +-
+ src/app/layout.tsx                           |   8 +
+ src/app/product/[id]/ProductDetailClient.tsx |  71 +++++--
+ src/app/product/[id]/page.tsx                | 106 +++++++++-
+ src/components/QuickViewModal.module.css     |  58 ++++++
+ src/components/QuickViewModal.tsx            | 208 ++++++++++++++-----
+ src/lib/medusa.ts                            |  49 ++++-
+ src/lib/shop.ts                              |  48 +++++
+ 17 files changed, 718 insertions(+), 135 deletions(-)
+ create mode 100644 docs/adr/0002-storefront-rendering-model.md
+
+diff --git a/.env.template b/.env.template
+index 9a4947d..05d3afc 100644
+--- a/.env.template
++++ b/.env.template
+@@ -1,5 +1,26 @@
++# --- Storefront data source -------------------------------------------------
++# Values prefixed with NEXT_PUBLIC_ are inlined into the browser bundle at build
++# time. The server prefers the unprefixed variables below and reads them when the
++# server process starts, so on Vercel a backend/key change no longer requires a
++# rebuild of the bundle — only a redeploy of the environment.
+ NEXT_PUBLIC_DATA_MODE=mock
+ NEXT_PUBLIC_MEDUSA_BACKEND_URL=http://localhost:9000
+ NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_replace_with_publishable_key
+ # Optional. When omitted, the storefront selects the RUB region automatically.
+ NEXT_PUBLIC_MEDUSA_REGION_ID=
++
++# --- Server-side overrides (optional; take precedence on the server) ---------
++# The browser still needs the NEXT_PUBLIC_ values for cart calls it makes
++# directly, so these are overrides for server rendering, not replacements.
++# DATA_MODE=medusa
++# MEDUSA_BACKEND_URL=https://api.mariomikke.shop
++# MEDUSA_PUBLISHABLE_KEY=pk_replace_with_publishable_key
++# MEDUSA_REGION_ID=
++
++# --- Server target only ------------------------------------------------------
++# Absolute base for canonical links and OG images.
++# NEXT_PUBLIC_SITE_URL=https://www.mariomikke.shop
++# Extra image origins the optimiser may fetch from, comma-separated. Needed once
++# media moves to S3 (roadmap 4.1). Build-time only — Next cannot re-read
++# `images.remotePatterns` per request.
++# MEDIA_ALLOWED_ORIGINS=
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 5bdf8c4..c476928 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -43,11 +43,19 @@
+       - name: Type check
+         run: npm run typecheck
+
+-      # Build the static export exactly as it is built for Pages, so CI catches
+-      # any regression in the deployable artifact. basePath is derived from the
++      # Two deployable artifacts exist, so CI builds both. Neither is allowed to
++      # rot behind the other: the server build is what Vercel ships, the export
++      # is what GitHub Pages ships, and a change that satisfies one can easily
++      # break the other (route segment config, image optimisation, basePath).
++
++      # 1. Server target — the Vercel artifact (SSR + ISR).
++      - name: Build server target
++        run: npm run build
++
++      # 2. Static export — the Pages artifact. basePath is derived from the
+       # repository name (matches next.config.ts and deploy-pages.yml).
+       - name: Build static export
+-        run: npm run build
++        run: npm run build:pages
+         env:
+           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+
+diff --git a/.github/workflows/deploy-pages.yml b/.github/workflows/deploy-pages.yml
+index c467a34..2d9894b 100644
+--- a/.github/workflows/deploy-pages.yml
++++ b/.github/workflows/deploy-pages.yml
+@@ -44,8 +44,10 @@
+       - name: Install dependencies
+         run: npm ci
+
++      # BUILD_TARGET=pages is what turns on `output: "export"`. Without it this
++      # job would produce a server build and upload an empty ./out.
+       - name: Build static export
+-        run: npm run build
++        run: npm run build:pages
+         env:
+           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+
+diff --git a/README.md b/README.md
+index 3cbbe72..860c43e 100644
+--- a/README.md
++++ b/README.md
+@@ -4,17 +4,39 @@ The repository contains the Mario Mikke Next.js storefront and a Medusa backend
+
+ ## Environments
+
+-| Environment | Data mode | Backend |
+-| --- | --- | --- |
+-| Local storefront | `mock` or `medusa` from `.env.local` | Local Medusa or the public Timeweb endpoint |
+-| GitHub Pages | `mock` demo | None; checkout is unavailable |
+-| Vercel | `medusa` at `https://www.mariomikke.shop` | `https://api.mariomikke.shop` |
+-| Timeweb Cloud | Medusa production | Load Balancer, Caddy, PostgreSQL, Redis, and daily backups |
++| Environment | Data mode | Build target | Backend |
++| --- | --- | --- | --- |
++| Local storefront | `mock` or `medusa` from `.env.local` | `npm run dev` | Local Medusa or the public Timeweb endpoint |
++| GitHub Pages | `mock` demo | `npm run build:pages` (static export) | None; checkout is unavailable |
++| Vercel | `medusa` at `https://www.mariomikke.shop` | `npm run build` (server + ISR) | `https://api.mariomikke.shop` |
++| Timeweb Cloud | Medusa production | — | Load Balancer, Caddy, PostgreSQL, Redis, and daily backups |
++
++## Build targets
++
++There are two deployable artifacts and CI builds both, because a change that
++satisfies one can break the other.
++
++- `npm run build` — the Vercel artifact. Server rendering with ISR: product
++  pages are generated on first request and revalidated every 5 minutes, so a
++  product created in Medusa Admin gets a page without a redeploy. `next/image`
++  optimisation is on; remote image hosts are allow-listed in `next.config.ts`
++  from the configured backend plus `MEDIA_ALLOWED_ORIGINS`.
++- `npm run build:pages` — the GitHub Pages artifact. Sets `BUILD_TARGET=pages`,
++  which switches on `output: "export"`, `images.unoptimized` and the
++  `basePath`/`assetPrefix` derived from the repository name. Demo only: mock
++  data, no checkout.
++
++See [`docs/adr/0002-storefront-rendering-model.md`](docs/adr/0002-storefront-rendering-model.md).
+
+ The stable backend endpoint is `https://api.mariomikke.shop`. A Timeweb Load
+ Balancer terminates HTTPS and forwards requests to Caddy on the backend server.
+-Public `NEXT_PUBLIC_*` variables are embedded during the storefront build, so
+-changing the backend URL also requires a new Vercel deployment.
++
++`NEXT_PUBLIC_*` variables are still embedded into the browser bundle at build
++time, but server rendering now prefers the unprefixed `MEDUSA_BACKEND_URL` /
++`MEDUSA_PUBLISHABLE_KEY` / `DATA_MODE`, which are read when the server process
++starts. Catalog and product pages therefore survive an env change without a
++bundle rebuild. Cart calls are still made by the browser and still depend on the
++public values — moving them behind a route handler is a separate task.
+
+ Backend deployment, firewall, HTTPS, and recovery procedures are documented in
+ [`medusa-prototype/DEPLOYMENT.md`](medusa-prototype/DEPLOYMENT.md).
+diff --git a/docs/adr/0002-storefront-rendering-model.md b/docs/adr/0002-storefront-rendering-model.md
+new file mode 100644
+index 0000000..217a9f0
+--- /dev/null
++++ b/docs/adr/0002-storefront-rendering-model.md
+@@ -0,0 +1,83 @@
++# ADR-002: Модель рендеринга витрины
++
++- **Статус:** принят
++- **Дата:** 2026-07-26
++- **Контекст roadmap:** задача 1.1 (этап P1); разблокирует 4.1 (медиа), 4.5 (SEO)
++- **Связан с:** ADR-001 §6 (режимы данных витрины)
++
++## Контекст
++
++Витрина собиралась в единственном режиме `output: "export"`. Следствия:
++
++1. Страницы товаров существовали только для id, перечисленных в
++   `generateStaticParams()`, а тот возвращал id демо-каталога. Товар, заведённый
++   менеджером в Medusa Admin, **не получал страницы вообще** — не медленную, не
++   пустую, а 404 по прямой ссылке. Это делало админку непригодной для основной
++   операции: завести товар.
++2. `next/image` работал только с `unoptimized: true`.
++3. `NEXT_PUBLIC_*` вшивались в бандл на сборке, поэтому смена ключа или адреса
++   бэкенда требовала пересборки. Именно этот механизм привёл к деградации
++   каталога на проде (roadmap 0.1).
++4. PDP держала костыль: серверный компонент отдавал мок-«оболочку», а клиент
++   заново дорезолвливал товар по handle.
++
++Демо на GitHub Pages при этом остаётся нужным: у него нет сервера.
++
++## Решение
++
++### 1. Две цели сборки вместо одной
++
++- `npm run build` — сервер + ISR. Артефакт Vercel. Значение по умолчанию.
++- `npm run build:pages` (`BUILD_TARGET=pages`) — статический экспорт. Артефакт
++  GitHub Pages. Включает `output: "export"`, `images.unoptimized`,
++  `basePath`/`assetPrefix`.
++
++CI собирает **обе** цели. Регрессия в экспортной цели иначе обнаруживается
++только падением деплоя Pages.
++
++### 2. Страницы товаров генерируются по требованию
++
++На серверной цели `generateStaticParams()` возвращает пустой массив. По
++документации Next 16 это и есть условие ISR-генерации путей в рантайме: любой
++id, включая созданный после деплоя, рендерится при первом обращении и дальше
++отдаётся из кеша. `revalidate = 300`.
++
++Next 16 **не** кеширует `fetch` по умолчанию (в 14 кешировал), поэтому серверные
++чтения каталога явно передают `next.revalidate`; одного сегментного
++`export const revalidate` недостаточно.
++
++### 3. Разграничение 404 и недоступности бэкенда
++
++- Товар отсутствует в Medusa → `notFound()`.
++- Medusa недоступна → контролируемое состояние ошибки, **не** 404 и **не** 500.
++
++404 в этом случае сообщил бы покупателю, что товара не существует, и отравил бы
++ISR-кеш отрицательным ответом для живого товара. Фолбэк на демо-каталог
++запрещён (ADR-001 §6).
++
++### 4. Серверные переменные окружения имеют приоритет
++
++На сервере `MEDUSA_BACKEND_URL` / `MEDUSA_PUBLISHABLE_KEY` / `DATA_MODE`
++перекрывают `NEXT_PUBLIC_*` и читаются при старте процесса. Рендеринг каталога и
++карточек перестаёт зависеть от того, что вшито в бандл.
++
++Ограничение: корзина ходит в Store API из браузера и по-прежнему требует
++публичного ключа в бандле. Перенос этих вызовов за route handler — отдельная
++задача, в этом ADR не решается.
++
++### 5. `images.remotePatterns` остаётся сборочной настройкой
++
++Next не перечитывает её в рантайме. Список выводится из адреса бэкенда плюс
++`MEDIA_ALLOWED_ORIGINS`, чтобы миграция медиа в S3 (4.1) была сменой переменной,
++а не правкой кода. Это единственная оставшаяся сборочная привязка к адресам.
++
++## Последствия
++
++- 4.5 (SEO-пакет) становится осмысленным: появились per-product `metadata`,
++  канонические ссылки и OG. `sitemap`/`robots` — в рамках 4.5.
++- 4.1 (медиа в S3) больше не блокируется отсутствием оптимизации изображений.
++- Демо на Pages сохраняется без изменений в поведении, но собирается другой
++  командой; workflow обновлён.
++- Отказ от `output: "export"` на серверной цели означает, что Vercel-деплой
++  теперь имеет серверную часть: это влияет на биллинг и на требования к
++  мониторингу (4.2).
+diff --git a/next.config.ts b/next.config.ts
+index ef881f5..08f9cc7 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,25 +1,86 @@
+ import type { NextConfig } from "next";
+
+-const githubPagesBasePath =
+-  process.env.NEXT_PUBLIC_BASE_PATH ??
+-  (process.env.GITHUB_ACTIONS === "true" ? "/clothing-store" : "");
++// Two build targets share this config.
++//
++//   default (Vercel)   — server rendering + ISR. Product pages are produced on
++//                        demand, so a product created in Medusa Admin gets a
++//                        page without a redeploy. next/image optimisation is on.
++//   BUILD_TARGET=pages — static export of the mock demo for GitHub Pages. No
++//                        server, no checkout (README → "Environments").
++//
++// CI builds BOTH targets on purpose: a regression in the export target is
++// otherwise invisible until the Pages deploy fails.
++const isPagesExport = process.env.BUILD_TARGET === "pages";
+
++// basePath/assetPrefix belong to the Pages export only. On Vercel the app is
++// served from the domain root and a stray basePath would break every asset URL.
++const githubPagesBasePath = isPagesExport
++  ? process.env.NEXT_PUBLIC_BASE_PATH ??
++    (process.env.GITHUB_ACTIONS === "true" ? "/clothing-store" : "")
++  : "";
++
++// Build-time guard for the export target only. In a static export the public
++// variables are inlined into the bundle, so a missing key can only be caught
++// here. On the server target the same variables are read per request
++// (src/lib/medusa.ts) — that is precisely what lets an env change take effect
++// without a rebuild, so a build-time throw there would reintroduce the coupling
++// this change removes. The server target fails loudly at request time instead.
+ if (
++  isPagesExport &&
+   process.env.NEXT_PUBLIC_DATA_MODE === "medusa" &&
+   (!process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL ||
+     !process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY)
+ ) {
+   throw new Error(
+-    "Medusa mode requires NEXT_PUBLIC_MEDUSA_BACKEND_URL and " +
++    "Static export in medusa mode requires NEXT_PUBLIC_MEDUSA_BACKEND_URL and " +
+       "NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY at build time.",
+   );
+ }
+
++/**
++ * Hosts the image optimiser is allowed to fetch product media from.
++ *
++ * `remotePatterns` is build-time configuration — Next cannot re-read it per
++ * request — so this is the one place where a backend/CDN move still requires a
++ * redeploy. Derived from the configured backend plus an explicit override list
++ * (`MEDIA_ALLOWED_ORIGINS`, comma-separated) so the S3 migration (task 4.1) is
++ * a variable change rather than a code change.
++ */
++function mediaRemotePatterns() {
++  const origins = [
++    process.env.MEDUSA_BACKEND_URL,
++    process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL,
++    ...(process.env.MEDIA_ALLOWED_ORIGINS?.split(",") ?? []),
++  ];
++
++  const patterns = new Map<string, { protocol: "http" | "https"; hostname: string; port: string }>();
++  for (const origin of origins) {
++    const trimmed = origin?.trim();
++    if (!trimmed) continue;
++    try {
++      const { protocol, hostname, port } = new URL(trimmed);
++      if (protocol !== "http:" && protocol !== "https:") continue;
++      patterns.set(`${protocol}//${hostname}:${port}`, {
++        protocol: protocol === "https:" ? "https" : "http",
++        hostname,
++        port,
++      });
++    } catch {
++      // A malformed origin must not take the build down; it simply grants no
++      // permission, and the resulting image request fails visibly in review.
++      console.warn(`[next.config] Ignored malformed media origin: ${trimmed}`);
++    }
++  }
++
++  return [...patterns.values()];
++}
++
+ const nextConfig: NextConfig = {
+-  output: "export",
+-  images: {
+-    unoptimized: true,
+-  },
++  ...(isPagesExport ? { output: "export" as const } : {}),
++  images: isPagesExport
++    ? // No optimiser exists in a static export.
++      { unoptimized: true }
++    : { remotePatterns: mediaRemotePatterns() },
+   basePath: githubPagesBasePath || undefined,
+   assetPrefix: githubPagesBasePath || undefined,
+   env: {
+diff --git a/package.json b/package.json
+index 4400061..3406cc6 100644
+--- a/package.json
++++ b/package.json
+@@ -5,6 +5,7 @@
+   "scripts": {
+     "dev": "next dev",
+     "build": "next build",
++    "build:pages": "BUILD_TARGET=pages next build",
+     "start": "next start",
+     "lint": "eslint",
+     "typecheck": "tsc --noEmit",
+diff --git a/src/app/cart/CartPageClient.tsx b/src/app/cart/CartPageClient.tsx
+index e2be1cb..572b005 100644
+--- a/src/app/cart/CartPageClient.tsx
++++ b/src/app/cart/CartPageClient.tsx
+@@ -7,7 +7,7 @@
+ import { useCart } from "../../context/CartContext";
+ import { useCatalog } from "../../context/CatalogContext";
+ import { withBasePath } from "../../lib/assets";
+ import { formatPrice } from "../../lib/format";
+-import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
++import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
+ import styles from "./cart.module.css";
+
+ function BookmarkIcon({ active = false }: { active?: boolean }) {
+@@ -127,10 +127,11 @@
+                 <h2>Дополните заказ</h2>
+                 <div className={styles.recommendGrid}>
+                   {recommendations.map((product) => {
+-                    const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
++                    const sizes = selectableSizes(product);
+                     const selectedSize = recommendationSizes[product.id] ??
+                       (sizes.includes(DEFAULT_RECOMMENDATION_SIZE) ? DEFAULT_RECOMMENDATION_SIZE : sizes[0]);
+                     const isSaved = isFavorite(product.id);
++                    const addableVariant = findAddableVariant(product, { size: selectedSize });
+
+                     return (
+                     <article className={styles.recommendCard} key={product.id}>
+@@ -179,18 +180,17 @@
+                       <button
+                         type="button"
+                         className={styles.recommendCartButton}
+-                        onClick={() =>
++                        onClick={() => {
++                          if (!addableVariant) return;
+                           addToCart({
+                             product,
+                             selectedSize,
+                             selectedColor: product.colors[0],
+-                            variantId: product.variants.find(
+-                              (variant) => variant.options.Размер === selectedSize,
+-                            )?.variantId ?? "",
++                            variantId: addableVariant.variantId,
+                             quantity: 1,
+-                          })
+-                        }
+-                        disabled={isCartMutating}
++                          });
++                        }}
++                        disabled={isCartMutating || !addableVariant}
+                         aria-busy={isCartMutating}
+                       >
+                         Добавить
+diff --git a/src/app/checkout/CheckoutClient.tsx b/src/app/checkout/CheckoutClient.tsx
+index e33c2b0..bd1ff51 100644
+--- a/src/app/checkout/CheckoutClient.tsx
++++ b/src/app/checkout/CheckoutClient.tsx
+@@ -7,7 +7,7 @@
+ import { useCart } from "../../context/CartContext";
+ import { useCatalog } from "../../context/CatalogContext";
+ import { withBasePath } from "../../lib/assets";
+ import { formatPrice } from "../../lib/format";
+-import { AVAILABLE_SIZES, DEFAULT_RECOMMENDATION_SIZE } from "../../lib/shop";
++import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
+ import styles from "./checkout.module.css";
+
+ // ── Validation helpers ────────────────────────────────────────────────────────
+@@ -288,9 +288,10 @@
+               <p className={styles.sectionTitle}>Дополните заказ</p>
+               <div className={styles.recommendGrid}>
+               {recommendations.map((product) => {
+-                  const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
++                  const sizes = selectableSizes(product);
+                   const selectedSize = recommendationSizes[product.id] ??
+                     (sizes.includes(DEFAULT_RECOMMENDATION_SIZE) ? DEFAULT_RECOMMENDATION_SIZE : sizes[0]);
++                  const addableVariant = findAddableVariant(product, { size: selectedSize });
+
+                   return (
+                   <div key={product.id} className={styles.recommendCard}>
+@@ -328,18 +329,19 @@
+                       ))}
+                     </div>
+                     <button
++                      type="button"
+                       className={styles.addBtn}
+-                      onClick={() =>
++                      onClick={() => {
++                        if (!addableVariant) return;
+                         addToCart({
+-                            product,
+-                            selectedSize,
+-                            selectedColor: product.colors[0],
+-                            variantId: product.variants.find(
+-                              (variant) => variant.options.Размер === selectedSize,
+-                            )?.variantId ?? "",
+-                            quantity: 1,
+-                        })
+-                      }
++                          product,
++                          selectedSize,
++                          selectedColor: product.colors[0],
++                          variantId: addableVariant.variantId,
++                          quantity: 1,
++                        });
++                      }}
++                      disabled={!addableVariant}
+                     >
+                       Добавить
+                     </button>
+diff --git a/src/app/favorites/FavoritesClient.tsx b/src/app/favorites/FavoritesClient.tsx
+index 0e3b421..7772385 100644
+--- a/src/app/favorites/FavoritesClient.tsx
++++ b/src/app/favorites/FavoritesClient.tsx
+@@ -6,7 +6,7 @@
+ import ProductImageGallery from "../../components/ProductImageGallery";
+ import { useCart } from "../../context/CartContext";
+ import { useCatalog } from "../../context/CatalogContext";
+ import { formatPrice } from "../../lib/format";
+-import { AVAILABLE_SIZES } from "../../lib/shop";
++import { findAddableVariant, selectableSizes } from "../../lib/shop";
+ import styles from "./favorites.module.css";
+
+ export default function FavoritesClient() {
+@@ -53,9 +53,13 @@
+
+         <section className={styles.grid} aria-label="Избранные товары">
+           {favoriteProducts.map((product) => {
+-            const sizes = product.availableSizes.length ? product.availableSizes : AVAILABLE_SIZES;
++            const sizes = selectableSizes(product);
+             const selectedSize = selectedSizes[product.id] ?? sizes[0];
+             const selectedColor = product.colors[0];
++            const addableVariant = findAddableVariant(product, {
++              size: selectedSize,
++              colorName: selectedColor?.name,
++            });
+
+             return (
+               <article key={product.id} className={styles.card}>
+@@ -108,20 +112,17 @@
+                   <button
+                     type="button"
+                     className={styles.addButton}
+-                    onClick={() =>
++                    onClick={() => {
++                      if (!addableVariant) return;
+                       addToCart({
+                         product,
+                         selectedSize,
+                         selectedColor,
+-                        variantId: product.variants.find(
+-                          (variant) =>
+-                            variant.options.Размер === selectedSize &&
+-                            variant.options.Цвет === selectedColor.name,
+-                        )?.variantId ?? "",
++                        variantId: addableVariant.variantId,
+                         quantity: 1,
+-                      })
+-                    }
+-                    disabled={isCartMutating}
++                      });
++                    }}
++                    disabled={isCartMutating || !addableVariant}
+                     aria-busy={isCartMutating}
+                   >
+                     Добавить в корзину
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index bf924e7..363967c 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -18,7 +18,15 @@
+   weight: ["300", "400", "500", "600"],
+ });
+
++// Absolute base for canonical links and OG/Twitter image URLs. Required once
++// per-product metadata exists: without it Next resolves them against
++// http://localhost:3000 and warns at build time. Overridable per environment;
++// note that the GitHub Pages demo therefore points its canonical at the real
++// store rather than competing with it in search results.
++const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.mariomikke.shop";
++
+ export const metadata: Metadata = {
++  metadataBase: new URL(siteUrl),
+   title: "Mario Mikke | Premium Clothing Store",
+   description: "Minimalist and elegant online clothing store by Mario Mikke",
+   applicationName: "Mario Mikke",
+diff --git a/src/app/product/[id]/ProductDetailClient.tsx b/src/app/product/[id]/ProductDetailClient.tsx
+index c1ac8ed..b81f597 100644
+--- a/src/app/product/[id]/ProductDetailClient.tsx
++++ b/src/app/product/[id]/ProductDetailClient.tsx
+@@ -98,25 +98,42 @@
+   );
+ }
+
+-export default function ProductDetailClient({ product: initialProduct }: { product: Product }) {
++interface ProductDetailClientProps {
++  /** Route param. Always present, even when no product could be resolved. */
++  productId: string;
++  /**
++   * Product resolved on the server — from Medusa in medusa mode, from the demo
++   * catalog in mock mode. Non-null in the common case, which is what removed the
++   * old "mock shell + client refetch" wrapper: the HTML now already contains the
++   * real product, so there is nothing to re-resolve and nothing to flicker.
++   */
++  initialProduct: Product | null;
++  /** Medusa was unreachable during server rendering (FE-002 / ADR-001 §6). */
++  serverError?: boolean;
++}
++
++export default function ProductDetailClient({
++  productId,
++  initialProduct,
++  serverError = false,
++}: ProductDetailClientProps) {
+   const { products, source, status } = useCatalog();
+-  const medusaProduct = products.find((item) => item.id === initialProduct.id);
++  const medusaProduct = products.find((item) => item.id === productId);
+
+   // FE-004 A2: the global catalog context only holds the FIRST page of products,
+-  // so a product beyond that page is absent from `products`. Rather than showing
+-  // "Товар недоступен" immediately, the PDP resolves its own product by handle.
+-  // State is keyed by product id so a stale result never leaks across navigations
+-  // (and so we can derive loading without a set-state-in-effect violation).
++  // so a product beyond that page is absent from `products`. The server now
++  // resolves the product for us, so this client fallback only still fires where
++  // no server resolution exists: the static export target, and any case where
++  // the server render failed. State is keyed by product id so a stale result
++  // never leaks across navigations (and so we can derive loading without a
++  // set-state-in-effect violation).
+   const [selfResult, setSelfResult] = useState<{ id: string; product: Product | null } | null>(null);
+   const [selfErrorId, setSelfErrorId] = useState<string | null>(null);
+
+-  const resolvedForThisId = selfResult?.id === initialProduct.id;
+-  const erroredForThisId = selfErrorId === initialProduct.id;
+-  // Only fall back to a self-fetch once the context has settled (not still loading
+-  // its first page) and the product truly isn't there. Gated on isMedusaConfigured
+-  // so we never fire a doomed request in mock/misconfigured modes.
++  const resolvedForThisId = selfResult?.id === productId;
++  const erroredForThisId = selfErrorId === productId;
+   const shouldSelfFetch =
+-    isMedusaConfigured && !medusaProduct && status !== "loading";
++    isMedusaConfigured && !initialProduct && !medusaProduct && status !== "loading";
+   const isSelfLoading = shouldSelfFetch && !resolvedForThisId && !erroredForThisId;
+
+   useEffect(() => {
+@@ -124,35 +141,43 @@
+
+     const controller = new AbortController();
+     // The handle convention mirrors the mock/import mapping: `mario-mikke-<id>`.
+-    fetchMedusaProductByHandle(`mario-mikke-${initialProduct.id}`, controller.signal)
++    fetchMedusaProductByHandle(`mario-mikke-${productId}`, controller.signal)
+       .then((found) => {
+         if (controller.signal.aborted) return;
+-        setSelfResult({ id: initialProduct.id, product: found });
++        setSelfResult({ id: productId, product: found });
+       })
+       .catch((error: unknown) => {
+         if (controller.signal.aborted) return;
+         if (error instanceof DOMException && error.name === "AbortError") return;
+         console.error("[PDP] Не удалось загрузить товар по handle.", error);
+-        setSelfErrorId(initialProduct.id);
++        setSelfErrorId(productId);
+       });
+
+     return () => controller.abort();
+-  }, [shouldSelfFetch, resolvedForThisId, erroredForThisId, initialProduct.id]);
++  }, [shouldSelfFetch, resolvedForThisId, erroredForThisId, productId]);
+
+-  // Mock mode: the static shell IS the real product. Medusa mode: render ONLY a
+-  // product built from Medusa data — never the mock shell (FE-002 / ADR-001 §6).
++  // Mock mode: the server already handed us the demo product.
+   if (source === "mock") {
+-    return (
++    return initialProduct ? (
+       <>
+         <Breadcrumbs productName={initialProduct.name} />
+         <ProductView product={initialProduct} />
+       </>
++    ) : (
++      <>
++        <Breadcrumbs />
++        <ProductUnavailable />
++      </>
+     );
+   }
+
++  // Medusa mode: render ONLY a product built from Medusa data — never the mock
++  // shell (FE-002 / ADR-001 §6). The server-resolved product wins over the
++  // context copy so the client renders exactly the markup that was sent.
+   const product =
++    initialProduct ??
+     medusaProduct ??
+-    (selfResult && selfResult.id === initialProduct.id ? selfResult.product : null);
++    (selfResult && selfResult.id === productId ? selfResult.product : null);
+
+   if (product) {
+     return (
+@@ -166,7 +191,11 @@
+   return (
+     <>
+       <Breadcrumbs />
+-      {status === "loading" || isSelfLoading ? <ProductSkeleton /> : <ProductUnavailable />}
++      {!serverError && (status === "loading" || isSelfLoading) ? (
++        <ProductSkeleton />
++      ) : (
++        <ProductUnavailable />
++      )}
+     </>
+   );
+ }
+diff --git a/src/app/product/[id]/page.tsx b/src/app/product/[id]/page.tsx
+index acc3c78..2a6f89d 100644
+--- a/src/app/product/[id]/page.tsx
++++ b/src/app/product/[id]/page.tsx
+@@ -1,5 +1,13 @@
++import type { Metadata } from "next";
+ import { notFound } from "next/navigation";
++import type { Product } from "../../../data/mockData";
+ import { MOCK_PRODUCTS } from "../../../data/mockData";
++import {
++  CATALOG_REVALIDATE_SECONDS,
++  fetchMedusaProductByHandle,
++  isMedusaConfigured,
++} from "../../../lib/medusa";
++import { formatPrice } from "../../../lib/format";
+ import ProductDetailClient from "./ProductDetailClient";
+ import Header from "../../../components/Header";
+ import Footer from "../../../components/Footer";
+@@ -9,18 +17,98 @@
+   params: Promise<{ id: string }>;
+ }
+
+-// Pre-render static paths for output: export config
++// Must be a literal: Next requires the segment value to be statically
++// analysable. Keep in sync with CATALOG_REVALIDATE_SECONDS in lib/medusa.ts.
++export const revalidate = 300;
++
++const isPagesExport = process.env.BUILD_TARGET === "pages";
++
++/**
++ * Which product ids exist as prebuilt HTML.
++ *
++ * Static export target: the demo ships the mock catalog, exactly as before.
++ *
++ * Server target: an empty array on purpose. Per the Next 16 docs
++ * (generate-static-params → "All paths at runtime"), returning `[]` is what
++ * enables paths to be rendered on first request and then cached by ISR. This is
++ * the fix for the roadmap's "самый дорогой скрытый дефект": previously the only
++ * product pages that existed were the 12 mock ids, so a product created in
++ * Medusa Admin had no page at all — not a slow page, no page.
++ */
+ export async function generateStaticParams() {
+-  return MOCK_PRODUCTS.map((product) => ({
+-    id: product.id,
+-  }));
++  if (!isPagesExport) return [];
++  return MOCK_PRODUCTS.map((product) => ({ id: product.id }));
++}
++
++/** The import convention mirrors the mock ids: `mario-mikke-<frontend id>`. */
++const handleFor = (id: string) => `mario-mikke-${id}`;
++
++type ProductResolution =
++  | { status: "ok"; product: Product }
++  | { status: "missing" }
++  // ADR-001 §6 / FE-002: in medusa mode an unreachable API is a controlled error
++  // state. It must never silently degrade into the demo catalog, and it must not
++  // become a bare 500 either — the client renders the same unavailable UI it
++  // already uses elsewhere.
++  | { status: "error" };
++
++async function resolveProduct(id: string): Promise<ProductResolution> {
++  if (!isMedusaConfigured) {
++    const mock = MOCK_PRODUCTS.find((product) => product.id === id);
++    return mock ? { status: "ok", product: mock } : { status: "missing" };
++  }
++
++  try {
++    const product = await fetchMedusaProductByHandle(
++      handleFor(id),
++      undefined,
++      CATALOG_REVALIDATE_SECONDS,
++    );
++    return product ? { status: "ok", product } : { status: "missing" };
++  } catch (error) {
++    console.error("[PDP] Medusa недоступна при серверном рендеринге товара.", {
++      id,
++      error,
++    });
++    return { status: "error" };
++  }
++}
++
++export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
++  const { id } = await params;
++  const resolution = await resolveProduct(id);
++
++  if (resolution.status !== "ok") {
++    return { title: "Товар не найден | Mario Mikke" };
++  }
++
++  const { product } = resolution;
++  const title = `${product.name} | Mario Mikke`;
++  const description = `${product.name} — ${product.category}. ${formatPrice(product.price)}.`;
++
++  return {
++    title,
++    description,
++    alternates: { canonical: `/product/${product.id}` },
++    openGraph: {
++      title,
++      description,
++      type: "website",
++      locale: "ru_RU",
++      siteName: "Mario Mikke",
++      ...(product.images[0] ? { images: [{ url: product.images[0] }] } : {}),
++    },
++  };
+ }
+
+ export default async function ProductDetailPage({ params }: ProductPageProps) {
+   const { id } = await params;
+-  const product = MOCK_PRODUCTS.find((p) => p.id === id);
++  const resolution = await resolveProduct(id);
+
+-  if (!product) {
++  // A genuinely absent product is a 404. An unreachable backend is not — that
++  // would tell a shopper the item does not exist when it merely could not be
++  // loaded, and would also poison the ISR cache with a 404 for a live product.
++  if (resolution.status === "missing") {
+     notFound();
+   }
+
+@@ -30,7 +118,11 @@
+
+       <main className={styles.pageWrapper}>
+         <div className={styles.shell}>
+-          <ProductDetailClient product={product} />
++          <ProductDetailClient
++            productId={id}
++            initialProduct={resolution.status === "ok" ? resolution.product : null}
++            serverError={resolution.status === "error"}
++          />
+         </div>
+       </main>
+
+diff --git a/src/components/QuickViewModal.module.css b/src/components/QuickViewModal.module.css
+index a566082..85e9180 100644
+--- a/src/components/QuickViewModal.module.css
++++ b/src/components/QuickViewModal.module.css
+@@ -173,6 +173,7 @@
+ }
+
+ .colorDot {
++  position: relative;
+   width: 32px;
+   height: 32px;
+   border-radius: 50%;
+@@ -252,3 +253,60 @@
+ .addToCartBtn:hover {
+   background-color: var(--accent-hover);
+ }
++
++/* FE-006 states, mirrored from the PDP (product.module.css) so an unavailable
++   or non-existent combination looks the same wherever it is offered. */
++.sizeBtnDisabled {
++  cursor: not-allowed;
++  color: var(--text-secondary);
++  opacity: 0.5;
++  text-decoration: line-through;
++}
++.sizeBtnDisabled:hover {
++  border-color: var(--border-color);
++}
++
++.colorDotDisabled {
++  cursor: not-allowed;
++  opacity: 0.4;
++}
++.colorDotDisabled:hover {
++  transform: none;
++}
++.colorDotDisabled::after {
++  content: "";
++  position: absolute;
++  inset: -1px;
++  border-radius: 50%;
++  background: linear-gradient(
++    to top right,
++    transparent calc(50% - 0.75px),
++    var(--text-secondary) calc(50% - 0.75px),
++    var(--text-secondary) calc(50% + 0.75px),
++    transparent calc(50% + 0.75px)
++  );
++  opacity: 0.7;
++}
++
++/* Single-size products (ONE SIZE is ~90% of the catalogue) show a static badge
++   rather than a one-button "choice". */
++.sizeBadge {
++  display: inline-flex;
++  align-items: center;
++  align-self: flex-start;
++  min-height: 44px;
++  padding: 0 20px;
++  border: 1px solid var(--border-color);
++  color: var(--text-secondary);
++  font-size: 12px;
++  line-height: 16px;
++  letter-spacing: 0;
++}
++
++.selectionHint {
++  margin-top: -4px;
++  color: var(--text-secondary);
++  font-size: 12px;
++  line-height: 18px;
++  letter-spacing: 0;
++}
+diff --git a/src/components/QuickViewModal.tsx b/src/components/QuickViewModal.tsx
+index bd5a078..494d665 100644
+--- a/src/components/QuickViewModal.tsx
++++ b/src/components/QuickViewModal.tsx
+@@ -8,7 +8,6 @@
+ import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+ import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+ import { withBasePath } from "../lib/assets";
+ import { formatPrice } from "../lib/format";
+-import { AVAILABLE_SIZES } from "../lib/shop";
+ import styles from "./QuickViewModal.module.css";
+
+ interface QuickViewModalProps {
+@@ -30,13 +29,83 @@
+   useOverlayDismiss(Boolean(product), onClose);
+
+   const activeSelection = product && selection?.productId === product.id ? selection : null;
+-  const selectedColor =
+-    product?.colors.find((color) => color.hex === activeSelection?.selectedColorHex) ??
+-    product?.colors[0] ??
++
++  // FE-006 / ADR-001 §3 & CAT-003: the option axes come from the product itself.
++  // This modal used to render a fixed XS–XL list, which offered sizes that do
++  // not exist in Medusa and resolved `variantId` to "" on add-to-cart. The
++  // catalogue is ~90% ONE SIZE, so the fixed list was wrong for most items.
++  const sizeValues =
++    product?.options.find((option) => option.title === "Размер")?.values ??
++    product?.availableSizes ??
++    [];
++  const colorValues = product?.options.find((option) => option.title === "Цвет")?.values ?? null;
++  const colors = colorValues
++    ? colorValues.map(
++        (name) => product?.colors.find((color) => color.name === name) ?? { name, hex: "#808080" },
++      )
++    : product?.colors ?? [];
++
++  // B3: a single size (typically "ONE SIZE") is not a choice — auto-select it,
++  // show it as a static badge, and never demand "выберите размер".
++  const isSingleSize = sizeValues.length === 1;
++  const soleSize = sizeValues[0] ?? "";
++  const requiresSizeChoice = sizeValues.length > 1;
++
++  const defaultColor =
++    colors.find((color) =>
++      product?.variants.some(
++        (variant) => variant.available && variant.options.Цвет === color.name,
++      ),
++    ) ??
++    colors[0] ??
+     null;
+-  const selectedSize = activeSelection?.selectedSize ?? "";
++
++  const selectedColor =
++    colors.find((color) => color.hex === activeSelection?.selectedColorHex) ?? defaultColor;
++  const selectedSize = activeSelection?.selectedSize ?? (isSingleSize ? soleSize : "");
+   const error = activeSelection?.error ?? "";
+
++  // B1/B2 cross-availability: an option is offered only when an AVAILABLE
++  // variant exists for it given the current choice on the opposite axis.
++  // Non-existent and out-of-stock combinations both render disabled, not hidden.
++  const isSizeAvailable = (size: string) =>
++    Boolean(
++      product?.variants.some(
++        (variant) =>
++          variant.available &&
++          variant.options.Размер === size &&
++          (!selectedColor || !colorValues || variant.options.Цвет === selectedColor.name),
++      ),
++    );
++
++  const isColorAvailable = (colorName: string) =>
++    Boolean(
++      product?.variants.some(
++        (variant) =>
++          variant.available &&
++          variant.options.Цвет === colorName &&
++          (!selectedSize || sizeValues.length === 0 || variant.options.Размер === selectedSize),
++      ),
++    );
++
++  // The variant must match only along axes this product actually has.
++  const selectedVariant = product?.variants.find(
++    (variant) =>
++      variant.available &&
++      (sizeValues.length === 0 || variant.options.Размер === selectedSize) &&
++      (!colorValues || variant.options.Цвет === selectedColor?.name),
++  );
++
++  // B4: enabled only for a fully selected, existing, available combination.
++  const canAddToCart = Boolean(selectedVariant) && !isCartMutating;
++
++  // B3/B5: guidance only when a real size choice is pending and at least one
++  // size can actually be picked — a sold-out product does not nudge.
++  const sizeHint =
++    requiresSizeChoice && !selectedSize && sizeValues.some(isSizeAvailable)
++      ? "Выберите размер"
++      : "";
++
+   const updateSelection = (updates: Partial<Omit<SelectionState, "productId">>) => {
+     if (!product) return;
+
+@@ -52,26 +121,20 @@
+   if (!product) return null;
+
+   const handleAddToCart = () => {
+-    if (!selectedSize) {
+-      updateSelection({ error: "Пожалуйста, выберите размер" });
+-      return;
+-    }
+-
+-    if (!selectedColor) return;
++    // Guarded by the disabled button (B4); this stays as a defensive no-op for
++    // keyboard/programmatic activation. Critically, it no longer invents a
++    // variantId: an unmatched selection cannot reach the cart at all.
++    if (!selectedVariant || !selectedColor) return;
+
+     updateSelection({ error: "" });
+     addToCart({
+       product,
+       selectedSize,
+       selectedColor,
+-      variantId: product.variants.find(
+-        (variant) =>
+-          variant.options.Размер === selectedSize &&
+-          variant.options.Цвет === selectedColor.name,
+-      )?.variantId ?? "",
++      variantId: selectedVariant.variantId,
+       quantity: 1,
+     });
+-    
++
+     // Close modal after adding
+     onClose();
+   };
+@@ -132,49 +195,98 @@
+             </p>
+
+             {/* Colors Selection */}
+-            {product.colors && product.colors.length > 0 && (
++            {colors.length > 0 && (
+               <div className={styles.colors}>
+                 <h3 className={styles.optionTitle}>Цвет: {selectedColor?.name}</h3>
+                 <div className={styles.colorList}>
+-                  {product.colors.map((color) => (
+-                    <button
+-                      key={color.name}
+-                      className={`${styles.colorDot} ${
+-                        selectedColor?.hex === color.hex ? styles.colorDotActive : ""
+-                      }`}
+-                      style={{ backgroundColor: color.hex }}
+-                      onClick={() => updateSelection({ selectedColorHex: color.hex })}
+-                      aria-label={`Выбрать цвет ${color.name}`}
+-                    />
+-                  ))}
++                  {colors.map((color) => {
++                    const isDisabled = !isColorAvailable(color.name);
++                    return (
++                      <button
++                        key={color.name}
++                        type="button"
++                        className={`${styles.colorDot} ${
++                          selectedColor?.hex === color.hex ? styles.colorDotActive : ""
++                        } ${isDisabled ? styles.colorDotDisabled : ""}`}
++                        style={{ backgroundColor: color.hex }}
++                        onClick={() => {
++                          if (isDisabled) return;
++                          // Keep the selection coherent: drop a size that has no
++                          // available variant in the newly chosen colour.
++                          const keepSize =
++                            isSingleSize ||
++                            (selectedSize !== "" &&
++                              product.variants.some(
++                                (variant) =>
++                                  variant.available &&
++                                  variant.options.Цвет === color.name &&
++                                  variant.options.Размер === selectedSize,
++                              ));
++                          updateSelection({
++                            selectedColorHex: color.hex,
++                            selectedSize: keepSize ? selectedSize : "",
++                            error: "",
++                          });
++                        }}
++                        disabled={isDisabled}
++                        aria-disabled={isDisabled}
++                        aria-label={`Выбрать цвет ${color.name}`}
++                      />
++                    );
++                  })}
+                 </div>
+               </div>
+             )}
+
+-            {/* Sizes Selection */}
+-            <div className={styles.sizes}>
+-              <h3 className={styles.optionTitle}>Размер</h3>
+-              <div className={styles.sizeList}>
+-                {AVAILABLE_SIZES.map((size) => (
+-                  <button
+-                    key={size}
+-                    className={`${styles.sizeBtn} ${
+-                      selectedSize === size ? styles.sizeBtnActive : ""
+-                    }`}
+-                    onClick={() => {
+-                      updateSelection({ selectedSize: size, error: "" });
+-                    }}
++            {/* Sizes Selection — rendered only when the product has a size axis. */}
++            {sizeValues.length > 0 && (
++              <div className={styles.sizes}>
++                <h3 className={styles.optionTitle}>Размер</h3>
++                {requiresSizeChoice ? (
++                  <div className={styles.sizeList}>
++                    {sizeValues.map((size) => {
++                      const isDisabled = !isSizeAvailable(size);
++                      return (
++                        <button
++                          key={size}
++                          type="button"
++                          className={`${styles.sizeBtn} ${
++                            selectedSize === size ? styles.sizeBtnActive : ""
++                          } ${isDisabled ? styles.sizeBtnDisabled : ""}`}
++                          onClick={() => {
++                            if (isDisabled) return;
++                            updateSelection({ selectedSize: size, error: "" });
++                          }}
++                          disabled={isDisabled}
++                          aria-disabled={isDisabled}
++                        >
++                          {size}
++                        </button>
++                      );
++                    })}
++                  </div>
++                ) : (
++                  <span
++                    className={styles.sizeBadge}
++                    aria-label={`Единственный доступный размер: ${soleSize}`}
+                   >
+-                    {size}
+-                  </button>
+-                ))}
++                    {soleSize}
++                  </span>
++                )}
++                {sizeHint && <p className={styles.selectionHint}>{sizeHint}</p>}
++                {error && <span className={styles.error}>{error}</span>}
+               </div>
+-              {error && <span className={styles.error}>{error}</span>}
+-            </div>
++            )}
+           </div>
+
+           {/* Add to Cart Button */}
+-          <button className={styles.addToCartBtn} onClick={handleAddToCart} disabled={isCartMutating} aria-busy={isCartMutating}>
++          <button
++            type="button"
++            className={styles.addToCartBtn}
++            onClick={handleAddToCart}
++            disabled={!canAddToCart}
++            aria-busy={isCartMutating}
++          >
+             Добавить в корзину
+           </button>
+         </div>
+diff --git a/src/lib/medusa.ts b/src/lib/medusa.ts
+index fe87828..241fa09 100644
+--- a/src/lib/medusa.ts
++++ b/src/lib/medusa.ts
+@@ -127,12 +127,30 @@
+   | { type: "order"; order: { id: string; display_id?: number | null } }
+   | { type: "cart"; error: { message: string } };
+
+-const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, "");
+-const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
+-const configuredRegionId = process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
++// Server-first credential resolution.
++//
++// `NEXT_PUBLIC_*` values are inlined into the client bundle at build time, so
++// changing one used to require a full rebuild — the failure mode behind the
++// production catalog outage (roadmap 0.1). On the server the unprefixed
++// variables win and are read when the server process starts, so a Vercel env
++// change takes effect on redeploy of the *environment*, not of the bundle.
++//
++// In the browser the unprefixed reads compile to `undefined`, so the public
++// values remain the only source there. That is unavoidable for cart calls the
++// browser makes directly; moving those behind a route handler so the key never
++// reaches the client is a separate follow-up, not part of this change.
++const backendUrl = (
++  process.env.MEDUSA_BACKEND_URL ?? process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
++)?.replace(/\/$/, "");
++const publishableKey =
++  process.env.MEDUSA_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
++const configuredRegionId =
++  process.env.MEDUSA_REGION_ID ?? process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
+
+ export const storefrontDataMode =
+-  process.env.NEXT_PUBLIC_DATA_MODE === "medusa" ? "medusa" : "mock";
++  (process.env.DATA_MODE ?? process.env.NEXT_PUBLIC_DATA_MODE) === "medusa"
++    ? "medusa"
++    : "mock";
+ export const isMedusaConfigured =
+   storefrontDataMode === "medusa" && Boolean(backendUrl && publishableKey);
+
+@@ -412,6 +430,17 @@
+   }
+ }
+
++/**
++ * Seconds a server-rendered catalog read stays fresh before Next revalidates it.
++ *
++ * Next 16 does NOT cache `fetch` by default (it did in 14), so ISR only happens
++ * for requests that opt in explicitly via `next.revalidate` — a segment-level
++ * `export const revalidate` alone is not enough to make an uncached fetch
++ * cacheable. Callers that render on the server pass `revalidate`; browser calls
++ * (cart mutations) leave it unset and the option is ignored there.
++ */
++export const CATALOG_REVALIDATE_SECONDS = 300;
++
+ async function medusaRequest<T>(
+   path: string,
+   options: {
+@@ -419,6 +448,7 @@
+     method?: "DELETE" | "POST";
+     signal?: AbortSignal;
+     parse?: (data: unknown, endpoint: string) => T;
++    revalidate?: number;
+   } = {},
+ ): Promise<T> {
+   if (!backendUrl || !publishableKey) {
+@@ -437,6 +467,9 @@
+       },
+       body: options.body ? JSON.stringify(options.body) : undefined,
+       signal: options.signal,
++      ...(typeof options.revalidate === "number"
++        ? { next: { revalidate: options.revalidate } }
++        : {}),
+     });
+   } catch (error) {
+     // Preserve cancellation semantics so callers can detect aborted requests.
+@@ -466,12 +499,12 @@
+   return options.parse ? options.parse(data, endpoint) : (data as T);
+ }
+
+-async function getRussianRegionId(signal?: AbortSignal) {
++async function getRussianRegionId(signal?: AbortSignal, revalidate?: number) {
+   if (configuredRegionId) return configuredRegionId;
+
+   const response = await medusaRequest(
+     "/store/regions?limit=100",
+-    { signal, parse: parseRegionsResponse },
++    { signal, parse: parseRegionsResponse, revalidate },
+   );
+   return response.regions?.find((region) => region.currency_code === "rub")?.id;
+ }
+@@ -540,8 +573,9 @@
+ export async function fetchMedusaProductByHandle(
+   handle: string,
+   signal?: AbortSignal,
++  revalidate?: number,
+ ): Promise<Product | null> {
+-  const regionId = await getRussianRegionId(signal);
++  const regionId = await getRussianRegionId(signal, revalidate);
+   const query = new URLSearchParams({
+     handle,
+     limit: "1",
+@@ -553,6 +587,7 @@
+   const response = await medusaRequest(`/store/products?${query.toString()}`, {
+     signal,
+     parse: parseProductsResponse,
++    revalidate,
+   });
+
+   const [product] = response.products || [];
+diff --git a/src/lib/shop.ts b/src/lib/shop.ts
+index 8161453..04f72b0 100644
+--- a/src/lib/shop.ts
++++ b/src/lib/shop.ts
+@@ -1,9 +1,57 @@
++import type { Product, ProductVariant } from "./product";
++import { isMedusaConfigured } from "./medusa";
++
++/**
++ * Demo size ladder. Valid ONLY for the mock catalog — it is not a fact about the
++ * real assortment, which is ~90% ONE SIZE (ADR-001 §3). Never render it for a
++ * Medusa-backed product; use `selectableSizes` instead.
++ */
+ export const AVAILABLE_SIZES = ["XS", "S", "M", "L", "XL"];
+
+ export const DEFAULT_RECOMMENDATION_SIZE = "S";
+
++/**
++ * Sizes a secondary surface (cart/favourites/checkout recommendation strip) may
++ * offer for a product.
++ *
++ * ADR-001 §3 guarantees every Medusa product carries a `Размер` option with at
++ * least `ONE SIZE`, so an empty list in medusa mode means the product is
++ * misconfigured. In that case we offer nothing rather than inventing XS–XL:
++ * a fabricated size cannot resolve to a real variant, and CAT-003 forbids the UI
++ * from presenting combinations that do not exist in Medusa. The demo ladder
++ * survives only for mock mode, where it is the intended stand-in.
++ */
++export function selectableSizes(product: Pick<Product, "availableSizes">): string[] {
++  if (product.availableSizes.length > 0) return product.availableSizes;
++  return isMedusaConfigured ? [] : AVAILABLE_SIZES;
++}
++
+ export const DELIVERY = {
+   cartFreeThreshold: 15000,
+   cartPrice: 700,
+   checkoutPrice: 350,
+ } as const;
++
++/**
++ * Resolve the variant a secondary surface is about to add to the cart.
++ *
++ * These surfaces used to build the payload with
++ * `product.variants.find(...)?.variantId ?? ""`, so an unmatched selection sent
++ * an empty variant id to Medusa instead of being prevented. Returning
++ * `undefined` here lets the caller disable its button, which is what CAT-003
++ * asks for: the UI must not offer a combination that does not exist.
++ *
++ * Axes are matched only where the product has them, so a ONE SIZE item with no
++ * colour option still resolves.
++ */
++export function findAddableVariant(
++  product: Pick<Product, "variants">,
++  selection: { size?: string; colorName?: string },
++): ProductVariant | undefined {
++  return product.variants.find(
++    (variant) =>
++      variant.available &&
++      (!selection.size || variant.options.Размер === selection.size) &&
++      (!selection.colorName || variant.options.Цвет === selection.colorName),
++  );
++}
+--
+2.43.0

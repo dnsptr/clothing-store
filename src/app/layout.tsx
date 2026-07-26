@@ -18,7 +18,15 @@ const inter = Inter({
   weight: ["300", "400", "500", "600"],
 });
 
+// Absolute base for canonical links and OG/Twitter image URLs. Required once
+// per-product metadata exists: without it Next resolves them against
+// http://localhost:3000 and warns at build time. Overridable per environment;
+// note that the GitHub Pages demo therefore points its canonical at the real
+// store rather than competing with it in search results.
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.mariomikke.shop";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "Mario Mikke | Premium Clothing Store",
   description: "Minimalist and elegant online clothing store by Mario Mikke",
   applicationName: "Mario Mikke",

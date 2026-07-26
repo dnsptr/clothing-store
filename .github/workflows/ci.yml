@@ -43,11 +43,19 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      # Build the static export exactly as it is built for Pages, so CI catches
-      # any regression in the deployable artifact. basePath is derived from the
+      # Two deployable artifacts exist, so CI builds both. Neither is allowed to
+      # rot behind the other: the server build is what Vercel ships, the export
+      # is what GitHub Pages ships, and a change that satisfies one can easily
+      # break the other (route segment config, image optimisation, basePath).
+
+      # 1. Server target — the Vercel artifact (SSR + ISR).
+      - name: Build server target
+        run: npm run build
+
+      # 2. Static export — the Pages artifact. basePath is derived from the
       # repository name (matches next.config.ts and deploy-pages.yml).
       - name: Build static export
-        run: npm run build
+        run: npm run build:pages
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
 

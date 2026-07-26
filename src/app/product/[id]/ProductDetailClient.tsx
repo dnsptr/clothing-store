@@ -98,25 +98,42 @@ function ProductUnavailable() {
   );
 }
 
-export default function ProductDetailClient({ product: initialProduct }: { product: Product }) {
+interface ProductDetailClientProps {
+  /** Route param. Always present, even when no product could be resolved. */
+  productId: string;
+  /**
+   * Product resolved on the server — from Medusa in medusa mode, from the demo
+   * catalog in mock mode. Non-null in the common case, which is what removed the
+   * old "mock shell + client refetch" wrapper: the HTML now already contains the
+   * real product, so there is nothing to re-resolve and nothing to flicker.
+   */
+  initialProduct: Product | null;
+  /** Medusa was unreachable during server rendering (FE-002 / ADR-001 §6). */
+  serverError?: boolean;
+}
+
+export default function ProductDetailClient({
+  productId,
+  initialProduct,
+  serverError = false,
+}: ProductDetailClientProps) {
   const { products, source, status } = useCatalog();
-  const medusaProduct = products.find((item) => item.id === initialProduct.id);
+  const medusaProduct = products.find((item) => item.id === productId);
 
   // FE-004 A2: the global catalog context only holds the FIRST page of products,
-  // so a product beyond that page is absent from `products`. Rather than showing
-  // "Товар недоступен" immediately, the PDP resolves its own product by handle.
-  // State is keyed by product id so a stale result never leaks across navigations
-  // (and so we can derive loading without a set-state-in-effect violation).
+  // so a product beyond that page is absent from `products`. The server now
+  // resolves the product for us, so this client fallback only still fires where
+  // no server resolution exists: the static export target, and any case where
+  // the server render failed. State is keyed by product id so a stale result
+  // never leaks across navigations (and so we can derive loading without a
+  // set-state-in-effect violation).
   const [selfResult, setSelfResult] = useState<{ id: string; product: Product | null } | null>(null);
   const [selfErrorId, setSelfErrorId] = useState<string | null>(null);
 
-  const resolvedForThisId = selfResult?.id === initialProduct.id;
-  const erroredForThisId = selfErrorId === initialProduct.id;
-  // Only fall back to a self-fetch once the context has settled (not still loading
-  // its first page) and the product truly isn't there. Gated on isMedusaConfigured
-  // so we never fire a doomed request in mock/misconfigured modes.
+  const resolvedForThisId = selfResult?.id === productId;
+  const erroredForThisId = selfErrorId === productId;
   const shouldSelfFetch =
-    isMedusaConfigured && !medusaProduct && status !== "loading";
+    isMedusaConfigured && !initialProduct && !medusaProduct && status !== "loading";
   const isSelfLoading = shouldSelfFetch && !resolvedForThisId && !erroredForThisId;
 
   useEffect(() => {
@@ -124,35 +141,43 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
 
     const controller = new AbortController();
     // The handle convention mirrors the mock/import mapping: `mario-mikke-<id>`.
-    fetchMedusaProductByHandle(`mario-mikke-${initialProduct.id}`, controller.signal)
+    fetchMedusaProductByHandle(`mario-mikke-${productId}`, controller.signal)
       .then((found) => {
         if (controller.signal.aborted) return;
-        setSelfResult({ id: initialProduct.id, product: found });
+        setSelfResult({ id: productId, product: found });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         if (error instanceof DOMException && error.name === "AbortError") return;
         console.error("[PDP] Не удалось загрузить товар по handle.", error);
-        setSelfErrorId(initialProduct.id);
+        setSelfErrorId(productId);
       });
 
     return () => controller.abort();
-  }, [shouldSelfFetch, resolvedForThisId, erroredForThisId, initialProduct.id]);
+  }, [shouldSelfFetch, resolvedForThisId, erroredForThisId, productId]);
 
-  // Mock mode: the static shell IS the real product. Medusa mode: render ONLY a
-  // product built from Medusa data — never the mock shell (FE-002 / ADR-001 §6).
+  // Mock mode: the server already handed us the demo product.
   if (source === "mock") {
-    return (
+    return initialProduct ? (
       <>
         <Breadcrumbs productName={initialProduct.name} />
         <ProductView product={initialProduct} />
       </>
+    ) : (
+      <>
+        <Breadcrumbs />
+        <ProductUnavailable />
+      </>
     );
   }
 
+  // Medusa mode: render ONLY a product built from Medusa data — never the mock
+  // shell (FE-002 / ADR-001 §6). The server-resolved product wins over the
+  // context copy so the client renders exactly the markup that was sent.
   const product =
+    initialProduct ??
     medusaProduct ??
-    (selfResult && selfResult.id === initialProduct.id ? selfResult.product : null);
+    (selfResult && selfResult.id === productId ? selfResult.product : null);
 
   if (product) {
     return (
@@ -166,7 +191,11 @@ export default function ProductDetailClient({ product: initialProduct }: { produ
   return (
     <>
       <Breadcrumbs />
-      {status === "loading" || isSelfLoading ? <ProductSkeleton /> : <ProductUnavailable />}
+      {!serverError && (status === "loading" || isSelfLoading) ? (
+        <ProductSkeleton />
+      ) : (
+        <ProductUnavailable />
+      )}
     </>
   );
 }

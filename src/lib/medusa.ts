@@ -127,12 +127,30 @@ type MedusaCompleteCartResponse =
   | { type: "order"; order: { id: string; display_id?: number | null } }
   | { type: "cart"; error: { message: string } };
 
-const backendUrl = process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL?.replace(/\/$/, "");
-const publishableKey = process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
-const configuredRegionId = process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
+// Server-first credential resolution.
+//
+// `NEXT_PUBLIC_*` values are inlined into the client bundle at build time, so
+// changing one used to require a full rebuild — the failure mode behind the
+// production catalog outage (roadmap 0.1). On the server the unprefixed
+// variables win and are read when the server process starts, so a Vercel env
+// change takes effect on redeploy of the *environment*, not of the bundle.
+//
+// In the browser the unprefixed reads compile to `undefined`, so the public
+// values remain the only source there. That is unavoidable for cart calls the
+// browser makes directly; moving those behind a route handler so the key never
+// reaches the client is a separate follow-up, not part of this change.
+const backendUrl = (
+  process.env.MEDUSA_BACKEND_URL ?? process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL
+)?.replace(/\/$/, "");
+const publishableKey =
+  process.env.MEDUSA_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
+const configuredRegionId =
+  process.env.MEDUSA_REGION_ID ?? process.env.NEXT_PUBLIC_MEDUSA_REGION_ID;
 
 export const storefrontDataMode =
-  process.env.NEXT_PUBLIC_DATA_MODE === "medusa" ? "medusa" : "mock";
+  (process.env.DATA_MODE ?? process.env.NEXT_PUBLIC_DATA_MODE) === "medusa"
+    ? "medusa"
+    : "mock";
 export const isMedusaConfigured =
   storefrontDataMode === "medusa" && Boolean(backendUrl && publishableKey);
 
@@ -412,6 +430,17 @@ async function readBodySnippet(response: Response): Promise<string | undefined> 
   }
 }
 
+/**
+ * Seconds a server-rendered catalog read stays fresh before Next revalidates it.
+ *
+ * Next 16 does NOT cache `fetch` by default (it did in 14), so ISR only happens
+ * for requests that opt in explicitly via `next.revalidate` — a segment-level
+ * `export const revalidate` alone is not enough to make an uncached fetch
+ * cacheable. Callers that render on the server pass `revalidate`; browser calls
+ * (cart mutations) leave it unset and the option is ignored there.
+ */
+export const CATALOG_REVALIDATE_SECONDS = 300;
+
 async function medusaRequest<T>(
   path: string,
   options: {
@@ -419,6 +448,7 @@ async function medusaRequest<T>(
     method?: "DELETE" | "POST";
     signal?: AbortSignal;
     parse?: (data: unknown, endpoint: string) => T;
+    revalidate?: number;
   } = {},
 ): Promise<T> {
   if (!backendUrl || !publishableKey) {
@@ -437,6 +467,9 @@ async function medusaRequest<T>(
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
+      ...(typeof options.revalidate === "number"
+        ? { next: { revalidate: options.revalidate } }
+        : {}),
     });
   } catch (error) {
     // Preserve cancellation semantics so callers can detect aborted requests.
@@ -466,12 +499,12 @@ async function medusaRequest<T>(
   return options.parse ? options.parse(data, endpoint) : (data as T);
 }
 
-async function getRussianRegionId(signal?: AbortSignal) {
+async function getRussianRegionId(signal?: AbortSignal, revalidate?: number) {
   if (configuredRegionId) return configuredRegionId;
 
   const response = await medusaRequest(
     "/store/regions?limit=100",
-    { signal, parse: parseRegionsResponse },
+    { signal, parse: parseRegionsResponse, revalidate },
   );
   return response.regions?.find((region) => region.currency_code === "rub")?.id;
 }
@@ -540,8 +573,9 @@ export async function fetchMedusaProducts(
 export async function fetchMedusaProductByHandle(
   handle: string,
   signal?: AbortSignal,
+  revalidate?: number,
 ): Promise<Product | null> {
-  const regionId = await getRussianRegionId(signal);
+  const regionId = await getRussianRegionId(signal, revalidate);
   const query = new URLSearchParams({
     handle,
     limit: "1",
@@ -553,6 +587,7 @@ export async function fetchMedusaProductByHandle(
   const response = await medusaRequest(`/store/products?${query.toString()}`, {
     signal,
     parse: parseProductsResponse,
+    revalidate,
   });
 
   const [product] = response.products || [];

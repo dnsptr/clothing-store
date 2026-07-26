@@ -1,0 +1,115 @@
+const DEFAULT_ENGINE_URL = "http://127.0.0.1:9000";
+const DEFAULT_INTERCEPT_TIMEOUT_MS = 310_000;
+const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
+
+const TOOL_MAP = {
+  bash: "Bash",
+  shell: "Bash",
+  read: "Read",
+  list: "Glob",
+  glob: "Glob",
+  grep: "Grep",
+  write: "Write",
+  edit: "Edit",
+  multiedit: "MultiEdit",
+  apply_patch: "apply_patch",
+  patch: "apply_patch",
+  webfetch: "WebFetch",
+  websearch: "WebSearch",
+  todowrite: "TodoWrite",
+  task: "Task",
+  question: "AskUserQuestion",
+};
+
+function engineUrl() {
+  return (process.env.CB_ENGINE_URL || process.env.AG_ENGINE_URL || DEFAULT_ENGINE_URL).replace(/\/$/, "");
+}
+
+function envNumber(name, fallback) {
+  const raw = process.env[`CB_${name}`] || process.env[`AG_${name}`];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function failOpen() {
+  const raw = process.env.CB_FAIL_OPEN || process.env.AG_FAIL_OPEN || "";
+  return raw === "1" || raw.toLowerCase() === "true";
+}
+
+function canonicalTool(tool) {
+  const key = String(tool || "unknown");
+  return TOOL_MAP[key.toLowerCase()] || key;
+}
+
+function normalizeArgs(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return {};
+  return { ...args };
+}
+
+async function post(path, body, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${engineUrl()}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function reasonOf(result) {
+  const action = result && typeof result.action === "string" ? result.action : "BLOCK";
+  const reason = result && typeof result.reason === "string" ? result.reason : "No reason returned.";
+  return `Cerberus ${action}: ${reason}`;
+}
+
+export const CerberusFirewall = async ({ directory }) => {
+  return {
+    "tool.execute.before": async (input, output) => {
+      const call = {
+        tool: canonicalTool(input.tool),
+        input: normalizeArgs(output.args),
+        sessionId: input.sessionID,
+        cwd: directory,
+        approvalMode: "hold",
+      };
+
+      let result;
+      try {
+        result = await post("/intercept", call, envNumber("INTERCEPT_TIMEOUT_MS", DEFAULT_INTERCEPT_TIMEOUT_MS));
+      } catch (error) {
+        if (failOpen()) return;
+        throw new Error(
+          `Cerberus engine unreachable at ${engineUrl()} (${error instanceof Error ? error.message : String(error)}). Start it or set CB_FAIL_OPEN=1. Failing closed.`,
+        );
+      }
+
+      if (!result || result.action !== "ALLOW") throw new Error(reasonOf(result));
+    },
+
+    "tool.execute.after": async (input, output) => {
+      try {
+        await post(
+          "/inspect",
+          {
+            tool: canonicalTool(input.tool),
+            input: normalizeArgs(input.args),
+            sessionId: input.sessionID,
+            cwd: directory,
+            toolResponse: typeof output.output === "string" ? output.output : JSON.stringify(output.output ?? ""),
+          },
+          envNumber("INSPECT_TIMEOUT_MS", DEFAULT_INSPECT_TIMEOUT_MS),
+        );
+      } catch {
+        // Inspection is observe-only; before-hook enforcement remains fail-closed.
+      }
+    },
+  };
+};
