@@ -16,8 +16,22 @@ describe("rublesToKopecks", () => {
 
   it("поглощает двоичный шум float, но не настоящие доли копейки", () => {
     expect(rublesToKopecks(3897.0000000001)).toBe(389700);
+    expect(rublesToKopecks(10.0100009)).toBe(1001);
+    expect(() => rublesToKopecks(10.0100011)).toThrow(/суб-копеечная/);
     expect(() => rublesToKopecks("10.005")).toThrow(/суб-копеечная/);
     expect(() => rublesToKopecks(10.005)).toThrow(/суб-копеечная/);
+  });
+
+  it("принимает объектные формы BigNumberInput Medusa", () => {
+    expect(rublesToKopecks({ value: "1299.50" })).toBe(129950);
+    expect(
+      rublesToKopecks({
+        numeric: 1299.5,
+        raw: { value: "1299.50" },
+        toJSON: () => 1299.5,
+        valueOf: () => 1299.5,
+      })
+    ).toBe(129950);
   });
 
   it("бросает на мусоре и отрицательных суммах", () => {

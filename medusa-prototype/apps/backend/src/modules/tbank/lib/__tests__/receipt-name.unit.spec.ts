@@ -52,9 +52,10 @@ describe("buildReceiptName (§6)", () => {
     expect(result).toBe(Array.from(result).join(""));
   });
 
-  it("защитная ветка: суффикс сам не помещается в лимит", () => {
-    const result = buildReceiptName("Пальто", "х".repeat(TBANK_NAME_MAX + 5));
-    expect(len(result)).toBeLessThanOrEqual(TBANK_NAME_MAX);
+  it("отклоняет суффикс, который сам не помещается в лимит", () => {
+    expect(() =>
+      buildReceiptName("Пальто", "х".repeat(TBANK_NAME_MAX + 5))
+    ).toThrow(/суффикс варианта/);
   });
 
   it("однословное длинное название режется жёстко, но в лимит", () => {

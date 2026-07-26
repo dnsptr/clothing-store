@@ -57,6 +57,12 @@ describe("generateToken", () => {
     ).toBe(DOC_TOKEN);
   });
 
+  it("переданный в параметрах Password заменяется настроенным", () => {
+    expect(
+      generateToken({ ...DOC_EXAMPLE, Password: "мусор" }, DOC_PASSWORD)
+    ).toBe(DOC_TOKEN);
+  });
+
   it("сортировка по имени параметра, а не по порядку в объекте", () => {
     const reversed = Object.fromEntries(
       Object.entries(DOC_EXAMPLE).reverse()

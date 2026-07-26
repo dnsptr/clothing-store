@@ -48,7 +48,7 @@ export function generateToken(
 ): string {
   const pairs: Array<[string, string]> = [];
   for (const [key, value] of Object.entries(params)) {
-    if (key === "Token" || !isScalar(value)) {
+    if (key === "Token" || key === "Password" || !isScalar(value)) {
       continue;
     }
     pairs.push([key, tokenValueToString(value)]);

@@ -1,3 +1,5 @@
+import type { BigNumberInput } from "@medusajs/types";
+
 /**
  * Конверсия рубли ↔ копейки для Т-Банка.
  *
@@ -16,7 +18,42 @@ const DECIMAL_RE = /^(\d+)(?:\.(\d+))?$/;
 
 /** Сумма в рублях → целые копейки. Бросает на отрицательных, нечисловых и
  * суб-копеечных значениях. */
-export function rublesToKopecks(amount: string | number): number {
+function unwrapAmount(amount: BigNumberInput): string | number {
+  if (typeof amount === "string" || typeof amount === "number") {
+    return amount;
+  }
+  if (
+    "value" in amount &&
+    (typeof amount.value === "string" || typeof amount.value === "number")
+  ) {
+    return amount.value;
+  }
+  if ("raw" in amount && amount.raw && typeof amount.raw === "object") {
+    const raw = amount.raw;
+    if (
+      "value" in raw &&
+      (typeof raw.value === "string" || typeof raw.value === "number")
+    ) {
+      return raw.value;
+    }
+  }
+  if (
+    "bigNumber" in amount &&
+    amount.bigNumber &&
+    typeof amount.bigNumber === "object" &&
+    "toFixed" in amount.bigNumber &&
+    typeof amount.bigNumber.toFixed === "function"
+  ) {
+    return amount.bigNumber.toFixed();
+  }
+  if ("toFixed" in amount && typeof amount.toFixed === "function") {
+    return amount.toFixed();
+  }
+  throw new Error("rublesToKopecks: неподдерживаемый BigNumberInput");
+}
+
+export function rublesToKopecks(input: BigNumberInput): number {
+  const amount = unwrapAmount(input);
   let normalized: string;
   if (typeof amount === "number") {
     if (!Number.isFinite(amount)) {
@@ -25,9 +62,17 @@ export function rublesToKopecks(amount: string | number): number {
     if (amount < 0) {
       throw new Error(`rublesToKopecks: отрицательная сумма: ${amount}`);
     }
-    // toFixed(6) поглощает двоичный шум (3897.0000000001 → "3897.000000"),
-    // но сохраняет настоящие суб-копеечные доли, чтобы их отловила проверка ниже.
-    normalized = amount.toFixed(6);
+    const scaled = amount * 100;
+    const nearestKopeck = Math.round(scaled);
+    if (Math.abs(scaled - nearestKopeck) > 1e-4) {
+      throw new Error(
+        `rublesToKopecks: суб-копеечная точность недопустима: ${amount}`
+      );
+    }
+    if (!Number.isSafeInteger(nearestKopeck)) {
+      throw new Error(`rublesToKopecks: сумма вне safe integer: ${amount}`);
+    }
+    return nearestKopeck;
   } else {
     normalized = amount.trim();
     if (normalized.startsWith("-")) {

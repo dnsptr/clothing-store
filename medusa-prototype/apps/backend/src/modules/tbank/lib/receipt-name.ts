@@ -58,8 +58,7 @@ export function buildReceiptName(
     return truncateAtWordBoundary(title, titleBudget) + SEPARATOR + suffix;
   }
 
-  // Защитная ветка: суффикс сам не помещается в лимит. По правилу §6 он
-  // неприкосновенен, но лимит банка сильнее — режем и его, это сигнал о
-  // некорректных данных каталога, а не штатный путь.
-  return truncateAtWordBoundary(full, TBANK_NAME_MAX);
+  throw new Error(
+    `buildReceiptName: суффикс варианта не помещается в ${TBANK_NAME_MAX} символов`
+  );
 }
