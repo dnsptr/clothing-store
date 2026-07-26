@@ -22,15 +22,61 @@ import {
 import {
   MARIO_MIKKE_COLLECTIONS,
   MARIO_MIKKE_PRODUCTS,
+  resolveVariantPackaging,
+  VariantPackagingFields,
 } from "./data/mario-mikke-catalog";
 
 const IMPORT_SOURCE = "mario-mikke-demo";
+// Поля варианта с весом и габаритами упаковки: по ним агрегатор доставки
+// считает тариф (справочник — в data/mario-mikke-catalog.ts).
+const PACKAGING_FIELDS = ["weight", "length", "width", "height"] as const;
 const STARTER_HANDLES = new Set([
   "t-shirt",
   "sweatshirt",
   "sweatpants",
   "shorts",
 ]);
+
+// Вес и габариты лежат в колонках `real`, но в базах, поднятых до миграции
+// Medusa 20260301002050, это был `numeric`, а его драйвер отдаёт строкой.
+// Сравниваем через Number(), иначе на таких базах "1500" !== 1500, и импорт
+// на каждом прогоне переписывал бы те же самые цифры.
+const isSameMeasure = (existingValue: unknown, desiredValue: number): boolean =>
+  existingValue !== null &&
+  existingValue !== undefined &&
+  Number(existingValue) === desiredValue;
+
+// Что мы читаем о существующем варианте, чтобы сверить упаковку. Меры —
+// unknown: query.graph отдаёт их из базы, а тип колонки за время жизни проекта
+// уже менялся (numeric -> real), то есть числом значение приходит не всегда.
+type ExistingVariantSnapshot = {
+  id: string;
+  weight: unknown;
+  length: unknown;
+  width: unknown;
+  height: unknown;
+};
+
+/**
+ * Поля упаковки для обновления существующего варианта — или пустой объект,
+ * если в базе уже те же цифры.
+ *
+ * Вес и габариты принадлежат каталогу: справочник упаковки — их единственный
+ * источник истины, поэтому расхождение мы исправляем, а не сохраняем (правку
+ * через Admin прогон перетрёт; уточнённые заказчиком цифры заводятся в
+ * справочник). Но повторный импорт с тем же справочником не должен слать в БД
+ * запись, которая ничего не меняет, — отсюда проверка на совпадение.
+ */
+export function packagingFieldsToUpdate(
+  existingVariant: Partial<Record<keyof VariantPackagingFields, unknown>>,
+  desiredPackaging: VariantPackagingFields,
+): Partial<VariantPackagingFields> {
+  const differs = PACKAGING_FIELDS.some(
+    (field) => !isSameMeasure(existingVariant[field], desiredPackaging[field]),
+  );
+
+  return differs ? { ...desiredPackaging } : {};
+}
 
 type ExecArgs = {
   container: MedusaContainer;
@@ -436,6 +482,10 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
       { title: "Размер", values: sizes },
       { title: "Цвет", values: colorNames },
     ];
+    // Упаковка одинакова для всех вариантов товара: размер и цвет на вес
+    // отправления влияют слабее, чем точность самих оценок в справочнике.
+    // Разнести по размерам можно будет, когда заказчик пришлёт замеры.
+    const variantPackaging = resolveVariantPackaging(product);
     const variants = sizes.flatMap((size) =>
       product.colors.map((color, colorIndex) => ({
         title: `${size} / ${color.name}`,
@@ -447,6 +497,10 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
         prices: [{ amount: product.price, currency_code: "rub" }],
         manage_inventory: true,
         allow_backorder: false,
+        // Вес (граммы) и габариты (сантиметры) упакованной вещи — по ним
+        // агрегатор доставки считает тариф. Без них расчёт уезжает на дефолты
+        // плагина (10×10×10 см, 20 г), то есть на заведомо неверную цену.
+        ...variantPackaging,
       })),
     );
 
@@ -471,7 +525,7 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
       },
     };
 
-    return { handle, productLevel, options, variants };
+    return { handle, productLevel, options, variantPackaging, variants };
   });
 
   // Find which catalog products already exist, keyed by handle. We also pull the
@@ -487,6 +541,12 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
       "options.values.value",
       "variants.id",
       "variants.sku",
+      // Текущая упаковка нужна, чтобы re-import с тем же справочником не слал
+      // обновление веса/габаритов, которое ничего не меняет.
+      "variants.weight",
+      "variants.length",
+      "variants.width",
+      "variants.height",
     ],
     filters: { handle: desiredProducts.map((product) => product.handle) },
   });
@@ -603,21 +663,46 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     // mutable, catalog-owned fields (price and the derived title) are synced.
     // Prices upsert into the variant's existing price set, so re-runs do not
     // create duplicate prices.
-    const existingVariantIdBySku = new Map<string, string>(
+    //
+    // Вес и габариты — такое же поле каталога (см. packagingFieldsToUpdate):
+    // расхождение с базой исправляем, совпадение не трогаем.
+    type ExistingVariantSnapshot = {
+      id: string;
+      weight: unknown;
+      length: unknown;
+      width: unknown;
+      height: unknown;
+    };
+    const existingVariantsBySku = new Map<string, ExistingVariantSnapshot>(
       (existing.variants || []).map(
-        (variant) => [variant.sku, variant.id] as [string, string],
+        (variant) =>
+          [
+            variant.sku,
+            {
+              id: variant.id,
+              weight: variant.weight,
+              length: variant.length,
+              width: variant.width,
+              height: variant.height,
+            },
+          ] as [string, ExistingVariantSnapshot],
       ),
     );
     const variantsToUpdate = product.variants
-      .filter((variant) => existingVariantIdBySku.has(variant.sku))
-      .map((variant) => ({
-        id: existingVariantIdBySku.get(variant.sku)!,
-        title: variant.title,
-        prices: variant.prices,
-      }));
+      .filter((variant) => existingVariantsBySku.has(variant.sku))
+      .map((variant) => {
+        const existingVariant = existingVariantsBySku.get(variant.sku)!;
+
+        return {
+          id: existingVariant.id,
+          title: variant.title,
+          prices: variant.prices,
+          ...packagingFieldsToUpdate(existingVariant, product.variantPackaging),
+        };
+      });
     const variantsToCreate = optionsAligned
       ? product.variants
-          .filter((variant) => !existingVariantIdBySku.has(variant.sku))
+          .filter((variant) => !existingVariantsBySku.has(variant.sku))
           .map((variant) => ({
             product_id: existing.id,
             title: variant.title,
@@ -626,6 +711,8 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
             prices: variant.prices,
             manage_inventory: true,
             allow_backorder: false,
+            // Новый вариант существующего товара тоже уезжает в расчёт тарифа.
+            ...product.variantPackaging,
           }))
       : [];
 
