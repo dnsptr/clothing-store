@@ -74,6 +74,49 @@ const redisModules = REDIS_URL
     ]
   : []
 
+/**
+ * Платёжный провайдер Т-Банка.
+ *
+ * Регистрируется только при заданных ключах терминала. Причина в том, что
+ * `validateOptions` провайдера бросает на пустом `terminalKey`, и без этого
+ * условия бэкенд перестал бы стартовать у всех, кто ключей не имеет: в
+ * dev-окружении, в CI и на сборке. Отсутствие провайдера — рабочее состояние
+ * до получения терминала, отсутствие бэкенда — нет.
+ *
+ * Следствие, которое надо помнить при развёртывании: пока переменные не
+ * заданы, в регионе доступен только `pp_system_default`, а он завершает
+ * корзину без единого рубля списания. Витрина это состояние распознаёт и
+ * закрывает чекаут (`src/lib/medusa.ts`, `isCheckoutEnabled`).
+ */
+const TBANK_TERMINAL_KEY = process.env.TBANK_TERMINAL_KEY
+const TBANK_PASSWORD = process.env.TBANK_PASSWORD
+
+const paymentModule =
+  TBANK_TERMINAL_KEY && TBANK_PASSWORD
+    ? [
+        {
+          resolve: '@medusajs/medusa/payment',
+          options: {
+            providers: [
+              {
+                resolve: './src/modules/tbank',
+                id: 'tbank',
+                options: {
+                  terminalKey: TBANK_TERMINAL_KEY,
+                  password: TBANK_PASSWORD,
+                  // Тестовый и боевой терминалы различаются только базовым URL.
+                  apiBaseUrl: process.env.TBANK_API_BASE_URL,
+                  successUrl: process.env.TBANK_SUCCESS_URL,
+                  failUrl: process.env.TBANK_FAIL_URL,
+                  notificationUrl: process.env.TBANK_NOTIFICATION_URL,
+                },
+              },
+            ],
+          },
+        },
+      ]
+    : []
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -86,5 +129,5 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET,
     }
   },
-  modules: redisModules,
+  modules: [...redisModules, ...paymentModule],
 })
