@@ -47,6 +47,7 @@ interface MedusaStoreProduct {
   id: string;
   title: string;
   handle: string;
+  description?: string | null;
   metadata?: unknown;
   images?: { url?: string | null }[];
   categories?: { name?: string | null; handle?: string | null }[];
@@ -389,6 +390,11 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
   );
   const colors = getColors(metadata.colors);
   const price = variants[0]?.price;
+  // `description` входит в набор полей товара, который Store API отдаёт по
+  // умолчанию: все элементы PRODUCT_FIELDS начинаются с `*`/`+`, то есть
+  // дополняют дефолтные поля, а не заменяют их. Пустой текст приравниваем к его
+  // отсутствию — иначе карточка отрисует пустой блок описания.
+  const description = product.description?.trim() || undefined;
 
   // FE-002 / ADR-001 §6: in medusa mode a product is built ONLY from Medusa
   // data — never from MOCK_PRODUCTS. A product without a priced variant is
@@ -411,6 +417,7 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
     productId: product.id,
     handle: product.handle,
     name: product.title,
+    description,
     price,
     category: category?.name || "Каталог",
     categorySlug: category?.handle || "catalog",
