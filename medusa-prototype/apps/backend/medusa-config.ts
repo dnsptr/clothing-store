@@ -125,6 +125,48 @@ const paymentModule =
       ]
     : []
 
+/**
+ * Уведомления.
+ *
+ * Модуль регистрируется всегда — у него своя таблица, а схема БД не должна
+ * зависеть от переменных окружения. Провайдер Telegram добавляется только при
+ * заданном токене: его `validateOptions` бросает на пустом значении, и без
+ * условия бэкенд не стартовал бы там, где токена нет.
+ *
+ * `notification-local` остаётся всегда: он пишет уведомление в лог вместо
+ * отправки, поэтому в разработке и в CI цепочка «заказ → уведомление»
+ * проверяется целиком, без внешнего сервиса.
+ */
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+
+const notificationModule = [
+  {
+    resolve: '@medusajs/medusa/notification',
+    options: {
+      providers: [
+        {
+          resolve: '@medusajs/medusa/notification-local',
+          id: 'local',
+          options: { channels: ['email', 'feed'] },
+        },
+        ...(TELEGRAM_BOT_TOKEN
+          ? [
+              {
+                resolve: './src/modules/telegram',
+                id: 'telegram',
+                options: {
+                  channels: ['telegram'],
+                  botToken: TELEGRAM_BOT_TOKEN,
+                  defaultChatId: process.env.TELEGRAM_CHAT_ID,
+                },
+              },
+            ]
+          : []),
+      ],
+    },
+  },
+]
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -137,5 +179,10 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET,
     }
   },
-  modules: [...redisModules, ...tbankNotificationModule, ...paymentModule],
+  modules: [
+    ...redisModules,
+    ...tbankNotificationModule,
+    ...notificationModule,
+    ...paymentModule,
+  ],
 })
