@@ -451,7 +451,12 @@ async function readBodySnippet(response: Response): Promise<string | undefined> 
  */
 export const CATALOG_REVALIDATE_SECONDS = 300;
 
-async function medusaRequest<T>(
+/**
+ * Exported so sibling modules (lib/content.ts) reuse one HTTP client rather
+ * than growing a second one: the publishable-key header, the error taxonomy and
+ * the Next 16 revalidate semantics above are easy to get subtly wrong twice.
+ */
+export async function medusaRequest<T>(
   path: string,
   options: {
     body?: unknown;
