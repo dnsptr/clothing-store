@@ -192,7 +192,7 @@ T-Банк + онлайн-касса | СДЭК | Яндекс | Email/Telegram 
 
 | ID         | Зависит от           | Микрозадача                                       | Критерий приёмки                                                                                  | Статус |
 | ---------- | -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------ |
-| TAX-001    | ADR-001, BOOT-001    | Создать tax rate НДС 5%                           | Integration test подтверждает согласованный inclusive расчёт 5/105                                | TODO   |
+| TAX-001    | ADR-001, BOOT-001    | Создать tax rate НДС 5%                           | Integration test: `Σ item_tax == order.tax_total`, расчёт по строке (ADR-001 §2)                  | TODO   |
 | CAT-001    | ADR-001              | Описать catalog schema                            | Зафиксированы product, variant, SKU, color, `ONE SIZE`, composition, country, care и measurements | TODO   |
 | CAT-002    | CAT-001              | Исправить demo taxonomy                           | Платья, юбки, обувь и аксессуары имеют корректные категории и материалы                           | TODO   |
 | CAT-003    | CAT-001              | Хранить реальные variant combinations             | UI/API не создают комбинации size/color, которых нет в Medusa                                     | TODO   |
@@ -247,17 +247,20 @@ T-Банк + онлайн-касса | СДЭК | Яндекс | Email/Telegram 
 
 ### Этап G. Т-Банк и онлайн-касса
 
-| ID         | Зависит от          | Микрозадача                                           | Критерий приёмки                                                    | Статус                     |
-| ---------- | ------------------- | ----------------------------------------------------- | ------------------------------------------------------------------- | -------------------------- |
-| PAY-001    | CART-004, SHIP-001  | Получить test terminal и утвердить двухстадийный flow | Зафиксированы Init, authorize, confirm, cancel и refund transitions | BLOCKED: нужен Т-Банк      |
-| PAY-002    | PAY-001             | Реализовать Medusa T-Банк provider                    | Payment session связана с cart/payment collection/order             | TODO                       |
-| PAY-003    | PAY-002             | Проверять подпись webhook                             | Неверная подпись отклоняется; payload не логируется с secrets       | TODO                       |
-| PAY-004    | PAY-003             | Обеспечить idempotency                                | Повторный webhook не создаёт второй capture/order transition        | TODO                       |
-| PAY-005    | PAY-004             | Реализовать reconciliation job                        | Medusa и Т-Банк сверяются; расхождения попадают в alert/report      | TODO                       |
-| FISCAL-001 | TAX-001, PAY-001    | Выбрать онлайн-кассу/OFD и ФФД                        | Зафиксированы taxation, `vat5`, payment method/object и маркировка  | BLOCKED: решение заказчика |
-| FISCAL-002 | FISCAL-001, PAY-002 | Передавать receipt при платеже                        | Сумма Items, payment и Medusa total совпадает до копейки            | TODO                       |
-| FISCAL-003 | FISCAL-002          | Реализовать refund receipt                            | Полный/частичный возврат формирует корректный возвратный чек        | TODO                       |
-| FISCAL-004 | FISCAL-003          | Проверить сценарий предоплата/полный расчёт           | Сценарий утверждён бухгалтером, Т-Банком и кассовым провайдером     | TODO                       |
+Проектное решение по этапу: [`docs/design/tbank-payments-and-fiscalization.md`](docs/design/tbank-payments-and-fiscalization.md)
+— контракт провайдера, схема вебхука, маппинг чека и открытые вопросы к бухгалтеру.
+
+| ID         | Зависит от          | Микрозадача                                           | Критерий приёмки                                                         | Статус                     |
+| ---------- | ------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------- |
+| PAY-001    | CART-004, SHIP-001  | Получить test terminal и утвердить одностадийный flow | `PayType: O`; зафиксированы Init, authorize, cancel и refund transitions | BLOCKED: нужен Т-Банк      |
+| PAY-002    | PAY-001             | Реализовать Medusa T-Банк provider                    | Payment session связана с cart/payment collection/order                  | TODO                       |
+| PAY-003    | PAY-002             | Проверять подпись webhook                             | Неверная подпись отклоняется; payload не логируется с secrets            | TODO                       |
+| PAY-004    | PAY-003             | Обеспечить idempotency                                | Повторный webhook не создаёт второй capture/order transition             | TODO                       |
+| PAY-005    | PAY-004             | Реализовать reconciliation job                        | Medusa и Т-Банк сверяются; расхождения попадают в alert/report           | TODO                       |
+| FISCAL-001 | TAX-001, PAY-001    | Выбрать онлайн-кассу/OFD и ФФД                        | Зафиксированы taxation, `vat5`, payment method/object и маркировка       | BLOCKED: решение заказчика |
+| FISCAL-002 | FISCAL-001, PAY-002 | Передавать receipt при платеже                        | Сумма Items, payment и Medusa total совпадает до копейки                 | TODO                       |
+| FISCAL-003 | FISCAL-002          | Реализовать refund receipt                            | Полный/частичный возврат формирует корректный возвратный чек             | TODO                       |
+| FISCAL-004 | FISCAL-003          | Проверить сценарий предоплата/полный расчёт           | Сценарий утверждён бухгалтером, Т-Банком и кассовым провайдером          | TODO                       |
 
 ### Этап H. Заказ, аккаунт, роли и уведомления
 
