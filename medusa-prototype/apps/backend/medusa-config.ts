@@ -91,6 +91,14 @@ const redisModules = REDIS_URL
 const TBANK_TERMINAL_KEY = process.env.TBANK_TERMINAL_KEY
 const TBANK_PASSWORD = process.env.TBANK_PASSWORD
 
+/**
+ * Журнал нотификаций Т-Банка регистрируется ВСЕГДА, в отличие от самого
+ * провайдера. Схема базы не должна зависеть от переменных окружения: иначе
+ * staging и production разъезжаются по структуре, а миграция, применённая на
+ * одном стенде, на другом не существует. Пустая таблица ничего не стоит.
+ */
+const tbankNotificationModule = [{ resolve: './src/modules/tbank-notifications' }]
+
 const paymentModule =
   TBANK_TERMINAL_KEY && TBANK_PASSWORD
     ? [
@@ -129,5 +137,5 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET,
     }
   },
-  modules: [...redisModules, ...paymentModule],
+  modules: [...redisModules, ...tbankNotificationModule, ...paymentModule],
 })
