@@ -1,3 +1,5 @@
+import { unstable_rethrow } from "next/navigation";
+
 import type { Product } from "../data/mockData";
 
 type UnknownRecord = Record<string, unknown>;
@@ -705,6 +707,8 @@ export async function medusaRequest<T>(
         : {}),
     });
   } catch (error) {
+    unstable_rethrow(error);
+
     // Preserve cancellation semantics so callers can detect aborted requests.
     if (options.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
       throw error;

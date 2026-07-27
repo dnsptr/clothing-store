@@ -19,7 +19,12 @@ const nextBin = require.resolve("next/dist/bin/next");
 
 const { status, error } = spawnSync(process.execPath, [nextBin, "build"], {
   stdio: "inherit",
-  env: { ...process.env, BUILD_TARGET: "pages" },
+  env: {
+    ...process.env,
+    BUILD_TARGET: "pages",
+    DATA_MODE: "mock",
+    NEXT_PUBLIC_DATA_MODE: "mock",
+  },
 });
 
 if (error) {

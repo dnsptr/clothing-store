@@ -9,11 +9,6 @@ import Footer from "@/components/Footer";
 import { fetchHomeContent } from "@/lib/content";
 import styles from "./page.module.css";
 
-// Must be a literal: Next requires the segment value to be statically
-// analysable. Matches CATALOG_REVALIDATE_SECONDS in lib/medusa.ts, so an edit
-// made in the admin appears within the same window as a catalog change.
-export const revalidate = 300;
-
 export default async function Home() {
   const content = await fetchHomeContent();
 

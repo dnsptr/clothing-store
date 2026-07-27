@@ -1,8 +1,6 @@
-import {
-  CATALOG_REVALIDATE_SECONDS,
-  isMedusaConfigured,
-  medusaRequest,
-} from "./medusa";
+import { unstable_rethrow } from "next/navigation";
+
+import { isMedusaConfigured, medusaRequest } from "./medusa";
 
 /**
  * Editorial content of the home page, authored by the client in Medusa Admin.
@@ -11,8 +9,7 @@ import {
  * failure policy here differs from the catalog's. ADR-001 §6 forbids falling
  * back to the demo catalog because inventing products and prices misleads a
  * shopper. A missing banner misleads nobody, so an unreachable backend renders
- * the affected section as absent rather than taking the whole page down — and
- * ISR keeps serving the last good render in the meantime.
+ * the affected section as absent rather than taking the whole page down.
  */
 export interface ContentMedia {
   type: "image" | "video";
@@ -206,7 +203,9 @@ export async function fetchHomeContent(): Promise<HomeContent> {
 
   try {
     const data = await medusaRequest<unknown>("/store/content/home", {
-      revalidate: CATALOG_REVALIDATE_SECONDS,
+      // Admin-managed home content should be fresh after a regular refresh.
+      // Static demo builds return the mock data before this request is made.
+      revalidate: 0,
     });
 
     if (!isRecord(data)) return EMPTY_HOME_CONTENT;
@@ -219,6 +218,7 @@ export async function fetchHomeContent(): Promise<HomeContent> {
       promo: parseSlide(data.promo),
     };
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[home] Не удалось загрузить контент главной страницы.", error);
     return EMPTY_HOME_CONTENT;
   }
