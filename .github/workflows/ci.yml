@@ -74,7 +74,7 @@ jobs:
           cache-dependency-path: medusa-prototype/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: medusa-prototype
 
       # `npm run build` -> `turbo build` -> `medusa build`. This compiles the
@@ -128,7 +128,7 @@ jobs:
           cache-dependency-path: medusa-prototype/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: medusa-prototype
 
       - name: Run unit tests
