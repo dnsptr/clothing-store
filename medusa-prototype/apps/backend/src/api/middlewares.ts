@@ -1,12 +1,24 @@
-import { defineMiddlewares, validateAndTransformBody } from "@medusajs/framework/http"
+import {
+  defineMiddlewares,
+  validateAndTransformBody,
+} from "@medusajs/framework/http";
 
 import {
   CreateSlideSchema,
   ReorderSchema,
   UpdateSlideSchema,
-} from "./admin/content/validators"
+} from "./admin/content/validators";
 
 /**
+ * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
+ * (`@medusajs/medusa/dist/api/hooks/middlewares.js`). Наш роут его перекрывает,
+ * поэтому настройку надо воспроизвести осознанно, а не унаследовать: без неё
+ * `req.rawBody` был бы `undefined`.
+ *
+ * Подписи Т-Банка сырое тело не требуется — токен считается по разобранным
+ * полям, а не по байтам (§5.4). Но `rawData` уходит в событие, форму которого
+ * читает штатный сабскрайбер, и терять его при переходе на свой роут незачем.
+ *
  * Body validation for the content admin routes.
  *
  * The handlers read `req.validatedBody`, which only exists once one of these
@@ -15,6 +27,11 @@ import {
  */
 export default defineMiddlewares({
   routes: [
+    {
+      method: ["POST"],
+      bodyParser: { preserveRawBody: true },
+      matcher: "/hooks/payment/tbank",
+    },
     {
       matcher: "/admin/content/slides",
       method: "POST",
@@ -31,4 +48,4 @@ export default defineMiddlewares({
       middlewares: [validateAndTransformBody(ReorderSchema)],
     },
   ],
-})
+});

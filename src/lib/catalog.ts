@@ -69,24 +69,25 @@ export const PRODUCT_CATEGORIES: CatalogCategory[] = [
   },
 ];
 
+// Пункты меню соответствуют реальным категориям каталога — по одному пункту на
+// фильтр. Раньше здесь были ярлыки без своего фильтра: «Платья» вели в
+// трикотаж, «Лоферы» и «Босоножки» — оба во всю обувь, «До 30 %» и «До 50 %» —
+// оба в общий раздел распродажи. Покупатель выбирал разные пункты и получал
+// одну и ту же выдачу. Пункты вернутся вместе с категориями, которые их
+// поддерживают.
 export const CLOTHING_CATEGORIES: CatalogLink[] = [
   { label: "Все товары", href: CATALOG_SECTIONS.clothing.href },
   ...PRODUCT_CATEGORIES.filter((category) => category.section === "clothing"),
-  { label: "Платья", href: "/catalog?category=knitwear" },
 ];
 
 export const SHOES_CATEGORIES: CatalogLink[] = [
   { label: "Вся обувь", href: CATALOG_SECTIONS.shoes.href },
-  { label: "Лоферы", href: "/catalog?category=shoes" },
-  { label: "Босоножки", href: "/catalog?category=shoes" },
 ];
 
 export const SALE_CATEGORIES: CatalogLink[] = [
-  { label: "До 30%", href: "/catalog?section=sale" },
-  { label: "До 50%", href: "/catalog?section=sale" },
+  { label: "Все акции", href: "/catalog?section=sale" },
   { label: "Трикотаж", href: "/catalog?category=knitwear" },
   { label: "Аксессуары", href: "/catalog?category=accessories" },
-  { label: "Все акции", href: "/catalog?section=sale" },
 ];
 
 export const MATERIALS: CatalogMaterial[] = [

@@ -32,6 +32,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Дампы БД: персональные данные покупателей в Git попадать не должны
+backups/
+
 # Local env files
 **/.env
 **/.env.local

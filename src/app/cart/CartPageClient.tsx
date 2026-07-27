@@ -5,8 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
-import { withBasePath } from "../../lib/assets";
-import { formatPrice } from "../../lib/format";
+import { productImageSrc } from "../../lib/assets";
+import { formatPrice, formatPriceOrUnknown } from "../../lib/format";
+import { isCheckoutEnabled } from "../../lib/medusa";
 import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
 import styles from "./cart.module.css";
 
@@ -65,11 +66,18 @@ export default function CartPageClient() {
               {cartItems.map((item, index) => {
                 const itemKey = `${item.product.id}-${item.selectedSize}-${item.selectedColor.hex}-${index}`;
                 const lineTotal = item.lineTotal ?? item.product.price * item.quantity;
+                // Артикул строки — настоящий SKU варианта: он приходит из Medusa
+                // вместе с позицией корзины. Раньше номер собирался из id товара
+                // (`padStart(6, "0")`), то есть покупатель видел артикул, которого
+                // нет ни в складском учёте, ни в заказе. Нет SKU — строки нет.
+                const sku = item.product.variants
+                  .find((variant) => variant.variantId === item.variantId)
+                  ?.sku?.trim();
 
                 return (
                   <article className={styles.item} key={itemKey}>
                     <div className={styles.productCell}>
-                      <p className={styles.article}>Артикул: {item.product.id.padStart(6, "0")}</p>
+                      {sku && <p className={styles.article}>Артикул: {sku}</p>}
                       <Link href={`/product/${item.product.id}`} className={styles.productName}>
                         {item.product.name}
                       </Link>
@@ -138,7 +146,7 @@ export default function CartPageClient() {
                       <div className={styles.recommendImageWrap}>
                         <Link href={`/product/${product.id}`} className={styles.recommendImageLink} aria-label={product.name}>
                           <Image
-                            src={withBasePath(product.images[0])}
+                            src={productImageSrc(product.images)}
                             alt={product.name}
                             fill
                             sizes="(max-width: 767px) 45vw, 20vw"
@@ -204,33 +212,55 @@ export default function CartPageClient() {
           </div>
 
           <aside className={styles.summary} aria-label="Итог заказа">
+            {/* Якоря #delivery/#returns/#payment вели в никуда: на странице
+                корзины нет ни одного элемента с такими id. Ведём на реальные
+                информационные страницы. */}
             <nav className={styles.summaryLinks} aria-label="Информация о заказе">
-              <Link href="/account">Войти в личный кабинет</Link>
-              <Link href="#delivery">Условия доставки</Link>
-              <Link href="#returns">Условия обмена и возврата</Link>
-              <Link href="#payment">Информация об оплате</Link>
+              <Link href="/info/delivery">Условия доставки</Link>
+              <Link href="/info/returns">Условия возврата</Link>
+              <Link href="/info/offer">Публичная оферта</Link>
+              <Link href="/info/faq">Вопросы и ответы</Link>
             </nav>
 
-            <label className={styles.promoControl}>
-              <span>Промокод или подарочный сертификат</span>
-              <input type="text" aria-label="Промокод или подарочный сертификат" />
-            </label>
+            {/* Поле промокода убрано до реализации промоакций: у него не было
+                ни value, ни onChange, ни отправки — ввести в него что-либо было
+                невозможно, а вызовов Medusa promotions в проекте нет. */}
 
             <dl className={styles.totals}>
               <div>
                 <dt>Доставка:</dt>
-                <dd>{cartShippingTotal === 0 ? "Бесплатно" : formatPrice(cartShippingTotal)}</dd>
+                <dd>{cartShippingTotal === 0 ? "Бесплатно" : formatPriceOrUnknown(cartShippingTotal)}</dd>
               </div>
               <div>
                 <dt>Итого:</dt>
-                <dd>{formatPrice(cartTotal)}</dd>
+                <dd>{formatPriceOrUnknown(cartTotal)}</dd>
               </div>
             </dl>
 
-            <Link href="/checkout" className={styles.checkoutButton}>Оплатить заказ</Link>
-            <p className={styles.summaryNote}>
-              Нажимая на кнопку «Оплатить заказ», вы соглашаетесь с условиями обработки персональных данных и публичной офертой.
-            </p>
+            {isCheckoutEnabled ? (
+              <>
+                <Link href="/checkout" className={styles.checkoutButton}>Оплатить заказ</Link>
+                {/* Кнопка ведёт на страницу оформления, а не заключает договор:
+                    утверждать, что нажатием покупатель уже с чем-то согласился,
+                    нельзя. Согласие фиксируется отдельным чекбоксом в чекауте. */}
+                <p className={styles.summaryNote}>
+                  Условия покупки — в публичной оферте. Согласие с офертой и политикой
+                  обработки персональных данных подтверждается на шаге оформления заказа.
+                </p>
+              </>
+            ) : (
+              // Кнопка ведёт на страницу, которая всё равно откажет: ведём себя
+              // честно здесь, а не после лишнего перехода.
+              <>
+                <button type="button" className={styles.checkoutButton} disabled>
+                  Оплатить заказ
+                </button>
+                <p className={styles.summaryNote}>
+                  Онлайн-оплата ещё подключается. Корзина сохранится — оформить заказ
+                  можно будет сразу после запуска приёма платежей.
+                </p>
+              </>
+            )}
           </aside>
         </div>
       </div>

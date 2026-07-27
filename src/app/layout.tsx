@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import { CartProvider } from "@/context/CartContext";
 import { CatalogProvider } from "@/context/CatalogContext";
+import CartErrorToast from "@/components/CartErrorToast";
 import MenuDrawer from "@/components/MenuDrawer";
 import RouteScrollReset from "@/components/RouteScrollReset";
 import "./globals.css";
@@ -57,6 +58,7 @@ export default function RootLayout({
             <RouteScrollReset />
             {children}
             <MenuDrawer />
+            <CartErrorToast />
           </CartProvider>
         </CatalogProvider>
       </body>

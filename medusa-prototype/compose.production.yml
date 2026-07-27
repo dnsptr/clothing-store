@@ -103,12 +103,38 @@ services:
       postgres:
         condition: service_healthy
     entrypoint:
+      # Прошлый вариант цикла делал ровно две вещи неправильно, и обе тихо.
+      #
+      # Первая: `pg_dump ... | gzip > файл`. Редирект создаёт файл ДО запуска
+      # pg_dump, а код возврата конвейера здесь никто не проверял — упавший
+      # дамп оставался на диске как валидный на вид архив.
+      #
+      # Вторая: `find -mtime +7 -delete` выполнялся следующей строкой
+      # безусловно. Через неделю незамеченной поломки все рабочие копии
+      # оказывались удалены, а на их месте лежал мусор.
+      #
+      # Теперь дамп пишется во временный файл, проверяется чтением оглавления
+      # (`pg_restore --list` — настоящая проверка целостности custom-формата) и
+      # только после этого публикуется. Ротация запускается лишь после
+      # проверенного успеха: пока бэкап не получается, старые копии остаются.
       - sh
       - -c
       - |
+        set -eu
         while true; do
-          pg_dump -h 127.0.0.1 -U medusa medusa_backend | gzip > /backups/medusa_$$(date +%Y%m%d_%H%M%S).sql.gz
-          find /backups -name '*.sql.gz' -mtime +7 -delete
+          TS=$$(date +%Y%m%d_%H%M%S)
+          TMP="/backups/.medusa_$$TS.dump.part"
+          if pg_dump -h 127.0.0.1 -U medusa -Fc medusa_backend > "$$TMP" \
+            && pg_restore --list "$$TMP" > /dev/null 2>&1; then
+            gzip -c "$$TMP" > "/backups/medusa_$$TS.dump.gz"
+            rm -f "$$TMP"
+            find /backups -name '*.dump.gz' -mtime +7 -delete
+            find /backups -name '*.dump.part' -mtime +1 -delete
+            echo "[pg_backup] ok: medusa_$$TS.dump.gz"
+          else
+            rm -f "$$TMP"
+            echo "[pg_backup] FAILED at $$TS — старые копии сохранены" >&2
+          fi
           sleep 86400
         done
 

@@ -16,6 +16,12 @@ export interface Product {
   productId: string;
   handle: string;
   name: string;
+  /**
+   * Описание товара из Medusa. Необязательное: скрипт импорта каталога его не
+   * заполняет, текст появляется только когда его напишут в админке. Отсутствие
+   * описания — валидное состояние, витрина в этом случае не показывает блок.
+   */
+  description?: string;
   price: number;
   category: string;
   categorySlug: string;

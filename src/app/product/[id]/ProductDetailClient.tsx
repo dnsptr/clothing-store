@@ -7,41 +7,15 @@ import type { Product } from "../../../data/mockData";
 import { useCatalog } from "../../../context/CatalogContext";
 import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
-import { withBasePath } from "../../../lib/assets";
+import { productImageSrc, withBasePath } from "../../../lib/assets";
 import { formatPrice } from "../../../lib/format";
 import { fetchMedusaProductByHandle, isMedusaConfigured } from "../../../lib/medusa";
 import styles from "./product.module.css";
-
-const PRODUCT_PANELS = [
-  {
-    id: "stores",
-    title: "Наличие в магазинах",
-    content: "Проверьте наличие в магазинах Москвы и других городов. Мы подготовим изделие к примерке.",
-  },
-  {
-    id: "measurements",
-    title: "Обмеры изделия",
-    content: "Длина по спинке: 74 см. Длина рукава: 62 см. Измерения выполнены для размера S.",
-  },
-  {
-    id: "care",
-    title: "Состав и уход",
-    content: "100% натуральный материал. Бережная стирка при температуре до 30°C, не отбеливать, сушить в расправленном виде.",
-  },
-];
 
 function BookmarkIcon({ active }: { active: boolean }) {
   return (
     <svg fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ expanded }: { expanded: boolean }) {
-  return (
-    <svg className={`${styles.chevron} ${expanded ? styles.chevronOpen : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" d="m9 5 7 7-7 7" />
     </svg>
   );
 }
@@ -226,7 +200,6 @@ function ProductView({ product }: { product: Product }) {
   const [selectedSize, setSelectedSize] = useState(isSingleSize ? soleSize : "");
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [savedPhotoIndexes, setSavedPhotoIndexes] = useState<number[]>([]);
-  const [openPanels, setOpenPanels] = useState<Record<string, boolean>>({});
 
   const lookProducts = products.filter((item) => item.id !== product.id).slice(0, 2);
 
@@ -262,6 +235,22 @@ function ProductView({ product }: { product: Product }) {
   // FE-006 B4: the primary action is enabled only for a fully-selected, existing
   // and available combination (and while the cart isn't mutating).
   const canAddToCart = Boolean(selectedVariant && selectedColor) && !isCartMutating;
+
+  // Артикул — только настоящий SKU: выбранного варианта, а пока выбор не сделан —
+  // единственного варианта товара. Раньше здесь стоял один и тот же выдуманный
+  // номер для всех товаров: по нему покупателя невозможно было ни найти в заказе,
+  // ни свериться с остатком. Нет SKU — строки нет вовсе.
+  const skuVariant =
+    selectedVariant ?? (product.variants.length === 1 ? product.variants[0] : undefined);
+  const sku = skuVariant?.sku?.trim() ?? "";
+
+  // Описание приходит из карточки товара в Medusa (скрипт импорта его не
+  // проставляет и не затирает — текст правится в админке). Пока текста нет,
+  // блок не рендерится: придумывать состав и свойства изделия витрина не вправе.
+  const descriptionParagraphs = (product.description ?? "")
+    .split(/\r?\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
 
   // FE-006 B3/B5: guidance shown only when a real size choice is still pending
   // AND at least one size is actually available (so a fully sold-out product does
@@ -308,10 +297,6 @@ function ProductView({ product }: { product: Product }) {
     setSavedPhotoIndexes((previous) =>
       previous.includes(index) ? previous.filter((item) => item !== index) : [...previous, index]
     );
-  };
-
-  const togglePanel = (id: string) => {
-    setOpenPanels((previous) => ({ ...previous, [id]: !previous[id] }));
   };
 
   return (
@@ -441,42 +426,25 @@ function ProductView({ product }: { product: Product }) {
               Добавить в корзину
             </button>
 
-            <div className={styles.productFacts}>
-              <p>Артикул: 137833</p>
-              <p>Параметры модели: 180/86/62/92</p>
-              <p>На модели размер: S</p>
-            </div>
+            {sku && (
+              <div className={styles.productFacts}>
+                <p>Артикул: {sku}</p>
+              </div>
+            )}
 
-            <div className={styles.description}>
-              <p>1. Мягкий материал из 100% хлопка - тактильно приятный, с выразительной фактурой.</p>
-              <p>2. Легко впишется в повседневный гардероб благодаря продуманному силуэту.</p>
-              <button type="button" className={styles.moreButton}>
-                ...ЕЩЁ
-              </button>
-            </div>
+            {descriptionParagraphs.length > 0 && (
+              <div className={styles.description}>
+                {descriptionParagraphs.map((paragraph, index) => (
+                  <p key={index}>{paragraph}</p>
+                ))}
+              </div>
+            )}
 
-            <div className={styles.accordions}>
-              {PRODUCT_PANELS.map((panel) => {
-                const isOpen = Boolean(openPanels[panel.id]);
-
-                return (
-                  <div className={styles.accordion} key={panel.id}>
-                    <button
-                      type="button"
-                      className={styles.accordionHeader}
-                      onClick={() => togglePanel(panel.id)}
-                      aria-expanded={isOpen}
-                    >
-                      <span>{panel.title}</span>
-                      <ChevronIcon expanded={isOpen} />
-                    </button>
-                    <div className={`${styles.accordionContent} ${isOpen ? styles.accordionContentOpen : ""}`}>
-                      <p className={styles.accordionInner}>{panel.content}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {/* Здесь были аккордеоны «Наличие в магазинах», «Обмеры изделия» и
+                «Состав и уход». Их содержимое было одинаковым для всех товаров и
+                ничем не подкреплено: примерки в магазине нет, обмеров изделий в
+                данных нет, состав неизвестен. Разделы вернутся, когда эти данные
+                появятся у товара, а не раньше. */}
           </div>
         </aside>
       </div>
@@ -489,7 +457,7 @@ function ProductView({ product }: { product: Product }) {
           {lookProducts.map((item) => (
             <article className={styles.outfitCard} key={item.id}>
               <Link href={`/product/${item.id}`} className={styles.outfitImageLink} aria-label={item.name}>
-                <Image src={withBasePath(item.images[0])} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
+                <Image src={productImageSrc(item.images)} alt={item.name} fill sizes="264px" className={styles.outfitImage} />
               </Link>
               <Link href={`/product/${item.id}`} className={styles.outfitName}>
                 {item.name}

@@ -17,6 +17,79 @@ import {
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows";
 
+// Правило слияния валют магазина — единственная нетривиальная логика сида, и
+// именно она подвела на учении по восстановлению БД 2026-07-27 (§3.1): сид
+// передавал supported_currencies коротким списком «только рубль», а
+// updateStoresWorkflow отдаёт этот список в upsertWithReplace, то есть ЗАМЕНЯЕТ
+// его целиком. Повторный прогон по восстановленной чужой базе оставил в
+// магазине одну валюту вместо трёх (eur и usd удалены).
+//
+// Правило теперь такое: чужие валюты переносим как есть вместе с их признаком
+// «по умолчанию», рублём список только дополняем. Вынесено отдельной чистой
+// функцией, чтобы правило проверялось юнит-тестом, а не только полным прогоном
+// сида по живой базе.
+export function mergeSupportedCurrencies(
+  existingCurrencies: {
+    currency_code: string;
+    is_default?: boolean | null;
+  }[],
+): {
+  currency_code: string;
+  is_default: boolean;
+  is_tax_inclusive?: boolean;
+}[] {
+  const supportedCurrencies = existingCurrencies.map((currency) => ({
+    currency_code: currency.currency_code,
+    is_default: Boolean(currency.is_default),
+    // is_tax_inclusive проставляем только рублю — своей валюте. Для чужих валют
+    // undefined означает «не менять»: updatePricePreferencesAsArrayStep резолвит
+    // флаг как `is_tax_inclusive ?? prevEntry.is_tax_inclusive`.
+    is_tax_inclusive: currency.currency_code === "rub" ? true : undefined,
+  }));
+  let rubCurrency = supportedCurrencies.find(
+    (currency) => currency.currency_code === "rub",
+  );
+
+  if (!rubCurrency) {
+    rubCurrency = {
+      currency_code: "rub",
+      is_default: false,
+      is_tax_inclusive: true,
+    };
+    supportedCurrencies.push(rubCurrency);
+  }
+
+  // Магазин обязан иметь ровно одну валюту по умолчанию: без неё
+  // validateUpdateRequest роняет весь `db:migrate`. Чужой выбор по умолчанию
+  // сохраняем как есть и назначаем рубль только тогда, когда выбора нет.
+  if (!supportedCurrencies.some((currency) => currency.is_default)) {
+    rubCurrency.is_default = true;
+  }
+
+  return supportedCurrencies;
+}
+
+export function currenciesForExistingStore(
+  storeName: string | null | undefined,
+  existingCurrencies: {
+    currency_code: string;
+    is_default?: boolean | null;
+  }[],
+) {
+  const isUntouchedMedusaScaffold =
+    (storeName === "Medusa Store" || storeName === "Default Store") &&
+    existingCurrencies.length === 1 &&
+    existingCurrencies[0].currency_code === "eur";
+
+  if (isUntouchedMedusaScaffold) {
+    return [
+      { currency_code: "rub", is_default: true, is_tax_inclusive: true },
+    ];
+  }
+
+  return mergeSupportedCurrencies(existingCurrencies);
+}
+
 // Mario Mikke sells only within Russia (currency RUB, УСН + НДС 5%). This seed
 // provisions the RU-first commerce skeleton (sales channel, publishable API key,
 // RUB store, Russia region, RU tax region, Moscow warehouse and RU fulfillment
@@ -99,7 +172,13 @@ export default async function initial_data_seed({
 
   const { data: existingStores } = await query.graph({
     entity: "store",
-    fields: ["id"],
+    fields: [
+      "id",
+      "name",
+      "default_sales_channel_id",
+      "supported_currencies.currency_code",
+      "supported_currencies.is_default",
+    ],
   });
   const existingStore = existingStores[0];
   // ADR-001 §2: all catalog prices are entered and stored WITH VAT (gross,
@@ -110,29 +189,58 @@ export default async function initial_data_seed({
   // updatePricePreferencesAsArrayStep. That upsert resolves the flag as
   // `is_tax_inclusive ?? prevEntry.is_tax_inclusive`, so it is idempotent and
   // never downgrades an already tax-inclusive currency on re-runs.
-  const storeInput = {
-    name: "Default Store",
-    supported_currencies: [
-      {
-        currency_code: "rub",
-        is_default: true,
-        is_tax_inclusive: true,
-      },
-    ],
-    default_sales_channel_id: defaultSalesChannel.id,
-  };
-
   if (existingStore) {
+    // Живому магазину список валют не задаём, а дополняем — см.
+    // mergeSupportedCurrencies выше и учение 2026-07-27 (§3.1).
+    const existingCurrencies = (existingStore.supported_currencies || []).filter(
+      (currency): currency is NonNullable<typeof currency> => currency !== null,
+    );
+    // A fresh Medusa database contains a placeholder EUR store. It is scaffold,
+    // not merchant data, so the RU-first bootstrap replaces it with RUB. Any
+    // renamed or multi-currency store is treated as live data and only augmented.
+    const supportedCurrencies = currenciesForExistingStore(
+      existingStore.name,
+      existingCurrencies,
+    );
+
+    // Имя магазина здесь больше не выставляется: на живой базе оно уже
+    // переименовано в «Mario Mikke» скриптом import-mario-mikke.ts, и повторный
+    // прогон сида (то же учение 2026-07-27) откатывал бы его в «Default Store».
+    // Канал продаж по умолчанию тоже не перебиваем: проставляем, только если у
+    // магазина его нет.
+    const storeUpdate: {
+      supported_currencies: typeof supportedCurrencies;
+      default_sales_channel_id?: string;
+    } = {
+      supported_currencies: supportedCurrencies,
+    };
+
+    if (!existingStore.default_sales_channel_id) {
+      storeUpdate.default_sales_channel_id = defaultSalesChannel.id;
+    }
+
     await updateStoresWorkflow(container).run({
       input: {
         selector: { id: existingStore.id },
-        update: storeInput,
+        update: storeUpdate,
       },
     });
   } else {
     await createStoresWorkflow(container).run({
       input: {
-        stores: [storeInput],
+        stores: [
+          {
+            name: "Default Store",
+            supported_currencies: [
+              {
+                currency_code: "rub",
+                is_default: true,
+                is_tax_inclusive: true,
+              },
+            ],
+            default_sales_channel_id: defaultSalesChannel.id,
+          },
+        ],
       },
     });
   }
@@ -192,11 +300,11 @@ export default async function initial_data_seed({
   logger.info("Finished seeding tax regions.");
 
   // Provision the single default VAT rate for the RU tax region. Catalog prices
-  // are gross / tax-inclusive (see storeInput above), so Medusa derives the tax
-  // portion as gross * rate / (100 + rate) = gross * 5 / 105 rather than adding
-  // it on top. The rate is created only when the RU tax region has no `vat5`
-  // rate yet, keeping the seed idempotent; the TaxRate model also enforces a
-  // single default rate per region (unique index IDX_single_default_region).
+  // are gross / tax-inclusive (see the store block above), so Medusa derives
+  // the tax portion as gross * rate / (100 + rate) = gross * 5 / 105 rather
+  // than adding it on top. The rate is created only when the RU tax region has
+  // no `vat5` rate yet, keeping the seed idempotent; the TaxRate model also
+  // enforces a single default rate per region (index IDX_single_default_region).
   // Note: is_combinable is intentionally left at its model default (false) — it
   // is not part of CreateTaxRateDTO in 2.17 and a lone flat rate must not stack.
   logger.info("Seeding default VAT tax rate...");
@@ -215,11 +323,29 @@ export default async function initial_data_seed({
   );
 
   if (ruTaxRegion) {
-    const hasVat5Rate = (ruTaxRegion.tax_rates || []).some(
-      (taxRate) => taxRate?.code === "vat5",
+    const ruTaxRates = ruTaxRegion.tax_rates || [];
+    const hasVat5Rate = ruTaxRates.some((taxRate) => taxRate?.code === "vat5");
+    // Учение 2026-07-27 (§3.1): `tax_rate` вырос с 0 до 1 — это не дубль.
+    // Ищем и создаём по одному и тому же полю `code`, поэтому второй ставки
+    // "vat5" в регионе не появится; в восстановленной базе ставок не было
+    // вовсе, и ставка появилась законно. Опасен другой случай: чужая база со
+    // своей ставкой по умолчанию. is_default защищён уникальным частичным
+    // индексом IDX_single_default_region, так что вторая ставка по умолчанию
+    // уронила бы весь `db:migrate`, а тихая замена чужого НДС на 5% была бы
+    // хуже отказа. Поэтому чужую налоговую настройку не трогаем и говорим об
+    // этом в лог.
+    const existingDefaultRate = ruTaxRates.find(
+      (taxRate) => taxRate?.is_default,
     );
 
-    if (!hasVat5Rate) {
+    if (!hasVat5Rate && existingDefaultRate) {
+      logger.warn(
+        `Tax region "ru" already has a default tax rate ` +
+          `("${existingDefaultRate.code}", ${existingDefaultRate.rate}%). ` +
+          `Skipping the "НДС 5%" (vat5) rate: this database was provisioned ` +
+          `elsewhere. Review the tax setup manually.`,
+      );
+    } else if (!hasVat5Rate) {
       await createTaxRatesWorkflow(container).run({
         input: [
           {
@@ -238,12 +364,31 @@ export default async function initial_data_seed({
   logger.info("Seeding stock location data...");
   const { data: existingStockLocations } = await query.graph({
     entity: "stock_location",
-    fields: ["id", "name"],
+    fields: ["id", "name", "sales_channels.id", "fulfillment_providers.id"],
   });
-  let stockLocation: { id: string } | undefined = existingStockLocations.find(
-    (location) => location.name === "Основной склад",
-  );
-  const stockLocationExisted = Boolean(stockLocation);
+  // Учение 2026-07-27 (§3.1): на восстановленной чужой базе поиск только по
+  // имени не узнал существующий склад ("European Warehouse"), и сид завёл
+  // второй — со своим адресом, каналом продаж и fulfillment-провайдером
+  // (stock_location 1 -> 2). Остатки после такого расходятся по двум локациям.
+  // Имя остаётся первым признаком (тот же приём, что и с fulfillment set), но
+  // если склад в базе уже есть под любым именем, переиспользуем его: задача
+  // сида — обеспечить ПЕРВЫЙ склад, а не именно свой. Запасной вариант
+  // совпадает с import-mario-mikke.ts, который тоже берёт первый склад из базы.
+  const existingStockLocation =
+    existingStockLocations.find(
+      (location) => location.name === "Основной склад",
+    ) || existingStockLocations[0];
+  let stockLocation: { id: string } | undefined = existingStockLocation;
+  // Привязки читаем у найденного склада, а не выводим из флага «склад только
+  // что создан»: раньше существующий, но не привязанный склад навсегда
+  // оставался без fulfillment-провайдера и канала продаж, а на чужой базе
+  // привязки создавались заново вместе с дублем склада.
+  const linkedFulfillmentProviderIds = (
+    existingStockLocation?.fulfillment_providers || []
+  ).map((fulfillmentProvider) => fulfillmentProvider?.id);
+  const linkedSalesChannelIds = (
+    existingStockLocation?.sales_channels || []
+  ).map((salesChannel) => salesChannel?.id);
 
   if (!stockLocation) {
     const { result: stockLocationResult } = await createStockLocationsWorkflow(
@@ -263,7 +408,9 @@ export default async function initial_data_seed({
       },
     });
     stockLocation = stockLocationResult[0];
+  }
 
+  if (!linkedFulfillmentProviderIds.includes("manual_manual")) {
     await link.create({
       [Modules.STOCK_LOCATION]: {
         stock_location_id: stockLocation.id,
@@ -324,7 +471,10 @@ export default async function initial_data_seed({
   // source of truth for shipping methods.
   logger.info("Finished seeding fulfillment data.");
 
-  if (!stockLocationExisted) {
+  // Привязка канала продаж — по факту её отсутствия у конкретного склада:
+  // повторная привязка того же канала переписала бы строку связи (upsert по
+  // составному ключу) и воскресила бы связь, которую магазин мог снять руками.
+  if (!linkedSalesChannelIds.includes(defaultSalesChannel.id)) {
     await linkSalesChannelsToStockLocationWorkflow(container).run({
       input: {
         id: stockLocation.id,

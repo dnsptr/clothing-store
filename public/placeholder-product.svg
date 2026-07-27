@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="400" height="500" role="img" aria-label="Изображение товара недоступно">
+  <rect width="400" height="500" fill="#f2efea" />
+  <g fill="none" stroke="#c9c0b4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 196h80l34 26-20 30-14-11v113h-80V241l-14 11-20-30 34-26z" />
+    <path d="M160 196c0 14 18 24 40 24s40-10 40-24" />
+  </g>
+  <text x="200" y="392" fill="#a89c8d" font-family="Helvetica, Arial, sans-serif" font-size="13" letter-spacing="1.6" text-anchor="middle">MARIO MIKKE</text>
+</svg>

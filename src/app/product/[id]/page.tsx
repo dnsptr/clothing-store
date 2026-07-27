@@ -6,6 +6,7 @@ import {
   CATALOG_REVALIDATE_SECONDS,
   fetchMedusaProductByHandle,
   isMedusaConfigured,
+  storefrontDataMode,
 } from "../../../lib/medusa";
 import { formatPrice } from "../../../lib/format";
 import ProductDetailClient from "./ProductDetailClient";
@@ -53,9 +54,25 @@ type ProductResolution =
   | { status: "error" };
 
 async function resolveProduct(id: string): Promise<ProductResolution> {
-  if (!isMedusaConfigured) {
+  // Демо-каталог живёт ровно в одном режиме — mock. Раньше сюда попадал и
+  // medusa-режим с потерянным ключом или URL, потому что условием была
+  // `isMedusaConfigured`, ложная в обоих случаях. Из-за этого достаточно было
+  // потерять переменную в окружении, чтобы боевые карточки начали отдавать
+  // demo-товары с выдуманными ценами под HTTP 200 (ADR-001 §6).
+  if (storefrontDataMode === "mock") {
     const mock = MOCK_PRODUCTS.find((product) => product.id === id);
     return mock ? { status: "ok", product: mock } : { status: "missing" };
+  }
+
+  if (!isMedusaConfigured) {
+    // В production такая конфигурация не доживает до этой строки — витрина
+    // падает при старте (см. lib/medusa.ts). В dev показываем то же
+    // контролируемое состояние ошибки, что и при недоступной Medusa.
+    console.error(
+      "[PDP] DATA_MODE=medusa, но backend URL или publishable key не заданы.",
+      { id },
+    );
+    return { status: "error" };
   }
 
   try {

@@ -1,8 +1,14 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { MOCK_OUTFITS, MOCK_PRODUCTS } from "../../../data/mockData";
+import { MOCK_OUTFITS, MOCK_PRODUCTS, type Product } from "../../../data/mockData";
 import { withBasePath } from "../../../lib/assets";
+import {
+  CATALOG_REVALIDATE_SECONDS,
+  fetchMedusaProductsByHandles,
+  isMedusaConfigured,
+  storefrontDataMode,
+} from "../../../lib/medusa";
 import CollectionOutfitClient from "./CollectionOutfitClient";
 import Header from "../../../components/Header";
 import Footer from "../../../components/Footer";
@@ -12,11 +18,58 @@ interface CollectionPageProps {
   params: Promise<{ id: string }>;
 }
 
-// Pre-render static paths for output: export config
+// Должно быть литералом: Next требует статически анализируемое значение сегмента.
+// Держать в согласии с CATALOG_REVALIDATE_SECONDS в lib/medusa.ts.
+export const revalidate = 300;
+
+// Сам образ (заголовок, подпись, баннер) — редакционный контент, которого в
+// Medusa пока нет: управление главной и коллекциями из админки вынесено в
+// отдельную задачу. Поэтому список образов остаётся статическим в обоих
+// режимах — в отличие от товаров внутри образа, у которых есть цена и наличие.
 export async function generateStaticParams() {
   return MOCK_OUTFITS.map((outfit) => ({
     id: outfit.id,
   }));
+}
+
+/** Соглашение импорта повторяет mock-идентификаторы: `mario-mikke-<frontend id>`. */
+const handleFor = (id: string) => `mario-mikke-${id}`;
+
+type OutfitProducts =
+  | { status: "ok"; products: Product[] }
+  // Товары образа не удалось загрузить. Показать вместо них demo-позиции нельзя
+  // (ADR-001 §6): у них своя цена и своё наличие, и покупатель принял бы их за
+  // настоящие.
+  | { status: "error" };
+
+async function resolveOutfitProducts(productIds: string[]): Promise<OutfitProducts> {
+  if (storefrontDataMode === "mock") {
+    return {
+      status: "ok",
+      products: MOCK_PRODUCTS.filter((product) => productIds.includes(product.id)),
+    };
+  }
+
+  if (!isMedusaConfigured) {
+    console.error("[Collection] DATA_MODE=medusa, но backend URL или publishable key не заданы.");
+    return { status: "error" };
+  }
+
+  try {
+    return {
+      status: "ok",
+      products: await fetchMedusaProductsByHandles(
+        productIds.map(handleFor),
+        CATALOG_REVALIDATE_SECONDS,
+      ),
+    };
+  } catch (error) {
+    console.error("[Collection] Medusa недоступна при серверном рендеринге образа.", {
+      productIds,
+      error,
+    });
+    return { status: "error" };
+  }
 }
 
 export default async function CollectionDetailPage({ params }: CollectionPageProps) {
@@ -27,10 +80,7 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
     notFound();
   }
 
-  // Filter products that are part of this outfit look
-  const products = MOCK_PRODUCTS.filter((product) =>
-    outfit.productIds.includes(product.id)
-  );
+  const outfitProducts = await resolveOutfitProducts(outfit.productIds);
 
   return (
     <div className={styles.pageWrapper}>
@@ -72,7 +122,14 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
           </div>
 
           {/* Interactive Outfit items grid */}
-          <CollectionOutfitClient products={products} />
+          {outfitProducts.status === "ok" ? (
+            <CollectionOutfitClient products={outfitProducts.products} />
+          ) : (
+            <p className={styles.outfitUnavailable} role="alert">
+              Не удалось загрузить товары образа. Обновите страницу или загляните
+              в <Link href="/catalog">каталог</Link>.
+            </p>
+          )}
         </div>
       </div>
 

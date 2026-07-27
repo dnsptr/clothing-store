@@ -1,5 +1,7 @@
 import { loadEnv, defineConfig, Modules } from '@medusajs/framework/utils'
 
+import { TBANK_PROVIDER_CONFIG_ID } from './src/modules/tbank/provider-id'
+
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
 const REDIS_URL = process.env.REDIS_URL
@@ -75,6 +77,142 @@ const redisModules = REDIS_URL
   : []
 
 /**
+ * Платёжный провайдер Т-Банка.
+ *
+ * Регистрируется только при заданных ключах терминала. Причина в том, что
+ * `validateOptions` провайдера бросает на пустом `terminalKey`, и без этого
+ * условия бэкенд перестал бы стартовать у всех, кто ключей не имеет: в
+ * dev-окружении, в CI и на сборке. Отсутствие провайдера — рабочее состояние
+ * до получения терминала, отсутствие бэкенда — нет.
+ *
+ * Следствие, которое надо помнить при развёртывании: пока переменные не
+ * заданы, в регионе доступен только `pp_system_default`, а он завершает
+ * корзину без единого рубля списания. Витрина это состояние распознаёт и
+ * закрывает чекаут (`src/lib/medusa.ts`, `isCheckoutEnabled`).
+ */
+const TBANK_TERMINAL_KEY = process.env.TBANK_TERMINAL_KEY
+const TBANK_PASSWORD = process.env.TBANK_PASSWORD
+
+/**
+ * Журнал нотификаций Т-Банка регистрируется ВСЕГДА, в отличие от самого
+ * провайдера. Схема базы не должна зависеть от переменных окружения: иначе
+ * staging и production разъезжаются по структуре, а миграция, применённая на
+ * одном стенде, на другом не существует. Пустая таблица ничего не стоит.
+ */
+const tbankNotificationModule = [{ resolve: './src/modules/tbank-notifications' }]
+
+const paymentModule =
+  TBANK_TERMINAL_KEY && TBANK_PASSWORD
+    ? [
+        {
+          resolve: '@medusajs/medusa/payment',
+          options: {
+            providers: [
+              {
+                resolve: './src/modules/tbank',
+                id: TBANK_PROVIDER_CONFIG_ID,
+                options: {
+                  terminalKey: TBANK_TERMINAL_KEY,
+                  password: TBANK_PASSWORD,
+                  // Тестовый и боевой терминалы различаются только базовым URL.
+                  apiBaseUrl: process.env.TBANK_API_BASE_URL,
+                  successUrl: process.env.TBANK_SUCCESS_URL,
+                  failUrl: process.env.TBANK_FAIL_URL,
+                  notificationUrl: process.env.TBANK_NOTIFICATION_URL,
+                },
+              },
+            ],
+          },
+        },
+      ]
+    : []
+
+/**
+ * Уведомления.
+ *
+ * Модуль регистрируется всегда — у него своя таблица, а схема БД не должна
+ * зависеть от переменных окружения. Провайдер Telegram добавляется только при
+ * заданном токене: его `validateOptions` бросает на пустом значении, и без
+ * условия бэкенд не стартовал бы там, где токена нет.
+ *
+ * `notification-local` остаётся всегда: он пишет уведомление в лог вместо
+ * отправки, поэтому в разработке и в CI цепочка «заказ → уведомление»
+ * проверяется целиком, без внешнего сервиса.
+ */
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+
+/**
+ * Почта (SMTP).
+ *
+ * Провайдер добавляется, только когда заданы все четыре обязательные
+ * переменные: его `validateOptions` бросает на любой пустой, и бэкенд не
+ * стартовал бы там, где почтового ящика ещё нет — в разработке, в CI, на сборке.
+ *
+ * Канал в модуле уведомлений может обслуживать ровно один провайдер: загрузчик
+ * падает с «Multiple providers are configured for the same channel». Поэтому
+ * `email` переходит от `local` к SMTP-провайдеру, когда тот настроен, а `local`
+ * сужается до `feed`. Без переменных всё остаётся как было: `local` держит оба
+ * канала и пишет письма в лог, так что цепочка «заказ → письмо» проверяется без
+ * почтового хостинга.
+ */
+const SMTP_HOST = process.env.SMTP_HOST
+const SMTP_USER = process.env.SMTP_USER
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD
+const SMTP_FROM = process.env.SMTP_FROM
+const SMTP_PORT = process.env.SMTP_PORT
+const SMTP_SECURE = process.env.SMTP_SECURE
+
+const HAS_SMTP = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM)
+
+const notificationModule = [
+  {
+    resolve: '@medusajs/medusa/notification',
+    options: {
+      providers: [
+        {
+          resolve: '@medusajs/medusa/notification-local',
+          id: 'local',
+          options: { channels: HAS_SMTP ? ['feed'] : ['email', 'feed'] },
+        },
+        ...(HAS_SMTP
+          ? [
+              {
+                resolve: './src/modules/email-smtp',
+                id: 'email-smtp',
+                options: {
+                  channels: ['email'],
+                  host: SMTP_HOST,
+                  // Порт и режим TLS не угадываются: у Unisender, Mail.ru и
+                  // Яндекса они разные. Пустое значение оставляем пустым —
+                  // провайдер сам возьмёт 587 и выведет TLS из порта.
+                  port: SMTP_PORT ? Number(SMTP_PORT) : undefined,
+                  secure: SMTP_SECURE ? SMTP_SECURE === 'true' : undefined,
+                  user: SMTP_USER,
+                  password: SMTP_PASSWORD,
+                  from: SMTP_FROM,
+                },
+              },
+            ]
+          : []),
+        ...(TELEGRAM_BOT_TOKEN
+          ? [
+              {
+                resolve: './src/modules/telegram',
+                id: 'telegram',
+                options: {
+                  channels: ['telegram'],
+                  botToken: TELEGRAM_BOT_TOKEN,
+                  defaultChatId: process.env.TELEGRAM_CHAT_ID,
+                },
+              },
+            ]
+          : []),
+      ],
+    },
+  },
+]
+
+/**
  * Home page editorial content (hero slides, category shortcuts, material and
  * store cards, the promo banner). Registered unconditionally — unlike the Redis
  * modules it has no infrastructure prerequisite, and the storefront's home page
@@ -111,7 +249,7 @@ if (IS_PRODUCTION && !PUBLIC_BACKEND_URL && !IS_BUILD) {
  * files are served by the Node process, and nothing under `static/` is private
  * — anything there is readable by whoever knows the filename. It is adequate
  * while the client fills the home page with content and inadequate for the long
- * run. Moving media to object storage (roadmap 4.1) means swapping the provider
+ * run. Moving media to object storage means swapping the provider
  * below for `@medusajs/medusa/file-s3`; content rows store the provider's file
  * `key` next to the url precisely so that swap stays a configuration change.
  */
@@ -145,5 +283,12 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET,
     }
   },
-  modules: [...redisModules, fileModule, contentModule],
+  modules: [
+    ...redisModules,
+    fileModule,
+    contentModule,
+    ...tbankNotificationModule,
+    ...notificationModule,
+    ...paymentModule,
+  ],
 })

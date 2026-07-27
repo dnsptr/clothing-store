@@ -145,9 +145,27 @@ Generate a password hash with Caddy and copy the printed value into
 docker run --rm caddy:2-alpine caddy hash-password --plaintext '<password>'
 ```
 
+**Double every `$` in the hash before writing it to the file.** Compose expands
+`$VAR` inside `--env-file` values, and a bcrypt hash always looks like
+`$2a$14$<salt+digest>` — the part after the third `$` is a valid variable name,
+so Compose replaces it with an empty string and Caddy receives a truncated,
+invalid hash. No password would ever match it. `$$` is the Compose escape for a
+literal `$`:
+
 ```bash
-ADMIN_BASIC_AUTH_HASH=<hash-from-command-above>
+# caddy printed: $2a$14$e4tdUXjlEnJRt3A8FnL8COX5qWWpUqV8X6uImLNbw/f65tVcyCy6i
+ADMIN_BASIC_AUTH_HASH=$$2a$$14$$e4tdUXjlEnJRt3A8FnL8COX5qWWpUqV8X6uImLNbw/f65tVcyCy6i
 ```
+
+Verify what the container actually receives before relying on it:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yml \
+  run --rm --no-deps --entrypoint sh caddy -c 'printenv ADMIN_BASIC_AUTH_HASH'
+```
+
+`scripts/deploy.sh` performs this escaping itself, so this applies only when the
+hash is set by hand.
 
 Then recreate Caddy so it picks up the value:
 
@@ -162,8 +180,12 @@ The admin username is `admin`. Caddy will not start with an empty
 
 A `pg_backup` service dumps the database once a day:
 
-- Dumps are written to `./backups/medusa_<timestamp>.sql.gz` on the host.
-- Dumps older than 7 days are removed automatically.
+- Dumps are written to `./backups/medusa_<timestamp>.dump.gz` on the host —
+  `pg_dump -Fc` (custom format), not plain SQL.
+- Each dump is verified with `pg_restore --list` before it is published, so a
+  file that exists is a file that could be read back.
+- Dumps older than 7 days are removed automatically, but rotation runs *only*
+  after a verified success: while backups are failing, old copies are kept.
 
 **A database dump is not a complete backup.** Files uploaded through the admin
 live in `./static` on the host, and the database only stores their URLs. A
@@ -175,8 +197,35 @@ the main operational argument for doing it.
 Restore a dump with the helper script (this overwrites the current data):
 
 ```bash
-bash scripts/restore-db.sh ./backups/medusa_20260101_030000.sql.gz
+bash scripts/restore-db.sh ./backups/medusa_20260101_030000.dump.gz
 ```
+
+The script exits non-zero if the restore is not complete — do not judge it by
+the absence of output. Legacy `.sql.gz` dumps taken before the switch to custom
+format are still accepted.
+
+**Finish a restore with `restart medusa`, not with `deploy.sh`.** `deploy.sh`
+runs `medusa db:migrate`, and that command executes *migration scripts* as well
+as schema migrations — ordinary code that writes to your data. Medusa tracks
+which scripts have run by file name *including the extension*
+(`getPendingMigrations` compares `basename(script)`), so a script that ran as
+`initial-data-seed.ts` under ts-node is a different ledger entry from the built
+`initial-data-seed.js`. Restore a dump taken from such an environment and the
+seed is considered pending and runs again over the restored data. In the
+2026-07-27 drill it collapsed the store's `supported_currencies` from three to
+one, created a duplicate stock location with its own address and links, and
+inserted a tax rate. `restore-db.sh` now warns when the restored
+`script_migrations` table contains `.ts` entries; check it before deploying:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yml \
+  exec -T postgres psql -U medusa -d medusa_backend \
+  -c 'select script_name from script_migrations order by id'
+```
+
+This path was rehearsed end to end on 2026-07-27 (fresh volume → restore →
+Medusa smoke test). The rehearsal ran on a workstation, not on the server —
+repeat it there.
 
 The `./backups` directory lives only on the server disk. Syncing it to external
 object storage (Amazon S3, Timeweb S3, etc.) is recommended for off-site

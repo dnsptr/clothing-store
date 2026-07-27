@@ -39,6 +39,7 @@ yarn-error.log*
 # local tooling and generated patches
 .npm-cache/
 .opencode/
+.turbo/
 *.patch
 
 # vercel

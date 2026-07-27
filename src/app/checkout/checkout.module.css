@@ -506,3 +506,28 @@ textarea.formInput {
   padding-bottom: 2px;
   text-decoration: none;
 }
+
+/* Согласие на обработку ПДн — обязательное осознанное действие покупателя. */
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.consent input {
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--text-primary);
+}
+
+.consent a {
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}

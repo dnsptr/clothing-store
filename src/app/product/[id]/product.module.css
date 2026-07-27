@@ -107,8 +107,7 @@
 
 .category,
 .productFacts,
-.description,
-.accordionInner {
+.description {
   color: var(--text-primary);
   font-size: 14.5px;
   line-height: 24px;
@@ -119,6 +118,14 @@
   color: var(--text-secondary);
   font-size: 12.5px;
   line-height: 20px;
+}
+
+/* Описание из Medusa — это несколько абзацев, а не одна строка: без отступа
+   между <p> они склеиваются в монолит. Шаг тот же, что внутри других блоков
+   сайдбара (.optionSection), то есть вдвое меньше зазора между блоками. */
+.description {
+  display: grid;
+  gap: 12px;
 }
 
 .title {
@@ -322,77 +329,6 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-}
-
-.description {
-  position: relative;
-  padding-right: 54px;
-}
-
-.moreButton {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 20px;
-  letter-spacing: 0.04em;
-}
-
-.moreButton:hover {
-  color: var(--text-primary);
-}
-
-.accordions {
-  border-top: 1px solid var(--border-light);
-}
-
-.accordion {
-  border-bottom: 1px solid var(--border-light);
-}
-
-.accordionHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 52px;
-  color: var(--text-primary);
-  font-size: 14.5px;
-  line-height: 22px;
-  letter-spacing: 0;
-  text-align: left;
-}
-
-.chevron {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  color: var(--text-secondary);
-  transition: transform 0.2s ease;
-}
-
-.chevronOpen {
-  transform: rotate(90deg);
-}
-
-.accordionContent {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.24s ease;
-}
-
-.accordionContentOpen {
-  grid-template-rows: 1fr;
-}
-
-.accordionInner {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.accordionContentOpen .accordionInner {
-  padding: 0 0 18px;
 }
 
 .outfit {

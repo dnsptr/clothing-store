@@ -17,8 +17,27 @@ WORKDIR /app
 
 COPY --from=builder /workspace/apps/backend/.medusa/server ./
 RUN npm install --omit=dev --no-audit --no-fund \
-  && npm cache clean --force
+  && npm cache clean --force \
+  && chown -R node:node /app
+
+# Процесс не должен быть root: на этом хосте контейнер работает в
+# `network_mode: host` и рядом лежат `.env.production` с секретами и каталог с
+# дампами БД. RCE в приложении не обязана сразу становиться root на машине.
+USER node
 
 EXPOSE 9000
 
-CMD ["sh", "-c", "npx medusa db:migrate && npm run start"]
+# Без healthcheck зависший процесс не отличим от живого: Caddy продолжает
+# проксировать в мёртвый upstream, а `restart: unless-stopped` не срабатывает,
+# потому что контейнер формально запущен. Node 22 умеет fetch, поэтому curl в
+# образ тащить не нужно.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:9000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+# Миграции больше не выполняются при каждом старте. Раньше они стояли в CMD, и
+# неудачная миграция вместе с `restart: unless-stopped` давала бесконечный цикл
+# перезапусков, а отката не существовало: предыдущий образ перезаписывался
+# сборкой, в registry его не было, `/opt/mario-mikke` не привязан к коммиту.
+# Теперь миграции — отдельный проверяемый шаг деплоя (scripts/deploy.sh),
+# выполняемый после дампа базы.
+CMD ["npm", "run", "start"]

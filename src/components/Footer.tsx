@@ -1,11 +1,14 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "@/hooks/useOverlayDismiss";
 import styles from "./Footer.module.css";
 
+// Страницы «Отзывы» и «Реферальная программа» убраны вместе со ссылками:
+// отзывов на сайте оставить негде, а реферальная программа обещала
+// персональную ссылку в личном кабинете, которого нет.
 const footerColumns = [
   {
     title: "Покупателям",
@@ -13,8 +16,6 @@ const footerColumns = [
       { label: "Доставка", href: "/info/delivery" },
       { label: "Возврат", href: "/info/returns" },
       { label: "Вопросы и ответы", href: "/info/faq" },
-      { label: "Отзывы", href: "/info/reviews" },
-      { label: "Реферальная программа", href: "/info/referral" },
       { label: "Личный кабинет", href: "/account" },
     ],
   },
@@ -29,23 +30,23 @@ const footerColumns = [
   },
 ];
 
+// Юридические документы продавца. Их ищут в подвале — и покупатель, и банк при
+// модерации сайта для эквайринга, — поэтому они вынесены отдельной строкой,
+// видимой на каждой странице.
+const legalLinks = [
+  { label: "Публичная оферта", href: "/info/offer" },
+  { label: "Обработка персональных данных", href: "/info/privacy" },
+  { label: "Условия возврата", href: "/info/returns" },
+  { label: "Реквизиты продавца", href: "/info/requisites" },
+];
+
 export default function Footer() {
   const [isSubscribeModalOpen, setIsSubscribeModalOpen] = useState(false);
-  const [email, setEmail] = useState("");
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const closeSubscribeModal = () => setIsSubscribeModalOpen(false);
 
   useBodyScrollLock(isSubscribeModalOpen);
   useOverlayDismiss(isSubscribeModalOpen, closeSubscribeModal);
-
-  const handleSubscribe = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!isEmailValid) return;
-
-    setIsSubscribed(true);
-  };
 
   return (
     <footer className={styles.footer}>
@@ -76,10 +77,7 @@ export default function Footer() {
               <button
                 type="button"
                 className={styles.submitBtn}
-                onClick={() => {
-                  setIsSubscribed(false);
-                  setIsSubscribeModalOpen(true);
-                }}
+                onClick={() => setIsSubscribeModalOpen(true)}
               >
                 Хочу
               </button>
@@ -97,6 +95,14 @@ export default function Footer() {
             </div>
           </div>
         </div>
+
+        <nav className={styles.legal} aria-label="Правовая информация">
+          {legalLinks.map((link) => (
+            <Link key={link.href} href={link.href} className={styles.legalLink}>
+              {link.label}
+            </Link>
+          ))}
+        </nav>
 
         <div className={styles.bottom}>
           <Link href="/info/english" className={styles.locale}>
@@ -128,47 +134,24 @@ export default function Footer() {
               <span aria-hidden="true" />
             </button>
 
-            {isSubscribed ? (
-              <div className={styles.subscribeSuccess}>
-                <h2 id="subscribe-modal-title" className={styles.modalTitle}>
-                  Спасибо за подписку
-                </h2>
-                <p className={styles.modalSuccessText}>Мы добавили {email} в список рассылки.</p>
-                <button type="button" className={styles.modalSubmitBtn} onClick={closeSubscribeModal}>
-                  Готово
-                </button>
-              </div>
-            ) : (
-              <>
-                <h2 id="subscribe-modal-title" className={styles.modalTitle}>
-                  Подписка на рассылку
-                </h2>
-                <form className={styles.modalForm} onSubmit={handleSubscribe}>
-                  <label className={styles.visuallyHidden} htmlFor="subscribe-email">
-                    Эл. почта
-                  </label>
-                  <input
-                    id="subscribe-email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="Эл. почта"
-                    className={styles.modalInput}
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                  />
-                  <button type="submit" className={styles.modalSubmitBtn} disabled={!isEmailValid}>
-                    Подписаться
-                  </button>
-                  <p className={styles.legalText}>
-                    Нажимая на кнопку «Подписаться», вы подтверждаете, что ознакомились с{" "}
-                    <Link href="/info/privacy">политикой конфиденциальности</Link>, и даете согласие на получение
-                    рассылки, в том числе рекламной.
-                  </p>
-                </form>
-              </>
-            )}
+            {/* Форма подписки убрана до появления рассылки.
+                Она показывала «Спасибо за подписку» и «Мы добавили <email> в
+                список рассылки», не сделав ни одного сетевого запроса: адрес
+                никуда не сохранялся, а согласие на рекламную рассылку при этом
+                фиксировалось. Собирать e-mail, которому некуда деться, нельзя
+                ни с точки зрения покупателя, ни с точки зрения 152-ФЗ. */}
+            <div className={styles.subscribeSuccess}>
+              <h2 id="subscribe-modal-title" className={styles.modalTitle}>
+                Рассылка ещё готовится
+              </h2>
+              <p className={styles.modalSuccessText}>
+                Мы настраиваем письма о новинках и специальных предложениях.
+                Подписка появится здесь, как только мы её запустим.
+              </p>
+              <button type="button" className={styles.modalSubmitBtn} onClick={closeSubscribeModal}>
+                Понятно
+              </button>
+            </div>
           </section>
         </div>
       )}

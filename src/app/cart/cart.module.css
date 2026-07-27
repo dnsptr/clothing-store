@@ -235,8 +235,10 @@
   width: 100%;
   height: 48px;
   margin-top: 20px;
+  border: 0;
   background: var(--text-primary);
   color: var(--bg-primary);
+  font-family: inherit;
   font-size: 11px;
   font-weight: 500;
   line-height: 17px;
@@ -244,8 +246,16 @@
   text-transform: uppercase;
 }
 
-.checkoutButton:hover {
+.checkoutButton:hover:not(:disabled) {
   opacity: 0.86;
+}
+
+/* Оплата ещё не подключена: кнопка остаётся видимой, чтобы не перестраивать
+   блок итога, но не притворяется рабочей. */
+.checkoutButton:disabled {
+  background: var(--border-light);
+  color: var(--text-secondary);
+  cursor: not-allowed;
 }
 
 .summaryNote {
