@@ -14,6 +14,7 @@ import {
 } from "@medusajs/ui"
 
 import { sdk } from "../../lib/sdk"
+import { resolveMediaPreviewUrl } from "../../lib/media"
 import {
   SlideForm,
   SECTION_LABELS,
@@ -66,6 +67,7 @@ const toDraft = (row: SlideRow): SlideDraft => ({
 const ContentPage = () => {
   const [section, setSection] = useState<SlideSection>("hero")
   const [slides, setSlides] = useState<SlideRow[]>([])
+  const [storefrontUrl, setStorefrontUrl] = useState("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<SlideDraft | null>(null)
@@ -75,11 +77,15 @@ const ContentPage = () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await sdk.client.fetch<{ slides: SlideRow[] }>(
+      const data = await sdk.client.fetch<{
+        slides: SlideRow[]
+        storefront_url: string
+      }>(
         "/admin/content/slides",
         { query: { section } }
       )
       setSlides(data.slides ?? [])
+      setStorefrontUrl(data.storefront_url ?? "")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить контент")
     } finally {
@@ -202,7 +208,7 @@ const ContentPage = () => {
                 <Table.Cell>
                   {slide.media_type === "image" ? (
                     <img
-                      src={slide.media_url}
+                      src={resolveMediaPreviewUrl(slide.media_url, storefrontUrl)}
                       alt=""
                       className="h-12 w-12 rounded-md object-cover"
                     />
@@ -271,6 +277,7 @@ const ContentPage = () => {
       <SlideForm
         open={draft !== null}
         draft={draft}
+        storefrontUrl={storefrontUrl}
         onClose={() => setDraft(null)}
         onSaved={() => void load()}
       />

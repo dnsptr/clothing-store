@@ -12,6 +12,7 @@ import {
 } from "@medusajs/ui"
 
 import { sdk } from "../lib/sdk"
+import { resolveMediaPreviewUrl } from "../lib/media"
 
 export type SlideSection = "hero" | "shortcut" | "material" | "store" | "promo"
 
@@ -81,11 +82,18 @@ export { SECTION_LABELS }
 interface SlideFormProps {
   open: boolean
   draft: SlideDraft | null
+  storefrontUrl: string
   onClose: () => void
   onSaved: () => void
 }
 
-export function SlideForm({ open, draft, onClose, onSaved }: SlideFormProps) {
+export function SlideForm({
+  open,
+  draft,
+  storefrontUrl,
+  onClose,
+  onSaved,
+}: SlideFormProps) {
   const [form, setForm] = useState<SlideDraft>(emptyDraft("hero"))
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<"media" | "poster" | null>(null)
@@ -278,7 +286,7 @@ export function SlideForm({ open, draft, onClose, onSaved }: SlideFormProps) {
             </div>
             {form.media_url && form.media_type === "image" && (
               <img
-                src={form.media_url}
+                src={resolveMediaPreviewUrl(form.media_url, storefrontUrl)}
                 alt=""
                 className="mt-2 max-h-40 w-full rounded-md object-cover"
               />
@@ -315,6 +323,13 @@ export function SlideForm({ open, draft, onClose, onSaved }: SlideFormProps) {
               >
                 Загрузить постер
               </Button>
+              {form.poster_url && (
+                <img
+                  src={resolveMediaPreviewUrl(form.poster_url, storefrontUrl)}
+                  alt=""
+                  className="mt-2 max-h-40 w-full rounded-md object-cover"
+                />
+              )}
             </div>
           )}
 

@@ -25,7 +25,12 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     { order: { section: "ASC", rank: "ASC" } }
   )
 
-  res.json({ slides })
+  res.json({
+    slides,
+    // Root-relative media lives in the storefront's public directory. The
+    // custom admin uses this public origin to render accurate previews.
+    storefront_url: process.env.STOREFRONT_URL ?? "",
+  })
 }
 
 export async function POST(
