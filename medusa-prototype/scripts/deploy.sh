@@ -74,6 +74,17 @@ compose() {
   docker compose --env-file "${ENV_FILE}" -f compose.production.yml "$@"
 }
 
+# The production image runs as the official Node user (uid/gid 1000). Bind
+# mounts keep host ownership, so a root-owned static directory is readable but
+# uploads fail with EACCES unless ownership is prepared before the container
+# starts.
+STATIC_DIR="${PROJECT_DIR}/static"
+MEDUSA_UID=1000
+MEDUSA_GID=1000
+mkdir -p "${STATIC_DIR}"
+chown -R "${MEDUSA_UID}:${MEDUSA_GID}" "${STATIC_DIR}"
+chmod -R u+rwX "${STATIC_DIR}"
+
 # Конфигурация проверяется до сборки: раньше опечатка или недостающая
 # обязательная переменная обнаруживались после нескольких минут сборки образа
 # на прод-машине с 2 vCPU.
