@@ -1,4 +1,28 @@
-import { mergeSupportedCurrencies } from "../initial-data-seed";
+import {
+  currenciesForExistingStore,
+  mergeSupportedCurrencies,
+} from "../initial-data-seed";
+
+describe("currenciesForExistingStore", () => {
+  it("заменяет untouched EUR scaffold Medusa на RUB-only", () => {
+    expect(
+      currenciesForExistingStore("Medusa Store", [
+        { currency_code: "eur", is_default: true },
+      ]),
+    ).toEqual([
+      { currency_code: "rub", is_default: true, is_tax_inclusive: true },
+    ]);
+  });
+
+  it("не удаляет валюты переименованного живого магазина", () => {
+    expect(
+      currenciesForExistingStore("Mario Mikke", [
+        { currency_code: "eur", is_default: true },
+        { currency_code: "usd", is_default: false },
+      ]).map((currency) => currency.currency_code),
+    ).toEqual(["eur", "usd", "rub"]);
+  });
+});
 
 // Чистый юнит-тест: ни базы, ни поднятого приложения. Проверяет правило, на
 // котором сид споткнулся на учении по восстановлению БД 2026-07-27 (§3.1) —

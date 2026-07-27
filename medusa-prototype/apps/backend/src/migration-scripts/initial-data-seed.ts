@@ -69,6 +69,27 @@ export function mergeSupportedCurrencies(
   return supportedCurrencies;
 }
 
+export function currenciesForExistingStore(
+  storeName: string | null | undefined,
+  existingCurrencies: {
+    currency_code: string;
+    is_default?: boolean | null;
+  }[],
+) {
+  const isUntouchedMedusaScaffold =
+    (storeName === "Medusa Store" || storeName === "Default Store") &&
+    existingCurrencies.length === 1 &&
+    existingCurrencies[0].currency_code === "eur";
+
+  if (isUntouchedMedusaScaffold) {
+    return [
+      { currency_code: "rub", is_default: true, is_tax_inclusive: true },
+    ];
+  }
+
+  return mergeSupportedCurrencies(existingCurrencies);
+}
+
 // Mario Mikke sells only within Russia (currency RUB, УСН + НДС 5%). This seed
 // provisions the RU-first commerce skeleton (sales channel, publishable API key,
 // RUB store, Russia region, RU tax region, Moscow warehouse and RU fulfillment
@@ -153,6 +174,7 @@ export default async function initial_data_seed({
     entity: "store",
     fields: [
       "id",
+      "name",
       "default_sales_channel_id",
       "supported_currencies.currency_code",
       "supported_currencies.is_default",
@@ -173,7 +195,13 @@ export default async function initial_data_seed({
     const existingCurrencies = (existingStore.supported_currencies || []).filter(
       (currency): currency is NonNullable<typeof currency> => currency !== null,
     );
-    const supportedCurrencies = mergeSupportedCurrencies(existingCurrencies);
+    // A fresh Medusa database contains a placeholder EUR store. It is scaffold,
+    // not merchant data, so the RU-first bootstrap replaces it with RUB. Any
+    // renamed or multi-currency store is treated as live data and only augmented.
+    const supportedCurrencies = currenciesForExistingStore(
+      existingStore.name,
+      existingCurrencies,
+    );
 
     // Имя магазина здесь больше не выставляется: на живой базе оно уже
     // переименовано в «Mario Mikke» скриптом import-mario-mikke.ts, и повторный
