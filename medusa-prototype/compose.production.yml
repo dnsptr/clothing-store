@@ -52,6 +52,9 @@ services:
       ADMIN_CORS: ${ADMIN_CORS}
       AUTH_CORS: ${AUTH_CORS}
       STOREFRONT_URL: ${STOREFRONT_URL:?STOREFRONT_URL is required}
+      # Uploaded files store an absolute URL at upload time, so this must be the
+      # public origin of this backend before the first upload happens.
+      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:?PUBLIC_BACKEND_URL is required}
       JWT_SECRET: ${JWT_SECRET}
       COOKIE_SECRET: ${COOKIE_SECRET}
       AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY}
@@ -65,6 +68,14 @@ services:
       redis:
         condition: service_healthy
     network_mode: host
+    volumes:
+      # Everything the client uploads through the admin lands here (the local
+      # file provider writes to <cwd>/static, and the image WORKDIR is /app).
+      # Without this bind mount the entire media library is destroyed by the
+      # next `deploy.sh`, because that rebuilds the image and recreates the
+      # container. Bound to the host rather than a named volume so the files can
+      # be copied off-site alongside ./backups.
+      - ./static:/app/static
 
   caddy:
     image: caddy:2-alpine

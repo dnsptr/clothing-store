@@ -64,7 +64,24 @@ published.
      npx medusa exec ./src/scripts/import-mario-mikke.js
    ```
 
-7. Create an administrator with `npx medusa user` inside the Medusa container.
+7. Seed the home page content:
+
+   ```bash
+   docker exec mario-mikke-medusa-1 \
+     npx medusa exec ./src/scripts/seed-home-content.js
+   ```
+
+   This fills the `content_slide` table with the images and texts the storefront
+   used to hardcode. It is idempotent, matching on `(section, title)`, and never
+   overwrites anything edited in the admin afterwards — so a re-run cannot
+   revert the client's work.
+
+8. Create an administrator with `npx medusa user` inside the Medusa container.
+
+   If the command fails partway it can leave a user row with no credentials:
+   the account then exists (a second attempt reports "already exists") but
+   cannot log in. Use a different email, or delete the row, rather than
+   re-running with the same address.
 
 The generated `.env.production` contains secrets and must never be committed.
 
@@ -100,7 +117,9 @@ Caddy must not request its own certificate in this setup.
 The production environment uses:
 
 - `BACKEND_HOST=api.mariomikke.shop`
-- `PUBLIC_BACKEND_URL=https://api.mariomikke.shop`
+- `PUBLIC_BACKEND_URL=https://api.mariomikke.shop` — also passed into the Medusa
+  container, where it becomes the base of every uploaded file's URL. The backend
+  refuses to boot in production without it.
 - `ADMIN_CORS=https://api.mariomikke.shop`
 - `STORE_CORS=https://mariomikke.shop,https://www.mariomikke.shop`
 - `AUTH_CORS=https://mariomikke.shop,https://www.mariomikke.shop,https://api.mariomikke.shop`
@@ -168,6 +187,13 @@ A `pg_backup` service dumps the database once a day:
 - Dumps older than 7 days are removed automatically, but rotation runs *only*
   after a verified success: while backups are failing, old copies are kept.
 
+**A database dump is not a complete backup.** Files uploaded through the admin
+live in `./static` on the host, and the database only stores their URLs. A
+restore from a dump alone yields a catalogue and a home page whose images all
+404. Back up `./static` together with `./backups`, and restore them together.
+This stops being true once media moves to object storage (roadmap 4.1), which is
+the main operational argument for doing it.
+
 Restore a dump with the helper script (this overwrites the current data):
 
 ```bash
@@ -198,9 +224,8 @@ docker compose --env-file .env.production -f compose.production.yml \
 ```
 
 This path was rehearsed end to end on 2026-07-27 (fresh volume → restore →
-Medusa smoke test); see `../docs/ops/restore-drill-2026-07-27.md` for the
-protocol and the residual risks that still need checking on the server. The
-rehearsal ran on a workstation, not on the server — repeat it there.
+Medusa smoke test). The rehearsal ran on a workstation, not on the server —
+repeat it there.
 
 The `./backups` directory lives only on the server disk. Syncing it to external
 object storage (Amazon S3, Timeweb S3, etc.) is recommended for off-site

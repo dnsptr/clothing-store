@@ -4,11 +4,22 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { withBasePath } from "../lib/assets";
-import { MATERIALS } from "../lib/catalog";
+import type { ContentSlide } from "../lib/content";
 import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./MaterialsSlider.module.css";
 
-export default function MaterialsSlider() {
+/**
+ * The editorial material cards on the home page.
+ *
+ * Not to be confused with the material taxonomy in lib/catalog.ts, which the
+ * menu and the catalog filters read: that is a fact about the assortment, this
+ * is a promotional row the client curates. They happen to overlap today.
+ */
+interface MaterialsSliderProps {
+  items: ContentSlide[];
+}
+
+export default function MaterialsSlider({ items }: MaterialsSliderProps) {
   const sliderRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
@@ -40,6 +51,8 @@ export default function MaterialsSlider() {
     if (draggedDistance > 5) e.preventDefault();
   };
 
+  if (!items.length) return null;
+
   return (
     <section id="materials" className={styles.section} aria-label="Рекомендации по материалам">
       <div
@@ -50,18 +63,18 @@ export default function MaterialsSlider() {
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
       >
-        {MATERIALS.map((item) => (
+        {items.map((item) => (
           <Link
-            key={item.slug}
-            href={item.href}
+            key={item.id}
+            href={item.href ?? "/catalog"}
             className={styles.card}
             onClick={handleLinkClick}
             draggable={false}
             {...cursorHandlers}
           >
             <Image
-              src={withBasePath(item.image)}
-              alt={item.label}
+              src={withBasePath(item.media.url)}
+              alt={item.alt || item.title}
               fill
               sizes="(max-width: 768px) 84vw, 46vw"
               className={styles.image}
@@ -69,8 +82,8 @@ export default function MaterialsSlider() {
             />
             <div className={styles.overlay} />
             <div className={styles.info}>
-              <span className={styles.eyebrow}>{item.eyebrow}</span>
-              <h3 className={styles.cardTitle}>{item.label}</h3>
+              {item.eyebrow && <span className={styles.eyebrow}>{item.eyebrow}</span>}
+              <h3 className={styles.cardTitle}>{item.title}</h3>
             </div>
           </Link>
         ))}

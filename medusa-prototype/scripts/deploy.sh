@@ -14,6 +14,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   umask 077
   cat > "${ENV_FILE}" <<EOF
 BACKEND_HOST=${BACKEND_HOST}
+PUBLIC_BACKEND_URL=${PUBLIC_BACKEND_URL}
 STOREFRONT_URL=${STOREFRONT_URL}
 
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
@@ -30,6 +31,12 @@ fi
 
 if ! grep -q '^STOREFRONT_URL=' "${ENV_FILE}"; then
   printf '\nSTOREFRONT_URL=%s\n' "${STOREFRONT_URL}" >> "${ENV_FILE}"
+fi
+
+# Backfill for servers whose .env.production predates this variable. Uploaded
+# files persist an absolute URL, so localhost must never reach production data.
+if ! grep -q '^PUBLIC_BACKEND_URL=' "${ENV_FILE}"; then
+  printf '\nPUBLIC_BACKEND_URL=%s\n' "${PUBLIC_BACKEND_URL}" >> "${ENV_FILE}"
 fi
 
 # Пароль админки генерируется здесь же. Раньше скрипт записывал строку

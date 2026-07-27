@@ -128,33 +128,16 @@ export const CATALOG_PRIMARY_NAV: CatalogLink[] = [
   CATALOG_SECTIONS.accessories,
 ];
 
-export const HOME_RECOMMENDATIONS: CatalogCard[] = [
-  {
-    label: "Новинки",
-    eyebrow: "Каталог",
-    image: "/images/collection-women.png",
-    href: CATALOG_SECTIONS.new.href,
-  },
-  {
-    label: "Одежда",
-    eyebrow: "Разделы",
-    image: "/products/1/1-1.jpg",
-    href: CATALOG_SECTIONS.clothing.href,
-  },
-  {
-    label: "Обувь",
-    eyebrow: "Разделы",
-    image: "/products/9/9-1.png",
-    href: CATALOG_SECTIONS.shoes.href,
-  },
-  {
-    label: "Аксессуары",
-    eyebrow: "Разделы",
-    image: "/products/4/4-1.png",
-    href: CATALOG_SECTIONS.accessories.href,
-  },
-];
-
+/**
+ * The home page's category shortcuts used to live here. They are editorial —
+ * which four sections to promote this season, with which photo — so they moved
+ * into the content module and are edited in Medusa Admin.
+ *
+ * MATERIALS below did NOT move, despite also appearing on the home page: the
+ * menu and the catalog filters read it, and `getMaterialBySlug` resolves
+ * `?material=linen` to a heading. That is a fact about the assortment rather
+ * than a promotional choice, and it belongs with the catalog taxonomy.
+ */
 export const CLOTHING_SECTION_CATEGORY_SLUGS = ["outerwear", "knitwear", "trousers"];
 
 export function getCategoryBySlug(slug: string) {
