@@ -53,6 +53,10 @@ export interface CheckoutDetails {
   comment: string;
 }
 
+type CheckoutCompletion =
+  | { type: "redirect"; paymentUrl: string }
+  | { type: "order"; id: string; displayId?: number | null };
+
 interface CartContextType {
   // Cart States
   cartItems: CartItem[];
@@ -62,7 +66,7 @@ interface CartContextType {
   updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
   prepareCheckout: (details: CheckoutDetails) => Promise<void>;
   getShippingOptions: () => Promise<MedusaShippingOption[]>;
-  completeCheckout: () => Promise<{ id: string; displayId?: number | null }>;
+  completeCheckout: () => Promise<CheckoutCompletion>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
@@ -540,14 +544,42 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return listMedusaShippingOptions(await getMedusaCartId());
   };
 
-  const completeCheckout = () => enqueueCartMutation(async () => {
+  const completeCheckout = () => enqueueCartMutation<CheckoutCompletion>(async () => {
     if (!isMedusaConfigured) {
       throw new Error("Checkout requires Medusa mode with a configured Store API.");
     }
 
     const cartId = await getMedusaCartId();
     const paymentCollection = await createMedusaPaymentCollection(cartId);
-    await initializeMedusaPaymentSession(paymentCollection.id);
+    const paymentSession = await initializeMedusaPaymentSession(paymentCollection.id);
+
+    // Встроенный провайдер оставлен только для локального/e2e escape hatch.
+    // Боевой redirect-провайдер не должен создавать заказ до оплаты: успешный
+    // подписанный webhook завершит эту же корзину через workflow Medusa.
+    if (paymentSession.provider_id !== "pp_system_default") {
+      if (paymentSession.status !== "pending_authorization") {
+        throw new Error(
+          `Платёжный провайдер вернул неожиданное состояние: ${paymentSession.status}.`,
+        );
+      }
+      const paymentUrl = paymentSession.data.paymentUrl;
+      if (typeof paymentUrl !== "string") {
+        throw new Error("Платёжный провайдер не вернул ссылку на оплату.");
+      }
+
+      let parsedPaymentUrl: URL;
+      try {
+        parsedPaymentUrl = new URL(paymentUrl);
+      } catch {
+        throw new Error("Платёжный провайдер вернул некорректную ссылку на оплату.");
+      }
+      if (parsedPaymentUrl.protocol !== "https:") {
+        throw new Error("Платёжный провайдер вернул небезопасную ссылку на оплату.");
+      }
+
+      return { type: "redirect", paymentUrl: parsedPaymentUrl.toString() };
+    }
+
     const response = await completeMedusaCart(cartId);
     if (response.type !== "order") {
       throw new Error(response.error.message);
@@ -557,7 +589,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     cartItemsRef.current = [];
     setCartItems([]);
     setServerCartTotal(null);
-    return { id: response.order.id, displayId: response.order.display_id };
+    return { type: "order", id: response.order.id, displayId: response.order.display_id };
   });
 
   const toggleFavorite = (productId: string) => {

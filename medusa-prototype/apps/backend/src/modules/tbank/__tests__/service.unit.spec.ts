@@ -328,11 +328,38 @@ describe("cancelPayment", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("не валит оформление, если банк отказал в отмене", async () => {
-    mockFetchOnce({ Success: false, ErrorCode: "9999", Message: "уже отменён" });
+  it("считает ошибку отмены идемпотентной только после GetState=CANCELED", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ Success: false, ErrorCode: "9999", Message: "уже отменён" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ Success: true, ErrorCode: "0", Status: "CANCELED" }),
+      }) as unknown as typeof fetch;
+
     await expect(
       makeService().cancelPayment({ data: { paymentId: "1" } } as never),
     ).resolves.toBeDefined();
+  });
+
+  it("не удаляет сессию после неоднозначной сетевой ошибки Cancel", async () => {
+    global.fetch = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("socket reset"))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ Success: true, ErrorCode: "0", Status: "NEW" }),
+      }) as unknown as typeof fetch;
+
+    await expect(
+      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
+    ).rejects.toThrow(/NETWORK/);
   });
 });
 

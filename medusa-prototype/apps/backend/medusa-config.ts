@@ -1,5 +1,7 @@
 import { loadEnv, defineConfig, Modules } from '@medusajs/framework/utils'
 
+import { TBANK_PROVIDER_CONFIG_ID } from './src/modules/tbank/provider-id'
+
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
 const REDIS_URL = process.env.REDIS_URL
@@ -108,7 +110,7 @@ const paymentModule =
             providers: [
               {
                 resolve: './src/modules/tbank',
-                id: 'tbank',
+                id: TBANK_PROVIDER_CONFIG_ID,
                 options: {
                   terminalKey: TBANK_TERMINAL_KEY,
                   password: TBANK_PASSWORD,

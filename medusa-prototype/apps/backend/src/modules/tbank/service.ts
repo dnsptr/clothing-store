@@ -53,6 +53,7 @@ import {
   toWebhookActionAndData,
 } from "./lib/status";
 import { verifyNotificationToken } from "./lib/token";
+import { TBANK_PROVIDER_IDENTIFIER } from "./provider-id";
 
 export type TBankOptions = {
   terminalKey: string;
@@ -79,7 +80,7 @@ type TBankSessionData = {
 };
 
 export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOptions> {
-  static identifier = "tbank";
+  static identifier = TBANK_PROVIDER_IDENTIFIER;
 
   protected readonly logger_: Logger;
   protected readonly options_: TBankOptions;
@@ -309,11 +310,33 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     try {
       await this.client_.cancel({ paymentId: data.paymentId });
     } catch (error) {
-      // Отмена уже отменённого платежа не должна валить оформление.
-      if (error instanceof TBankApiError) {
-        this.logger_.warn(`tbank: Cancel вернул ${error.errorCode}: ${error.message}`);
-        return { data: input.data };
+      if (!(error instanceof TBankApiError)) {
+        throw error;
       }
+
+      // `Cancel` не идемпотентен по контракту. После ошибки удалять сессию
+      // можно только если GetState доказывает, что старый URL уже не оплатить.
+      try {
+        const state = await this.client_.getState(data.paymentId);
+        if (
+          state.Status === "CANCELED" ||
+          state.Status === "REVERSED" ||
+          state.Status === "REJECTED" ||
+          state.Status === "DEADLINE_EXPIRED"
+        ) {
+          this.logger_.warn(
+            `tbank: Cancel вернул ${error.errorCode}, но GetState подтвердил ${state.Status}`,
+          );
+          return { data: input.data };
+        }
+      } catch (stateError) {
+        this.logger_.warn(
+          `tbank: после ошибки Cancel не удалось проверить GetState: ${
+            stateError instanceof Error ? stateError.message : String(stateError)
+          }`,
+        );
+      }
+
       throw error;
     }
 

@@ -146,8 +146,18 @@ interface MedusaShippingOptionsResponse {
   shipping_options?: MedusaShippingOption[];
 }
 
+interface MedusaPaymentSession {
+  id: string;
+  provider_id: string;
+  status: string;
+  data: Record<string, unknown>;
+}
+
 interface MedusaPaymentCollectionResponse {
-  payment_collection: { id: string };
+  payment_collection: {
+    id: string;
+    payment_sessions?: MedusaPaymentSession[];
+  };
 }
 
 type MedusaCompleteCartResponse =
@@ -588,6 +598,39 @@ function parsePaymentCollectionResponse(
   return data as MedusaPaymentCollectionResponse;
 }
 
+function parseInitializedPaymentCollectionResponse(
+  data: unknown,
+  endpoint: string,
+): MedusaPaymentCollectionResponse {
+  const parsed = parsePaymentCollectionResponse(data, endpoint);
+  const collection = expectRecord(parsed.payment_collection, endpoint, "payment_collection");
+  const sessions = expectArray(
+    collection.payment_sessions,
+    endpoint,
+    "payment_collection.payment_sessions",
+  );
+  sessions.forEach((item, index) => {
+    const session = expectRecord(
+      item,
+      endpoint,
+      `payment_collection.payment_sessions[${index}]`,
+    );
+    expectString(session.id, endpoint, `payment_collection.payment_sessions[${index}].id`);
+    expectString(
+      session.provider_id,
+      endpoint,
+      `payment_collection.payment_sessions[${index}].provider_id`,
+    );
+    expectString(
+      session.status,
+      endpoint,
+      `payment_collection.payment_sessions[${index}].status`,
+    );
+    expectRecord(session.data, endpoint, `payment_collection.payment_sessions[${index}].data`);
+  });
+  return parsed;
+}
+
 function parseCompleteCartResponse(
   data: unknown,
   endpoint: string,
@@ -917,10 +960,24 @@ export async function initializeMedusaPaymentSession(paymentCollectionId: string
     );
   }
 
-  await medusaRequest(`/store/payment-collections/${paymentCollectionId}/payment-sessions`, {
+  const endpoint = `/store/payment-collections/${paymentCollectionId}/payment-sessions`;
+  const response = await medusaRequest(endpoint, {
     method: "POST",
     body: { provider_id: medusaPaymentProviderId },
+    parse: parseInitializedPaymentCollectionResponse,
   });
+  const session = response.payment_collection.payment_sessions?.find(
+    (candidate) => candidate.provider_id === medusaPaymentProviderId,
+  );
+  if (!session) {
+    throw new MedusaContractError(
+      endpoint,
+      "payment_collection.payment_sessions",
+      `does not contain provider ${medusaPaymentProviderId}`,
+    );
+  }
+
+  return session;
 }
 
 export async function completeMedusaCart(cartId: string) {

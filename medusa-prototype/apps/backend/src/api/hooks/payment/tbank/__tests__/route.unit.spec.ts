@@ -115,6 +115,19 @@ describe("роут нотификаций Т-Банка", () => {
     expect(order).toEqual(["journal", "event"]);
   });
 
+  it("эмитит полный provider token зарегистрированного провайдера Medusa", async () => {
+    const eventBus = { emit: jest.fn().mockResolvedValue(undefined) };
+
+    await POST(makeReq(signed(), makeNotifications(), eventBus), makeRes() as never);
+
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ provider: "tbank_tbank" }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("сохраняет разобранные поля нотификации", async () => {
     const notifications = makeNotifications();
     await POST(

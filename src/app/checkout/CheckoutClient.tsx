@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "../../context/CartContext";
@@ -152,6 +152,7 @@ export default function CheckoutClient() {
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [orderId, setOrderId] = useState<string | null>(null);
   const [recommendationSizes, setRecommendationSizes] = useState<Record<string, string>>({});
@@ -187,6 +188,15 @@ export default function CheckoutClient() {
     };
   }, [needsShippingOptions, getShippingOptions]);
 
+  useEffect(() => {
+    const resetSubmission = () => {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
+    };
+    window.addEventListener("pageshow", resetSubmission);
+    return () => window.removeEventListener("pageshow", resetSubmission);
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -204,6 +214,7 @@ export default function CheckoutClient() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingRef.current) return;
 
     // Run full validation
     const newErrors = validateForm(form);
@@ -233,16 +244,26 @@ export default function CheckoutClient() {
       comment: form.comment,
     };
 
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setSubmitMessage("");
+    let redirectStarted = false;
     try {
       await prepareCheckout(checkoutDetails);
-      const order = await completeCheckout();
-      setOrderId(order.displayId ? String(order.displayId) : order.id);
+      const result = await completeCheckout();
+      if (result.type === "redirect") {
+        window.location.assign(result.paymentUrl);
+        redirectStarted = true;
+        return;
+      }
+      setOrderId(result.displayId ? String(result.displayId) : result.id);
     } catch (error) {
       setSubmitMessage(error instanceof Error ? error.message : "Не удалось сохранить checkout.");
     } finally {
-      setIsSubmitting(false);
+      if (!redirectStarted) {
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   };
 

@@ -7,6 +7,7 @@
  */
 
 import handler from "../tbank-payment-outcome";
+import { TBANK_PROVIDER_EVENT_ID } from "../../modules/tbank/provider-id";
 
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
 
@@ -37,7 +38,7 @@ function makeContainer(action: string, overrides: Record<string, unknown> = {}) 
 }
 
 /** Аргументы обработчика целиком: спред от `as never` не типизируется. */
-function makeArgs(container: unknown, provider = "tbank") {
+function makeArgs(container: unknown, provider = TBANK_PROVIDER_EVENT_ID) {
   return {
     event: { data: { provider, payload: { data: {}, headers: {} } } },
     container,

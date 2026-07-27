@@ -3,6 +3,7 @@ import { Modules, PaymentWebhookEvents } from "@medusajs/framework/utils";
 
 import { TBANK_NOTIFICATION_MODULE } from "../../../../modules/tbank-notifications";
 import type TbankNotificationModuleService from "../../../../modules/tbank-notifications/service";
+import { TBANK_PROVIDER_EVENT_ID } from "../../../../modules/tbank/provider-id";
 import { parseNotification } from "../../../../modules/tbank/lib/status";
 import { verifyNotificationToken } from "../../../../modules/tbank/lib/token";
 
@@ -137,7 +138,10 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
       {
         name: PaymentWebhookEvents.WebhookReceived,
         data: {
-          provider: "tbank",
+          // Payment Module восстанавливает runtime id как `pp_${provider}`.
+          // identifier сервиса `tbank` + config id `tbank` дают
+          // `pp_tbank_tbank`, поэтому событие обязано нести оба сегмента.
+          provider: TBANK_PROVIDER_EVENT_ID,
           payload: {
             data: req.body,
             rawData: req.rawBody,

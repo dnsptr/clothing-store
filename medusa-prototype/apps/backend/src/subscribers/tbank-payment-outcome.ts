@@ -2,6 +2,8 @@ import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework";
 import type { IPaymentModuleService, ProviderWebhookPayload } from "@medusajs/types";
 import { Modules, PaymentWebhookEvents } from "@medusajs/framework/utils";
 
+import { TBANK_PROVIDER_EVENT_ID } from "../modules/tbank/provider-id";
+
 /**
  * Отражение неуспешных исходов платежа.
  *
@@ -25,7 +27,7 @@ export default async function tbankPaymentOutcomeHandler({
   const input = event.data;
 
   // Событие общее для всех провайдеров — чужие пропускаем.
-  if (input?.provider !== "tbank") {
+  if (input?.provider !== TBANK_PROVIDER_EVENT_ID) {
     return;
   }
 
