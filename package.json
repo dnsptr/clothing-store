@@ -12,7 +12,9 @@
     "backend:dev": "npm --prefix medusa-prototype run backend:dev",
     "backend:build": "npm --prefix medusa-prototype run build",
     "backend:catalog": "npm --prefix medusa-prototype run catalog:import",
-    "backend:lint": "npm --prefix medusa-prototype run lint"
+    "backend:lint": "npm --prefix medusa-prototype run lint",
+    "integrations:check:cdek": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-cdek.mjs",
+    "integrations:check:tbank": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-tbank.mjs"
   },
   "dependencies": {
     "next": "16.2.12",

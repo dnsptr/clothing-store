@@ -15,6 +15,10 @@ FROM node:22.14.0-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
+COPY apps/backend/certificates/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
 COPY --from=builder /workspace/apps/backend/.medusa/server ./
 RUN npm install --omit=dev --no-audit --no-fund \
   && npm cache clean --force \
