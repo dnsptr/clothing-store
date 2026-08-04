@@ -71,16 +71,19 @@ async function main() {
     console.log("Signed CheckOrder request: OK");
     return;
   }
-  if (errorCode === "914" || errorCode === "407" || errorCode === "63") {
+  if (["914", "407", "63", "335"].includes(errorCode)) {
     console.log(`Credentials and signature: OK (expected missing-order response ${errorCode})`);
     return;
   }
-  if (errorCode === "204" || errorCode === "205" || errorCode === "2015") {
+  if (["204", "205", "501", "2015"].includes(errorCode)) {
     throw new Error(`credentials or signature rejected [${errorCode}]: ${payload?.Message || "no message"}`);
   }
+  const safeDetails = payload?.Details
+    ? String(payload.Details).replaceAll(terminalKey, "[redacted-terminal-key]")
+    : "";
   throw new Error(
     `unexpected API response [${errorCode}]: ${payload?.Message || "no message"}` +
-      (payload?.Details ? ` (${payload.Details})` : ""),
+      (safeDetails ? ` (${safeDetails})` : ""),
   );
 }
 

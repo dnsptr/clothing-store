@@ -26,8 +26,21 @@ order or courier intake.
 
 ## T-Bank
 
-The test environment uses a live terminal without the `DEMO` suffix and the
-test API base URL:
+T-Bank supports two different test flows:
+
+- A test terminal with the `DEMO` suffix uses the regular API URL.
+- A live terminal without the `DEMO` suffix uses the isolated test API URL and
+  requires the server IP to be allow-listed.
+
+For a `DEMO` terminal:
+
+```dotenv
+TBANK_TERMINAL_KEY=...DEMO
+TBANK_PASSWORD=...
+TBANK_API_BASE_URL=https://securepay.tinkoff.ru/v2
+```
+
+For a live terminal in the isolated test environment:
 
 ```dotenv
 TBANK_TERMINAL_KEY=...
@@ -41,12 +54,12 @@ Run the signed read-only request:
 npm run integrations:check:tbank
 ```
 
-The command calls `CheckOrder` with a unique non-existent order id. Error code
-`914` (payment not found) is expected and proves that the terminal and request
-signature were accepted. Codes `204`, `205`, or `2015` mean that the terminal,
-password, or signature is invalid.
+The command calls `CheckOrder` with a unique non-existent order id. Missing-order
+codes such as `335` or `914` are expected and prove that the terminal and request
+signature were accepted. Codes `204`, `205`, `501`, or `2015` mean that the
+terminal, password, environment, or signature is invalid.
 
-T-Bank requires the caller IP to be allow-listed for the test environment.
+T-Bank requires the caller IP to be allow-listed for the isolated test environment.
 Production backend requests originate from `5.42.97.122`; ask T-Bank support to
 allow that IP for `rest-api-test.tinkoff.ru`. An nginx `403` is the expected
 response until the allow-list is updated.
@@ -58,6 +71,7 @@ system CA bundle. TLS verification must never be disabled as a workaround.
 Official references:
 
 - https://developer.tbank.ru/eacq/intro/errors/test
+- https://developer.tbank.ru/eacq/intro/errors/test-cases
 - https://developer.tbank.ru/eacq/intro/certificates/
 - https://developer.tbank.ru/eacq/api/check-order
 - https://developer.tbank.ru/eacq/intro/developer/token
