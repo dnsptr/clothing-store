@@ -1,51 +1,45 @@
 # Mario Mikke Storefront
 
-Full-stack e-commerce application for a clothing brand, built with **Next.js** and **Medusa**.
+E-commerce storefront for **Mario Mikke**, built with **Next.js, React, TypeScript and Medusa**.
 
-The project includes a custom storefront, product catalog, cart and checkout flow, backed by a production Medusa deployment.
+The project combines a custom Next.js storefront with a Medusa e-commerce backend and production infrastructure.
 
-🌐 **[mariomikke.shop](https://www.mariomikke.shop)**
+**Live:** [mariomikke.shop](https://www.mariomikke.shop)
 
-> 🚧 Currently in active development
-
----
-
-## Preview
-
-![Mario Mikke Storefront](./docs/images/preview.png)
+> Currently in active development
 
 ---
 
 ## Features
 
 * Product catalog and categories
-* Product pages with variants and sizes
+* Product pages with variants
 * Product filtering
 * Shopping cart
 * Checkout flow
 * Product recommendations
-* Responsive interface
-* Medusa backend integration
-* Mock data mode for static demos
-* Server-side rendering and ISR
+* Responsive storefront
+* Medusa API integration
+* Mock catalog mode for static demos
+* Server-side rendering with ISR
 
 ---
 
 ## Tech Stack
 
-### Frontend
+**Frontend**
 
 `Next.js` · `React` · `TypeScript`
 
-### E-commerce & Backend
+**Backend & Data**
 
 `Medusa` · `PostgreSQL` · `Redis` · `REST API`
 
-### Infrastructure
+**Infrastructure**
 
 `Vercel` · `Timeweb Cloud` · `Caddy` · `GitHub Actions`
 
-### Tools
+**Tools**
 
 `Git` · `npm` · `Figma`
 
@@ -55,15 +49,15 @@ The project includes a custom storefront, product catalog, cart and checkout flo
 
 ```text
                     ┌─────────────────────┐
-                    │   Next.js Storefront │
-                    │     Vercel + ISR     │
+                    │  Next.js Storefront │
+                    │    Vercel + ISR     │
                     └──────────┬──────────┘
                                │
                                │ Medusa API
                                ▼
                     ┌─────────────────────┐
-                    │       Medusa         │
-                    │   Timeweb Cloud      │
+                    │       Medusa        │
+                    │   Timeweb Cloud     │
                     └──────────┬──────────┘
                                │
                      ┌─────────┴─────────┐
@@ -71,16 +65,11 @@ The project includes a custom storefront, product catalog, cart and checkout flo
                 PostgreSQL             Redis
 ```
 
-The storefront is deployed on **Vercel** and communicates with a production
-**Medusa** backend hosted on Timeweb Cloud.
+The storefront is deployed on **Vercel** and communicates with the production **Medusa** backend hosted on Timeweb Cloud.
 
-Product and catalog pages use server rendering with **Incremental Static
-Regeneration (ISR)**. Product pages are generated on demand and periodically
-revalidated, allowing newly created products to become available without
-redeploying the storefront.
+Catalog and product pages use server rendering with **Incremental Static Regeneration (ISR)**. Product pages are generated on the first request and periodically revalidated, allowing newly created products to become available without redeploying the storefront.
 
-The backend infrastructure uses a Timeweb Load Balancer with **Caddy**,
-**PostgreSQL** and **Redis**.
+The production backend uses a Timeweb Load Balancer, Caddy, PostgreSQL and Redis.
 
 ---
 
@@ -93,17 +82,11 @@ The backend infrastructure uses a Timeweb Load Balancer with **Caddy**,
 | Vercel        | `medusa`          | `npm run build`       | Production Medusa              |
 | Timeweb Cloud | —                 | —                     | Medusa + PostgreSQL + Redis    |
 
-### Production
-
-**Storefront:** [mariomikke.shop](https://www.mariomikke.shop)
-
-**Backend:** `api.mariomikke.shop`
-
 ---
 
-## Rendering
+## Build Targets
 
-The project supports two different build targets.
+The project has two deployable storefront targets.
 
 ### Production / Vercel
 
@@ -111,11 +94,9 @@ The project supports two different build targets.
 npm run build
 ```
 
-Uses server rendering with ISR.
+The production build uses server rendering with ISR.
 
-Product pages are generated on the first request and periodically
-revalidated, allowing products created through Medusa Admin to become
-available without rebuilding the application.
+Product pages are generated on demand and periodically revalidated, allowing products created through Medusa Admin to become available without rebuilding the application.
 
 Next.js image optimization is enabled for production.
 
@@ -127,8 +108,7 @@ npm run build:pages
 
 Creates a static export using mock catalog data.
 
-The GitHub Pages build is intended as a frontend demo and therefore
-does not provide checkout functionality.
+This build is intended as a frontend demo and does not provide checkout functionality.
 
 ---
 
@@ -157,7 +137,7 @@ npm run backend:dev
 
 ### 4. Configure the storefront
 
-Create `.env.local` based on `.env.template`:
+Create `.env.local` from `.env.template`:
 
 ```env
 NEXT_PUBLIC_DATA_MODE=medusa
@@ -173,11 +153,15 @@ npm run dev
 
 Storefront:
 
-`http://localhost:3000`
+```text
+http://localhost:3000
+```
 
 Medusa Admin:
 
-`http://localhost:9000/app`
+```text
+http://localhost:9000/app
+```
 
 ---
 
@@ -211,7 +195,7 @@ Backend deployment, HTTPS, firewall configuration and recovery procedures are do
 
 ## Status
 
-The project is currently under active development.
+**Active development**
 
-Current focus includes improving the storefront, e-commerce flows and production infrastructure.
+The project is being actively developed. Current work focuses on improving the storefront, e-commerce flows and production infrastructure.
 
