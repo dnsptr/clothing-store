@@ -16,7 +16,10 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 COPY apps/backend/certificates/ /usr/local/share/ca-certificates/
-RUN update-ca-certificates
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && update-ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 COPY --from=builder /workspace/apps/backend/.medusa/server ./
