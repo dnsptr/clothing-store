@@ -215,12 +215,3 @@ The project is currently under active development.
 
 Current focus includes improving the storefront, e-commerce flows and production infrastructure.
 
----
-
-## Author
-
-**Denis Patraev**
-
-Frontend Developer
-
-[GitHub](https://github.com/dnsptr) · [Telegram](https://t.me/cailiyu)
