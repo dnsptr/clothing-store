@@ -1,0 +1,8 @@
+TBANK_API_BASE_URL=<redacted>
+TBANK_ENABLED=<redacted>
+TBANK_FAIL_URL=<redacted>
+TBANK_NOTIFICATION_URL=<redacted>
+TBANK_PASSWORD=<redacted>
+TBANK_PAYMENT_PROVIDER_ID=<redacted>
+TBANK_SUCCESS_URL=<redacted>
+TBANK_TERMINAL_KEY=<redacted>

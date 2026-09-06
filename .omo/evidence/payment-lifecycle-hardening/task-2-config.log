@@ -1,0 +1,91 @@
+Task 2 production T-Bank configuration evidence
+Generated: 2026-09-06
+Worktree: C:\studying\work\clothing-store\.slim\worktrees\payment-lifecycle-baseline
+
+SOURCE RECEIPT (current after independent-review remediation)
+- Parser allow-list and required row: medusa-prototype/apps/backend/src/modules/tbank/config.ts:10-29
+- Parser entry point: medusa-prototype/apps/backend/src/modules/tbank/config.ts:69
+- Payment registration resolver: medusa-prototype/apps/backend/src/modules/tbank/config.ts:105
+- Startup invocation before module graph export: medusa-prototype/apps/backend/medusa-config.ts:10
+- Resolved payment modules included in graph: medusa-prototype/apps/backend/medusa-config.ts:262
+- Compose propagation names: medusa-prototype/compose.production.yml:61-68
+- Approved backend template callbacks: medusa-prototype/apps/backend/.env.template:40-42
+- Backend registration/Compose/template assertions: medusa-prototype/apps/backend/src/lib/__tests__/backend-config.unit.spec.ts:20,29,55,91
+- Storefront gate function: src/lib/payment-config.ts:10
+- Production storefront gate call: src/lib/medusa.ts:238
+- Storefront gate matrix: src/lib/__tests__/payment-config.unit.test.ts:6-26
+
+RAW ARTIFACT RECEIPTS
+Each directory contains command.txt, command.stdout.log, command.stderr.log,
+command.exit-code.txt, cleanup.log, and post-command-processes.json.
+- .omo/evidence/payment-lifecycle-hardening/task-2-config/backend-tests/
+- .omo/evidence/payment-lifecycle-hardening/task-2-config/storefront-gate/
+- .omo/evidence/payment-lifecycle-hardening/task-2-config/targeted-tsc/
+- .omo/evidence/payment-lifecycle-hardening/task-2-config/root-typecheck/
+- .omo/evidence/payment-lifecycle-hardening/task-2-config/compose-redacted/
+
+BACKEND TEST RAW RESULT
+PASS src/modules/tbank/__tests__/config.unit.spec.ts
+PASS src/lib/__tests__/backend-config.unit.spec.ts
+Test Suites: 2 passed, 2 total
+Tests:       33 passed, 33 total
+Snapshots:   0 total
+EXIT_CODE=0
+
+The 33 assertions cover absent/false with stale values, malformed activation,
+every partial enabled row, wrong provider, localhost/HTTP/arbitrary origins,
+wrong callback paths, both approved API endpoints, no-secret errors, payment
+module omission/inclusion, rendered Compose propagation, and template parity.
+
+STOREFRONT GATE RAW RESULT
+TAP version 13
+# tests 6
+# suites 1
+# pass 6
+# fail 0
+EXIT_CODE=0
+
+The matrix covers missing, arbitrary, production system-provider, development
+system-provider with and without the escape hatch, and canonical T-Bank modes.
+
+TARGETED STRICT TYPESCRIPT
+stdout: empty
+stderr: empty
+EXIT_CODE=0
+
+ROOT TYPECHECK RAW RESULT
+> clothing-store@0.1.0 typecheck
+> tsc --noEmit
+EXIT_CODE=0
+
+REDACTED COMPOSE RAW RESULT
+TBANK_API_BASE_URL=<redacted>
+TBANK_ENABLED=<redacted>
+TBANK_FAIL_URL=<redacted>
+TBANK_NOTIFICATION_URL=<redacted>
+TBANK_PASSWORD=<redacted>
+TBANK_PAYMENT_PROVIDER_ID=<redacted>
+TBANK_SUCCESS_URL=<redacted>
+TBANK_TERMINAL_KEY=<redacted>
+EXIT_CODE=0
+
+PROBE RECEIPT
+- Dirty worktree: Task 1 package, lockfile, Playwright, fixture, harness, and
+  .gitignore changes remained unstaged throughout Task 2 staging preparation.
+- Malformed/partial/unsafe rows: committed parser matrix fails closed.
+- Stale disabled values: committed parser and module-omission assertions pass.
+- Stale evidence: this source receipt was regenerated after final edits.
+- Misleading success: assertions inspect semantic module arrays and parsed
+  Compose JSON, not command text or an exit code alone.
+- No-secret exposure: the committed Compose fixture contains synthetic values;
+  the evidence renderer emits names and <redacted> only. No production env file
+  or credential was read.
+- Docker: only client-side `docker compose config` ran. No engine, container,
+  network, volume, database, backend, or bank operation was invoked.
+- Cleanup: all command receipts report no surviving tracked child processes;
+  no generated .medusa output remains from Task 2.
+
+DONECLAIM
+CONFIRMED for Task 2 scope: parser rows, startup registration include/omit,
+eight-name Compose propagation, approved template callbacks, and storefront gate
+modes are enforced by committed tests with reproducible redacted evidence.

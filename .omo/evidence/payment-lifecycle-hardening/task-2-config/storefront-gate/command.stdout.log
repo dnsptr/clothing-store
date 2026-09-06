@@ -1,0 +1,53 @@
+TAP version 13
+# Subtest: storefront checkout provider gate
+    # Subtest: missing provider
+    ok 1 - missing provider
+      ---
+      duration_ms: 2.6266
+      type: 'test'
+      ...
+    # Subtest: arbitrary provider
+    ok 2 - arbitrary provider
+      ---
+      duration_ms: 0.2203
+      type: 'test'
+      ...
+    # Subtest: system provider in production
+    ok 3 - system provider in production
+      ---
+      duration_ms: 0.2544
+      type: 'test'
+      ...
+    # Subtest: system provider in development without escape hatch
+    ok 4 - system provider in development without escape hatch
+      ---
+      duration_ms: 0.1956
+      type: 'test'
+      ...
+    # Subtest: system provider in development with escape hatch
+    ok 5 - system provider in development with escape hatch
+      ---
+      duration_ms: 0.1901
+      type: 'test'
+      ...
+    # Subtest: canonical T-Bank provider
+    ok 6 - canonical T-Bank provider
+      ---
+      duration_ms: 0.1357
+      type: 'test'
+      ...
+    1..6
+ok 1 - storefront checkout provider gate
+  ---
+  duration_ms: 6.2033
+  type: 'suite'
+  ...
+1..1
+# tests 6
+# suites 1
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9077.1982

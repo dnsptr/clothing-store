@@ -1,6 +1,12 @@
 import { unstable_rethrow } from "next/navigation";
 
 import type { Product } from "../data/mockData";
+import {
+  isCheckoutEnabledForConfiguration,
+  SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID,
+} from "./payment-config";
+
+export { SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID, TBANK_PAYMENT_PROVIDER_ID } from "./payment-config";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -199,8 +205,6 @@ export const isMedusaConfigured =
  * не заплатил, и по которому не пробит чек. В production он допустим только как
  * значение по умолчанию, которое витрина обязана распознать и отвергнуть.
  */
-export const SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID = "pp_system_default";
-
 // Идентификатор платёжного провайдера и производный от него флаг оформления
 // заказа читаются ТОЛЬКО из NEXT_PUBLIC_-переменной — в отличие от каталога,
 // который резолвится server-first.
@@ -231,9 +235,11 @@ const isTestCheckoutAllowed =
  * `completeCheckout` отказывается работать: без провайдера заказ создаётся без
  * оплаты, резервирует остаток и не сопровождается фискальным чеком (54-ФЗ).
  */
-export const isCheckoutEnabled =
-  medusaPaymentProviderId !== "" &&
-  (medusaPaymentProviderId !== SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID || isTestCheckoutAllowed);
+export const isCheckoutEnabled = isCheckoutEnabledForConfiguration({
+  providerId: medusaPaymentProviderId,
+  nodeEnvironment: process.env.NODE_ENV,
+  allowTestCheckout: isTestCheckoutAllowed,
+});
 
 // --- Конфигурационные предохранители ----------------------------------------
 // Оба срабатывают только на сервере. В браузере бросать на уровне модуля нельзя:

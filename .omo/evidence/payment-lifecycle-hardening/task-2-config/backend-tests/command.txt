@@ -1,0 +1,1 @@
+C:\Program Files\nodejs\node.exe ..\..\node_modules\jest\bin\jest.js src/modules/tbank/__tests__/config.unit.spec.ts src/lib/__tests__/backend-config.unit.spec.ts --config jest.config.js --runInBand --forceExit --no-color

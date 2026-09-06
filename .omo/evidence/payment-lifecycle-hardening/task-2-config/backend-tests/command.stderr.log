@@ -1,0 +1,9 @@
+PASS src/modules/tbank/__tests__/config.unit.spec.ts
+PASS src/lib/__tests__/backend-config.unit.spec.ts
+
+Test Suites: 2 passed, 2 total
+Tests:       33 passed, 33 total
+Snapshots:   0 total
+Time:        2.607 s, estimated 4 s
+Ran all test suites matching /src\\modules\\tbank\\__tests__\\config.unit.spec.ts|src\\lib\\__tests__\\backend-config.unit.spec.ts/i.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?

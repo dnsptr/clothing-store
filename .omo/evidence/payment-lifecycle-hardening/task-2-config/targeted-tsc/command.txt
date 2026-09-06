@@ -1,0 +1,1 @@
+C:\Program Files\nodejs\node.exe node_modules/typescript/bin/tsc --noEmit --strict --esModuleInterop --skipLibCheck --module commonjs --moduleResolution node --target ES2022 --types jest,node apps/backend/src/modules/tbank/config.ts apps/backend/src/modules/tbank/__tests__/config.unit.spec.ts apps/backend/src/lib/__tests__/backend-config.unit.spec.ts ../src/lib/payment-config.ts
