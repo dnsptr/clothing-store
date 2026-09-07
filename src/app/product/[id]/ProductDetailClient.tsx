@@ -9,7 +9,7 @@ import { useCart } from "../../../context/CartContext";
 import SizeGuideModal from "../../../components/SizeGuideModal";
 import { productImageSrc, withBasePath } from "../../../lib/assets";
 import { formatPrice } from "../../../lib/format";
-import { fetchMedusaProductByHandle, isMedusaConfigured } from "../../../lib/medusa";
+import { fetchMedusaProductByFrontendId, isMedusaConfigured } from "../../../lib/medusa";
 import styles from "./product.module.css";
 
 function BookmarkIcon({ active }: { active: boolean }) {
@@ -114,8 +114,7 @@ export default function ProductDetailClient({
     if (!shouldSelfFetch || resolvedForThisId || erroredForThisId) return;
 
     const controller = new AbortController();
-    // The handle convention mirrors the mock/import mapping: `mario-mikke-<id>`.
-    fetchMedusaProductByHandle(`mario-mikke-${productId}`, controller.signal)
+    fetchMedusaProductByFrontendId(productId, controller.signal)
       .then((found) => {
         if (controller.signal.aborted) return;
         setSelfResult({ id: productId, product: found });
