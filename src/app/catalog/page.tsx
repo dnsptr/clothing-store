@@ -33,6 +33,12 @@ const AVAILABILITY_FILTERS = [
 // FE-004 A3: products fetched per page in medusa mode.
 const CATALOG_PAGE_SIZE = 24;
 
+const SORT_OPTIONS = [
+  { value: "default", label: "По умолчанию" },
+  { value: "price-low-to-high", label: "Цена: по возрастанию" },
+  { value: "price-high-to-low", label: "Цена: по убыванию" },
+];
+
 function CatalogContent() {
   const {
     products: contextProducts,
@@ -53,6 +59,19 @@ function CatalogContent() {
 
   const [sortBy, setSortBy] = useState("default");
   const [openFacet, setOpenFacet] = useState<string | null>(null);
+  const sortRef = useRef<HTMLDivElement>(null);
+  const sortButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (openFacet !== "sort") return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !sortRef.current?.contains(event.target)) {
+        setOpenFacet(null);
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [openFacet]);
 
   // --- FE-004 A3/A5: catalog data source -----------------------------------
   // Mock mode keeps the previous behaviour: the global context holds the full
@@ -454,19 +473,54 @@ function CatalogContent() {
                 </div>
               </div>
 
-              <label className={styles.sortControl}>
-                <span className={styles.sortLabel}>Сортировка</span>
-                <select
-                  className={styles.sortSelect}
-                  value={sortBy}
-                  onChange={(event) => setSortBy(event.target.value)}
-                  aria-label="Сортировка товаров"
+              <div
+                ref={sortRef}
+                className={styles.sortControl}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setOpenFacet((current) => current === "sort" ? null : current);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && openFacet === "sort") {
+                    event.preventDefault();
+                    setOpenFacet(null);
+                    sortButtonRef.current?.focus();
+                  }
+                }}
+              >
+                <button
+                  ref={sortButtonRef}
+                  type="button"
+                  className={`${styles.facetButton} ${styles.sortButton} ${openFacet === "sort" || sortBy !== "default" ? styles.facetButtonActive : ""}`}
+                  onClick={() => setOpenFacet(openFacet === "sort" ? null : "sort")}
+                  aria-expanded={openFacet === "sort"}
+                  aria-controls="catalog-sort-options"
+                  aria-label={`Сортировка товаров: ${SORT_OPTIONS.find((option) => option.value === sortBy)?.label}`}
                 >
-                  <option value="default">По умолчанию</option>
-                  <option value="price-low-to-high">Цена: по возрастанию</option>
-                  <option value="price-high-to-low">Цена: по убыванию</option>
-                </select>
-              </label>
+                  {SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
+                  <span className={styles.facetChevron} aria-hidden="true" />
+                </button>
+                {openFacet === "sort" && (
+                  <div id="catalog-sort-options" className={`${styles.facetPanel} ${styles.sortPanel}`}>
+                    {SORT_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`${styles.facetOption} ${sortBy === option.value ? styles.facetOptionActive : ""}`}
+                        aria-pressed={sortBy === option.value}
+                        onClick={() => {
+                          setSortBy(option.value);
+                          setOpenFacet(null);
+                          sortButtonRef.current?.focus();
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

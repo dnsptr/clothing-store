@@ -175,26 +175,19 @@
   flex: 0 0 auto;
 }
 
-.sortLabel {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
+.sortButton {
+  width: 222px;
 }
 
-.sortSelect {
-  min-width: 160px;
-  padding: 0 22px 0 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 14.5px;
-  line-height: 24px;
-  letter-spacing: 0;
-  cursor: pointer;
+.sortPanel {
+  left: auto;
+  right: 0;
+  width: 100%;
+}
+
+.sortControl button:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: -2px;
 }
 
 .grid {
