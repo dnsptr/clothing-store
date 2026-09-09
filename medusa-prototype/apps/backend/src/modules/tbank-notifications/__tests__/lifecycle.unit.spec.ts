@@ -46,26 +46,29 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
     expect(canonicalNotificationHash(unknownInjection)).toBe(canonicalNotificationHash(business));
   });
 
-  it("correlates an amount-less cancellation but rejects a provided wrong amount", () => {
-    const cancellation = toAuthenticatedNotification({
-      TerminalKey: "terminal",
-      OrderId: SESSION.id,
-      PaymentId: 3456789,
-      Status: "CANCELED",
-      Success: false,
-    });
+  it.each(["CANCELED", "REJECTED"])(
+    "correlates amount-less %s but rejects a provided wrong amount",
+    (status) => {
+      const cancellation = toAuthenticatedNotification({
+        TerminalKey: "terminal",
+        OrderId: SESSION.id,
+        PaymentId: 3456789,
+        Status: status,
+        Success: false,
+      });
     const wrongAmount = toAuthenticatedNotification({
       TerminalKey: "terminal",
       OrderId: SESSION.id,
       PaymentId: 3456789,
-      Status: "CANCELED",
+        Status: status,
       Success: false,
       Amount: 1,
     });
 
     expect(correlateNotification(cancellation, SESSION as never, "terminal")).toEqual({ kind: "correlated" });
     expect(correlateNotification(wrongAmount, SESSION as never, "terminal")).toEqual({ kind: "mismatch", fields: ["amount"] });
-  });
+    },
+  );
 
   it.each([
     ["NEW", true],

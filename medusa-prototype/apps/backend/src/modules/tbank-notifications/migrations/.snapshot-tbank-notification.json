@@ -5,6 +5,7 @@
     {
       "columns": {
         "id": {"name":"id","type":"text","unsigned":false,"autoincrement":false,"primary":true,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "payment_attempt_id": {"name":"payment_attempt_id","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":true,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
         "terminal_key": {"name":"terminal_key","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
         "payment_id": {"name":"payment_id","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
         "status": {"name":"status","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
@@ -36,6 +37,29 @@
         {"keyName":"IDX_tbank_notification_order_id","columnNames":[],"composite":false,"constraint":false,"primary":false,"unique":false,"expression":"CREATE INDEX IF NOT EXISTS \"IDX_tbank_notification_order_id\" ON \"tbank_notification\" (\"order_id\") WHERE deleted_at IS NULL"},
         {"keyName":"IDX_tbank_notification_lifecycle_state_next_attempt_at_lease_expires_at","columnNames":[],"composite":false,"constraint":false,"primary":false,"unique":false,"expression":"CREATE INDEX IF NOT EXISTS \"IDX_tbank_notification_lifecycle_state_next_attempt_at_lease_expires_at\" ON \"tbank_notification\" (\"lifecycle_state\", \"next_attempt_at\", \"lease_expires_at\") WHERE deleted_at IS NULL"},
         {"keyName":"tbank_notification_pkey","columnNames":["id"],"composite":false,"constraint":true,"primary":true,"unique":true}
+      ],
+      "checks": [], "foreignKeys": {
+        "FK_tbank_notification_payment_attempt_id": {"constraintName":"FK_tbank_notification_payment_attempt_id","columnNames":["payment_attempt_id"],"localTableName":"public.tbank_notification","referencedColumnNames":["id"],"referencedTableName":"public.tbank_payment_attempt","updateRule":"cascade","deleteRule":"restrict"}
+      }, "nativeEnums": {}
+    },
+    {
+      "columns": {
+        "id": {"name":"id","type":"text","unsigned":false,"autoincrement":false,"primary":true,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "payment_session_id": {"name":"payment_session_id","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "provider_id": {"name":"provider_id","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "terminal_key": {"name":"terminal_key","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "order_id": {"name":"order_id","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "expected_amount_kopecks": {"name":"expected_amount_kopecks","type":"integer","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"integer"},
+        "currency_code": {"name":"currency_code","type":"text","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":null,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"text"},
+        "created_at": {"name":"created_at","type":"timestamptz","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":6,"precision":null,"scale":null,"default":"now()","comment":null,"enumItems":[],"mappedType":"datetime"},
+        "updated_at": {"name":"updated_at","type":"timestamptz","unsigned":false,"autoincrement":false,"primary":false,"nullable":false,"unique":false,"length":6,"precision":null,"scale":null,"default":"now()","comment":null,"enumItems":[],"mappedType":"datetime"},
+        "deleted_at": {"name":"deleted_at","type":"timestamptz","unsigned":false,"autoincrement":false,"primary":false,"nullable":true,"unique":false,"length":6,"precision":null,"scale":null,"default":null,"comment":null,"enumItems":[],"mappedType":"datetime"}
+      },
+      "name": "tbank_payment_attempt", "schema": "public",
+      "indexes": [
+        {"keyName":"IDX_tbank_payment_attempt_payment_session_id_unique","columnNames":[],"composite":false,"constraint":false,"primary":false,"unique":false,"expression":"CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_tbank_payment_attempt_payment_session_id_unique\" ON \"tbank_payment_attempt\" (\"payment_session_id\") WHERE deleted_at IS NULL"},
+        {"keyName":"IDX_tbank_payment_attempt_order_id_unique","columnNames":[],"composite":false,"constraint":false,"primary":false,"unique":false,"expression":"CREATE UNIQUE INDEX IF NOT EXISTS \"IDX_tbank_payment_attempt_order_id_unique\" ON \"tbank_payment_attempt\" (\"order_id\") WHERE deleted_at IS NULL"},
+        {"keyName":"tbank_payment_attempt_pkey","columnNames":["id"],"composite":false,"constraint":true,"primary":true,"unique":true}
       ],
       "checks": [], "foreignKeys": {}, "nativeEnums": {}
     },

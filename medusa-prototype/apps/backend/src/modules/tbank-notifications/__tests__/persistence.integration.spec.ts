@@ -30,7 +30,9 @@ async function applyQueries(client: Client, migration: Migration20260726153050 |
 
 async function rebuildSchema(client: Client): Promise<void> {
   await client.query('drop table if exists "tbank_notification_conflict" cascade');
+  await client.query('drop table if exists "tbank_payment_attempt" cascade');
   await client.query('drop table if exists "tbank_notification" cascade');
+  await client.query('drop function if exists "tbank_payment_attempt_immutable_correlation"()');
   const baseline = new Migration20260726153050({} as never, {} as never);
   await baseline.up();
   await applyQueries(client, baseline);
@@ -70,6 +72,22 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
   });
 
   it("applies, rolls back, and reapplies with snapshot-compatible index names", async () => {
+    await database.query(
+      `INSERT INTO tbank_payment_attempt
+        (id, payment_session_id, provider_id, terminal_key, order_id, expected_amount_kopecks, currency_code)
+       VALUES ('attempt-1', 'session-1', 'pp_tbank_tbank', 'terminal', 'order-1', 100, 'rub')`,
+    );
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, payment_attempt_id, terminal_key, payment_id, status, order_id, amount_kopecks,
+         currency_code, success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES ('related', 'attempt-1', 'terminal', 'payment-1', 'CONFIRMED', 'order-1',
+               100, 'rub', true, repeat('a', 64), 'pending', 0)`,
+    );
+    await expect(database.query(
+      `UPDATE tbank_payment_attempt SET expected_amount_kopecks = 200 WHERE id = 'attempt-1'`,
+    )).rejects.toThrow("T-Bank payment attempt correlation fields are immutable");
+
     const migration = new Migration20260909120000({} as never, {} as never);
     await migration.down();
     await applyQueries(database, migration);
@@ -93,6 +111,31 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
       "IDX_tbank_notification_terminal_key_payment_id_status_unique",
       "IDX_tbank_notification_conflict_payment_id_status",
     ]));
+  });
+
+  it("refuses rollback transactionally when legacy and redelivered rows collide", async () => {
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES
+        ('legacy-copy', 'legacy', 'same-payment', 'CONFIRMED', 'legacy-order', 100, 'rub', true, repeat('a', 64), 'processed', 0),
+        ('redelivery', 'terminal', 'same-payment', 'CONFIRMED', 'new-order', 100, 'rub', true, repeat('b', 64), 'pending', 0)`,
+    );
+    const migration = new Migration20260909120000({} as never, {} as never);
+    await migration.down();
+    await database.query("BEGIN");
+
+    await expect(applyQueries(database, migration)).rejects.toThrow(
+      "cannot rollback T-Bank inbox: duplicate legacy payment/status rows",
+    );
+    await database.query("ROLLBACK");
+    const preserved = await database.query(
+      `SELECT count(*)::int AS rows, count(terminal_key)::int AS correlated_rows
+       FROM tbank_notification WHERE payment_id = 'same-payment'`,
+    );
+
+    expect(preserved.rows[0]).toEqual({ rows: 2, correlated_rows: 2 });
   });
 
   it("gives competing claims different rows", async () => {

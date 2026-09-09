@@ -3,6 +3,7 @@ import type { EntityManager } from "@medusajs/framework/mikro-orm/knex";
 import { InjectManager, MedusaContext, MedusaService } from "@medusajs/framework/utils";
 
 import { INBOX_LEASE_MS, MAX_INBOX_ATTEMPTS } from "./lifecycle";
+import TbankPaymentAttempt from "./models/tbank-payment-attempt";
 import TbankNotification from "./models/tbank-notification";
 import TbankNotificationConflict from "./models/tbank-notification-conflict";
 
@@ -25,6 +26,7 @@ export class InboxClaimLimitError extends Error {
 }
 
 class TbankNotificationModuleService extends MedusaService({
+  TbankPaymentAttempt,
   TbankNotification,
   TbankNotificationConflict,
 }) {

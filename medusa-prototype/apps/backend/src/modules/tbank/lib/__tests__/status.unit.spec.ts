@@ -164,10 +164,17 @@ describe("parseNotification", () => {
     expect(parseNotification(withoutAmount).amountKopecks).toBe(0);
   });
 
-  it("Success !== true даёт success: false", () => {
+  it("принимает Success только как обязательный boolean", () => {
+    expect(parseNotification({ ...base, Success: true }).success).toBe(true);
     expect(parseNotification({ ...base, Success: false }).success).toBe(false);
-    expect(parseNotification({ ...base, Success: "true" }).success).toBe(false);
   });
+
+  it.each([undefined, "true", "false", 1, 0, null])(
+    "отвергает отсутствующий или не-boolean Success: %p",
+    (success) => {
+      expect(() => parseNotification({ ...base, Success: success })).toThrow("Success");
+    },
+  );
 
   it("переносит диагностику отказа", () => {
     const parsed = parseNotification({

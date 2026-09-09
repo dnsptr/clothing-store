@@ -96,7 +96,8 @@ export function correlateNotification(
   if (session.provider_id !== TBANK_PAYMENT_PROVIDER_ID) mismatches.push("provider");
   if (notification.paymentId !== data["paymentId"]) mismatches.push("PaymentId");
   if (notification.orderId !== session.id || notification.orderId !== data["orderId"]) mismatches.push("OrderId");
-  if (notification.amountProvided || notification.status !== "CANCELED") {
+  const permitsMissingAmount = notification.status === "CANCELED" || notification.status === "REJECTED";
+  if (notification.amountProvided || !permitsMissingAmount) {
     try {
       if (notification.amountKopecks !== rublesToKopecks(session.amount)) mismatches.push("amount");
     } catch (error) {

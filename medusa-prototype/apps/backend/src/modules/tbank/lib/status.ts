@@ -207,12 +207,16 @@ export function parseNotification(
   const paymentId = payload["PaymentId"];
   const status = payload["Status"];
   const amount = payload["Amount"];
+  const success = payload["Success"];
 
   if (typeof orderId !== "string" || orderId.length === 0) {
     throw new Error("TBank notification: отсутствует OrderId");
   }
   if (typeof status !== "string" || status.length === 0) {
     throw new Error("TBank notification: отсутствует Status");
+  }
+  if (typeof success !== "boolean") {
+    throw new Error("TBank notification: отсутствует или некорректен Success");
   }
 
   // PaymentId банк присылает и числом, и строкой в зависимости от метода.
@@ -245,7 +249,7 @@ export function parseNotification(
     paymentId: normalizedPaymentId,
     status,
     amountKopecks,
-    success: payload["Success"] === true,
+    success,
     errorCode:
       typeof payload["ErrorCode"] === "string" ? payload["ErrorCode"] : undefined,
     message:

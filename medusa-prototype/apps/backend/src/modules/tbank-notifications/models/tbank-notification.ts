@@ -1,6 +1,7 @@
 import { model } from "@medusajs/framework/utils";
 
 import { INBOX_LIFECYCLE_STATES } from "../lifecycle";
+import TbankPaymentAttempt from "./tbank-payment-attempt";
 
 /**
  * Журнал обработанных нотификаций Т-Банка.
@@ -24,6 +25,7 @@ const TbankNotification = model
     { name: "TbankNotification", tableName: "tbank_notification" },
     {
       id: model.id({ prefix: "tbnotif" }).primaryKey(),
+      payment_attempt: model.belongsTo(() => TbankPaymentAttempt, { mappedBy: "notifications" }).nullable(),
       terminal_key: model.text(),
       /** `PaymentId` банка. Приходит и числом, и строкой — храним строкой. */
       payment_id: model.text(),

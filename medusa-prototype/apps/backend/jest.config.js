@@ -35,7 +35,10 @@ module.exports = {
 if (process.env.TEST_TYPE === "integration:http") {
   module.exports.testMatch = ["**/integration-tests/http/*.spec.[jt]s"];
 } else if (process.env.TEST_TYPE === "integration:modules") {
-  module.exports.testMatch = ["**/src/modules/*/__tests__/**/*.[jt]s"];
+  module.exports.testMatch = [
+    "**/src/modules/*/__tests__/**/*.[jt]s",
+    "**/src/api/**/__tests__/**/*.persistence.integration.spec.[jt]s",
+  ];
   // Юнит-тесты модулей живут в тех же каталогах, но не нуждаются ни в БД, ни в
   // Redis. Без этого исключения `test:integration:modules` поднимал бы
   // окружение ради тестов, которым оно не нужно.

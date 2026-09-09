@@ -13,6 +13,9 @@ describe("T-Bank notification inbox migration", () => {
     expect(sql).toContain('"last_error_at" timestamptz');
     expect(sql).toContain('"attempt_count" between 0 and 5');
     expect(sql).toContain('create table "tbank_notification_conflict"');
+    expect(sql).toContain('create table "tbank_payment_attempt"');
+    expect(sql).toContain('"payment_attempt_id" text');
+    expect(sql).toContain('references "tbank_payment_attempt" ("id")');
     expect(sql).toContain('"terminal_key", "payment_id", "status"');
     expect(sql).toContain('"IDX_tbank_notification_conflict_payment_id_status"');
   });
@@ -24,6 +27,8 @@ describe("T-Bank notification inbox migration", () => {
     const sql = migration.getQueries().join("\n");
 
     expect(sql).toContain('drop table if exists "tbank_notification_conflict"');
+    expect(sql).toContain("cannot rollback T-Bank inbox: duplicate legacy payment/status rows");
+    expect(sql).toContain('drop table if exists "tbank_payment_attempt"');
     expect(sql).toContain('drop constraint if exists "CHK_tbank_notification_lifecycle"');
     expect(sql).toContain('drop column if exists "terminal_key"');
     expect(sql).toContain('"IDX_tbank_notification_payment_id_status_unique"');
