@@ -1,72 +1,24 @@
-/**
- * Тесты роута нотификаций — без БД и без сети.
- *
- * Проверяется порядок операций, а не интеграция: подпись раньше журнала,
- * журнал раньше ответа `OK`, событие после журнала. Каждый из этих порядков
- * защищает от конкретной атаки или потери платежа, и перепутать их легко.
- */
-
 import { POST } from "../route";
+import { canonicalNotificationHash } from "../../../../../modules/tbank-notifications/lifecycle";
 import { generateToken } from "../../../../../modules/tbank/lib/token";
 
 const PASSWORD = "TinkoffBankTest";
-
+const TERMINAL = "TinkoffBankTest";
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
 
-function makeNotifications(overrides: Record<string, unknown> = {}) {
-  return {
-    listTbankNotifications: jest.fn().mockResolvedValue([]),
-    createTbankNotifications: jest.fn().mockResolvedValue({}),
-    ...overrides,
-  };
-}
-
-function makeReq(body: Record<string, unknown>, notifications: unknown, eventBus: unknown) {
-  return {
-    body,
-    rawBody: Buffer.from(JSON.stringify(body)),
-    headers: {},
-    scope: {
-      resolve: (key: string) => {
-        if (key === "logger") return logger;
-        if (key === "tbankNotification") return notifications;
-        return eventBus;
-      },
-    },
-  } as never;
-}
-
-type ResMock = {
-  statusCode: number;
-  body: unknown;
-  status: jest.Mock;
-  send: jest.Mock;
+const SESSION = {
+  id: "payses_01JABCDEF",
+  provider_id: "pp_tbank_tbank",
+  currency_code: "rub",
+  amount: 18990,
+  status: "pending_authorization",
+  data: { paymentId: "3456789", orderId: "payses_01JABCDEF", status: "NEW" },
 };
 
-function makeRes(): ResMock {
-  const res: ResMock = {
-    statusCode: 200,
-    body: undefined,
-    status: jest.fn(),
-    send: jest.fn(),
-  };
-  // Реализации навешиваются после создания объекта: ссылаться на `res` внутри
-  // его собственного литерала нельзя — тип получился бы рекурсивным.
-  res.status.mockImplementation((code: number) => {
-    res.statusCode = code;
-    return res;
-  });
-  res.send.mockImplementation((payload: unknown) => {
-    res.body = payload;
-    return res;
-  });
-  return res;
-}
-
-function signed(overrides: Record<string, unknown> = {}) {
+function signed(overrides: Readonly<Record<string, unknown>> = {}) {
   const body: Record<string, unknown> = {
-    TerminalKey: "TinkoffBankTest",
-    OrderId: "payses_01JABCDEF",
+    TerminalKey: TERMINAL,
+    OrderId: SESSION.id,
     PaymentId: 3456789,
     Status: "CONFIRMED",
     Amount: 1899000,
@@ -77,203 +29,227 @@ function signed(overrides: Record<string, unknown> = {}) {
   return body;
 }
 
+function makeNotifications(overrides: Readonly<Record<string, unknown>> = {}) {
+  return {
+    listTbankNotifications: jest.fn().mockResolvedValue([]),
+    createTbankNotifications: jest.fn().mockResolvedValue({ id: "tbnotif_1" }),
+    createTbankNotificationConflicts: jest.fn().mockResolvedValue({ id: "tbconf_1" }),
+    ...overrides,
+  };
+}
+
+function makePayment(overrides: Readonly<Record<string, unknown>> = {}) {
+  return { retrievePaymentSession: jest.fn().mockResolvedValue(SESSION), ...overrides };
+}
+
+function makeReq(
+  body: Record<string, unknown>,
+  notifications: ReturnType<typeof makeNotifications>,
+  payment: ReturnType<typeof makePayment>,
+  eventBus = { emit: jest.fn() },
+) {
+  return {
+    body,
+    scope: {
+      resolve: (key: string) => {
+        if (key === "logger") return logger;
+        if (key === "tbankNotification") return notifications;
+        if (key === "payment") return payment;
+        return eventBus;
+      },
+    },
+  } as never;
+}
+
+function makeRes() {
+  const result: { statusCode: number; body?: unknown; status: jest.Mock; send: jest.Mock } = {
+    statusCode: 200,
+    status: jest.fn(),
+    send: jest.fn(),
+  };
+  result.status.mockImplementation((statusCode: number) => {
+    result.statusCode = statusCode;
+    return result;
+  });
+  result.send.mockImplementation((body: unknown) => {
+    result.body = body;
+    return result;
+  });
+  return result;
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
-  process.env.TBANK_PASSWORD = PASSWORD;
+  Object.assign(process.env, {
+    TBANK_ENABLED: "true",
+    TBANK_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",
+    TBANK_TERMINAL_KEY: TERMINAL,
+    TBANK_PASSWORD: PASSWORD,
+    TBANK_API_BASE_URL: "https://rest-api-test.tinkoff.ru/v2",
+    TBANK_SUCCESS_URL: "https://mariomikke.shop/checkout/success",
+    TBANK_FAIL_URL: "https://mariomikke.shop/checkout/fail",
+    TBANK_NOTIFICATION_URL: "https://api.mariomikke.shop/hooks/payment/tbank",
+  });
 });
 
-describe("роут нотификаций Т-Банка", () => {
-  it("подтверждает приём телом ровно «OK»", async () => {
+describe("T-Bank authenticated webhook inbox", () => {
+  it("creates zero rows and events when the signature is invalid", async () => {
     const notifications = makeNotifications();
-    const eventBus = { emit: jest.fn().mockResolvedValue(undefined) };
-    const res = makeRes();
+    const payment = makePayment();
+    const eventBus = { emit: jest.fn() };
+    const response = makeRes();
 
-    await POST(makeReq(signed(), notifications, eventBus), res as never);
+    await POST(makeReq({ ...signed(), Token: "invalid" }, notifications, payment, eventBus), response as never);
 
-    // Банк проверяет тело буквально: заглавными, без тегов и пробелов.
-    expect(res.send).toHaveBeenCalledWith("OK");
-    expect(res.status).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(401);
+    expect(response.body).not.toBe("OK");
+    expect(notifications.listTbankNotifications).not.toHaveBeenCalled();
+    expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
+    expect(notifications.createTbankNotificationConflicts).not.toHaveBeenCalled();
+    expect(payment.retrievePaymentSession).not.toHaveBeenCalled();
+    expect(eventBus.emit).not.toHaveBeenCalled();
   });
 
-  it("записывает факт до того, как отдаёт событие наружу", async () => {
-    const order: string[] = [];
-    const notifications = makeNotifications({
-      createTbankNotifications: jest.fn(async () => {
-        order.push("journal");
-      }),
-    });
-    const eventBus = {
-      emit: jest.fn(async () => {
-        order.push("event");
-      }),
-    };
-
-    await POST(makeReq(signed(), notifications, eventBus), makeRes() as never);
-
-    // Обратный порядок означал бы, что упавшая запись журнала оставляет
-    // обработку запущенной, а повтор от банка обработается второй раз.
-    expect(order).toEqual(["journal", "event"]);
-  });
-
-  it("эмитит полный provider token зарегистрированного провайдера Medusa", async () => {
-    const eventBus = { emit: jest.fn().mockResolvedValue(undefined) };
-
-    await POST(makeReq(signed(), makeNotifications(), eventBus), makeRes() as never);
-
-    expect(eventBus.emit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ provider: "tbank_tbank" }),
-      }),
-      expect.any(Object),
-    );
-  });
-
-  it("сохраняет разобранные поля нотификации", async () => {
+  it("persists one correlated pending inbox fact and performs no projection", async () => {
     const notifications = makeNotifications();
-    await POST(
-      makeReq(signed(), notifications, { emit: jest.fn() }),
-      makeRes() as never,
-    );
+    const payment = makePayment();
+    const eventBus = { emit: jest.fn() };
+    const body = signed();
+    const response = makeRes();
 
-    expect(notifications.createTbankNotifications).toHaveBeenCalledWith({
+    await POST(makeReq(body, notifications, payment, eventBus), response as never);
+
+    expect(notifications.createTbankNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      terminal_key: TERMINAL,
       payment_id: "3456789",
-      status: "CONFIRMED",
-      order_id: "payses_01JABCDEF",
+      order_id: SESSION.id,
       amount_kopecks: 1899000,
+      currency_code: "rub",
       success: true,
-      error_code: null,
-      message: null,
-    });
+      status: "CONFIRMED",
+      lifecycle_state: "pending",
+      canonical_payload_hash: canonicalNotificationHash(body),
+      attempt_count: 0,
+    }));
+    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(response.body).toBe("OK");
   });
 
-  describe("подпись", () => {
-    it("отвергает подменённое после подписи тело и не пишет в журнал", async () => {
-      const body = signed();
-      body.Amount = 1;
+  it("retains a signed callback awaiting correlation when its session is missing", async () => {
+    const notifications = makeNotifications();
+    const payment = makePayment({ retrievePaymentSession: jest.fn().mockRejectedValue(new Error("not found")) });
 
-      const notifications = makeNotifications();
-      const eventBus = { emit: jest.fn() };
-      const res = makeRes();
+    await POST(makeReq(signed(), notifications, payment), makeRes() as never);
 
-      await POST(makeReq(body, notifications, eventBus), res as never);
-
-      expect(res.status).toHaveBeenCalledWith(401);
-      // Ключевое: журнал не тронут. Иначе кто угодно занял бы пару
-      // (PaymentId, Status) выдуманным уведомлением и заставил нас отбросить
-      // настоящее как дубликат.
-      expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
-      expect(eventBus.emit).not.toHaveBeenCalled();
-    });
-
-    it("не отвечает OK при неверной подписи — банк должен повторить", async () => {
-      const res = makeRes();
-      await POST(
-        makeReq({ ...signed(), Token: "deadbeef" }, makeNotifications(), { emit: jest.fn() }),
-        res as never,
-      );
-      expect(res.body).not.toBe("OK");
-    });
-
-    it("без TBANK_PASSWORD отказывается принимать уведомление", async () => {
-      delete process.env.TBANK_PASSWORD;
-      const notifications = makeNotifications();
-      const res = makeRes();
-
-      await POST(makeReq(signed(), notifications, { emit: jest.fn() }), res as never);
-
-      expect(res.status).toHaveBeenCalledWith(503);
-      expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
-    });
+    expect(notifications.createTbankNotifications).toHaveBeenCalledWith(
+      expect.objectContaining({ lifecycle_state: "awaiting_correlation" }),
+    );
+    expect(notifications.createTbankNotificationConflicts).not.toHaveBeenCalled();
   });
 
-  describe("дедупликация", () => {
-    it("повтор подтверждается, но не обрабатывается заново", async () => {
-      const notifications = makeNotifications({
-        listTbankNotifications: jest.fn().mockResolvedValue([{ id: "tbnotif_1" }]),
-      });
-      const eventBus = { emit: jest.fn() };
-      const res = makeRes();
+  it("persists reordered AUTHORIZED and CONFIRMED callbacks without projecting either", async () => {
+    const notifications = makeNotifications();
+    const eventBus = { emit: jest.fn() };
 
-      await POST(makeReq(signed(), notifications, eventBus), res as never);
+    await POST(makeReq(signed({ Status: "AUTHORIZED" }), notifications, makePayment(), eventBus), makeRes() as never);
+    await POST(makeReq(signed({ Status: "CONFIRMED" }), notifications, makePayment(), eventBus), makeRes() as never);
 
-      // Банк шлёт повторы раз в час сутки, затем раз в сутки месяц. Ответить
-      // надо, обработать — нет.
-      expect(res.send).toHaveBeenCalledWith("OK");
-      expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
-      expect(eventBus.emit).not.toHaveBeenCalled();
-    });
-
-    it("проигранная гонка за уникальный индекс считается повтором", async () => {
-      const notifications = makeNotifications({
-        listTbankNotifications: jest
-          .fn()
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([{ id: "tbnotif_1" }]),
-        createTbankNotifications: jest.fn().mockRejectedValue(new Error("unique violation")),
-      });
-      const eventBus = { emit: jest.fn() };
-      const res = makeRes();
-
-      await POST(makeReq(signed(), notifications, eventBus), res as never);
-
-      expect(res.send).toHaveBeenCalledWith("OK");
-      expect(eventBus.emit).not.toHaveBeenCalled();
-    });
-
-    it("ключ — пара, поэтому AUTHORIZED и CONFIRMED не схлопываются", async () => {
-      const notifications = makeNotifications();
-      await POST(
-        makeReq(signed({ Status: "AUTHORIZED" }), notifications, { emit: jest.fn() }),
-        makeRes() as never,
-      );
-
-      expect(notifications.listTbankNotifications).toHaveBeenCalledWith({
-        payment_id: "3456789",
-        status: "AUTHORIZED",
-      });
-    });
+    expect(notifications.createTbankNotifications).toHaveBeenCalledTimes(2);
+    expect(notifications.createTbankNotifications).toHaveBeenNthCalledWith(
+      1, expect.objectContaining({ status: "AUTHORIZED", lifecycle_state: "pending" }),
+    );
+    expect(notifications.createTbankNotifications).toHaveBeenNthCalledWith(
+      2, expect.objectContaining({ status: "CONFIRMED", lifecycle_state: "pending" }),
+    );
+    expect(eventBus.emit).not.toHaveBeenCalled();
   });
 
-  describe("отказы", () => {
-    it("не подтверждает приём, если журнал не записался", async () => {
-      const notifications = makeNotifications({
-        createTbankNotifications: jest.fn().mockRejectedValue(new Error("db down")),
-      });
-      const eventBus = { emit: jest.fn() };
-      const res = makeRes();
+  it("durably quarantines a malformed authenticated callback", async () => {
+    const body: Record<string, unknown> = { TerminalKey: TERMINAL };
+    body.Token = generateToken(body, PASSWORD);
+    const notifications = makeNotifications();
+    const response = makeRes();
 
-      await POST(makeReq(signed(), notifications, eventBus), res as never);
+    await POST(makeReq(body, notifications, makePayment()), response as never);
 
-      // Ответить OK здесь — значит потерять платёж: банк больше не повторит.
-      expect(res.status).toHaveBeenCalledWith(500);
-      expect(res.body).not.toBe("OK");
-      expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(notifications.createTbankNotificationConflicts).toHaveBeenCalledWith(
+      expect.objectContaining({ conflict_kind: "malformed_authenticated", lifecycle_state: "manual_review" }),
+    );
+    expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
+    expect(response.body).toBe("OK");
+  });
+
+  it.each([
+    ["terminal", { TerminalKey: "OtherTerminal" }, SESSION],
+    ["provider", {}, { ...SESSION, provider_id: "pp_other_other" }],
+    ["PaymentId", {}, { ...SESSION, data: { ...SESSION.data, paymentId: "999" } }],
+    ["OrderId", {}, { ...SESSION, id: "payses_other" }],
+    ["amount", {}, { ...SESSION, amount: 1 }],
+    ["currency", {}, { ...SESSION, currency_code: "usd" }],
+    ["Success/status", { Success: false }, SESSION],
+    ["unknown status", { Status: "SURPRISE" }, SESSION],
+  ])("audits and quarantines a definite %s mismatch without consuming dedupe", async (_name, bodyOverride, session) => {
+    const notifications = makeNotifications();
+    const payment = makePayment({ retrievePaymentSession: jest.fn().mockResolvedValue(session) });
+
+    await POST(makeReq(signed(bodyOverride), notifications, payment), makeRes() as never);
+
+    expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
+    expect(notifications.createTbankNotificationConflicts).toHaveBeenCalledWith(
+      expect.objectContaining({ lifecycle_state: "manual_review" }),
+    );
+  });
+
+  it("does not consume dedupe when mismatch quarantine cannot be persisted", async () => {
+    const notifications = makeNotifications({
+      createTbankNotificationConflicts: jest.fn().mockRejectedValue(new Error("db down")),
+    });
+    const response = makeRes();
+
+    await POST(
+      makeReq(signed(), notifications, makePayment({ retrievePaymentSession: jest.fn().mockResolvedValue({ ...SESSION, amount: 1 }) })),
+      response as never,
+    );
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toBe("OK");
+    expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges an identical authenticated duplicate as one inbox fact", async () => {
+    const body = signed();
+    const notifications = makeNotifications({
+      listTbankNotifications: jest.fn().mockResolvedValue([{ canonical_payload_hash: canonicalNotificationHash(body) }]),
     });
 
-    it("подтверждает приём, если факт записан, но событие не поставилось", async () => {
-      const notifications = makeNotifications();
-      const eventBus = { emit: jest.fn().mockRejectedValue(new Error("redis down")) };
-      const res = makeRes();
+    const response = makeRes();
+    await POST(makeReq(body, notifications, makePayment()), response as never);
 
-      await POST(makeReq(signed(), notifications, eventBus), res as never);
+    expect(response.body).toBe("OK");
+    expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
+    expect(notifications.createTbankNotificationConflicts).not.toHaveBeenCalled();
+  });
 
-      // Платёж уже в БД, его подберёт сверка. Повтор от банка ничего не даст —
-      // ключ дедупликации занят, поэтому просить повтор бессмысленно.
-      expect(res.send).toHaveBeenCalledWith("OK");
-      expect(logger.error).toHaveBeenCalled();
+  it("audits a changed canonical duplicate as a security conflict", async () => {
+    const notifications = makeNotifications({
+      listTbankNotifications: jest.fn().mockResolvedValue([{ id: "tbnotif_1", canonical_payload_hash: "old" }]),
     });
 
-    it("отвергает тело, которое не разбирается, несмотря на верную подпись", async () => {
-      const body: Record<string, unknown> = { TerminalKey: "TinkoffBankTest" };
-      body.Token = generateToken(body, PASSWORD);
+    await POST(makeReq(signed(), notifications, makePayment()), makeRes() as never);
 
-      const notifications = makeNotifications();
-      const res = makeRes();
+    expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
+    expect(notifications.createTbankNotificationConflicts).toHaveBeenCalledWith(
+      expect.objectContaining({ canonical_notification_id: "tbnotif_1", conflict_kind: "canonical_payload_changed" }),
+    );
+  });
 
-      await POST(makeReq(body, notifications, { emit: jest.fn() }), res as never);
+  it("does not return OK when an authenticated fact cannot be persisted", async () => {
+    const notifications = makeNotifications({ createTbankNotifications: jest.fn().mockRejectedValue(new Error("db down")) });
+    const response = makeRes();
 
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(notifications.createTbankNotifications).not.toHaveBeenCalled();
-    });
+    await POST(makeReq(signed(), notifications, makePayment()), response as never);
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toBe("OK");
   });
 });

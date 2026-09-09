@@ -1,5 +1,7 @@
 import { model } from "@medusajs/framework/utils";
 
+import { INBOX_LIFECYCLE_STATES } from "../lifecycle";
+
 /**
  * Журнал обработанных нотификаций Т-Банка.
  *
@@ -22,6 +24,7 @@ const TbankNotification = model
     { name: "TbankNotification", tableName: "tbank_notification" },
     {
       id: model.id({ prefix: "tbnotif" }).primaryKey(),
+      terminal_key: model.text(),
       /** `PaymentId` банка. Приходит и числом, и строкой — храним строкой. */
       payment_id: model.text(),
       /** Статус Т-Банка: `AUTHORIZED`, `CONFIRMED`, `REJECTED`… */
@@ -34,9 +37,20 @@ const TbankNotification = model
        * расчётов. Любая конверсия здесь потеряла бы то, что реально пришло.
        */
       amount_kopecks: model.number(),
+      currency_code: model.text(),
       success: model.boolean(),
       error_code: model.text().nullable(),
       message: model.text().nullable(),
+      canonical_payload_hash: model.text(),
+      lifecycle_state: model.enum([...INBOX_LIFECYCLE_STATES]).default("pending"),
+      attempt_count: model.number().default(0),
+      next_attempt_at: model.dateTime().nullable(),
+      last_attempt_at: model.dateTime().nullable(),
+      last_error_at: model.dateTime().nullable(),
+      lease_token: model.text().nullable(),
+      lease_expires_at: model.dateTime().nullable(),
+      processed_at: model.dateTime().nullable(),
+      manual_review_at: model.dateTime().nullable(),
     },
   )
   .indexes([
@@ -44,12 +58,13 @@ const TbankNotification = model
     // коде: при одностадийной оплате банк шлёт два уведомления одновременно,
     // и проверка «сначала посмотреть, потом вставить» их не разведёт.
     {
-      on: ["payment_id", "status"],
+      on: ["terminal_key", "payment_id", "status"],
       unique: true,
       where: "deleted_at IS NULL",
     },
     // Поиск по сессии — для сверки и для разбора инцидентов.
     { on: ["order_id"] },
+    { on: ["lifecycle_state", "next_attempt_at", "lease_expires_at"] },
   ]);
 
 export default TbankNotification;
