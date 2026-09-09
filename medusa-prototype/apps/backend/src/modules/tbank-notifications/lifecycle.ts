@@ -18,6 +18,16 @@ export type InboxLifecycleState = (typeof INBOX_LIFECYCLE_STATES)[number];
 export const INBOX_LEASE_MS = 60_000;
 export const MAX_INBOX_ATTEMPTS = 5;
 export const RETRY_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000, 43_200_000] as const;
+const CANONICAL_NOTIFICATION_FIELDS = [
+  "TerminalKey",
+  "OrderId",
+  "Success",
+  "Status",
+  "PaymentId",
+  "ErrorCode",
+  "Amount",
+  "Message",
+] as const;
 
 export type AuthenticatedNotification = {
   readonly terminalKey: string;
@@ -25,6 +35,7 @@ export type AuthenticatedNotification = {
   readonly paymentId: string;
   readonly status: string;
   readonly amountKopecks: number;
+  readonly amountProvided: boolean;
   readonly currencyCode: "rub";
   readonly success: boolean;
 };
@@ -46,8 +57,8 @@ export interface TbankNotificationStore {
 
 export function canonicalNotificationHash(payload: Readonly<Record<string, unknown>>): string {
   const canonicalScalars: Array<readonly [string, string | number | boolean]> = [];
-  for (const [key, value] of Object.entries(payload)) {
-    if (key === "Token") continue;
+  for (const key of CANONICAL_NOTIFICATION_FIELDS) {
+    const value = payload[key];
     if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") continue;
     canonicalScalars.push([key, key === "PaymentId" || key === "Amount" ? String(value) : value]);
   }
@@ -63,7 +74,9 @@ export function toAuthenticatedNotification(
   if (typeof terminalKey !== "string" || terminalKey.length === 0) {
     throw new Error("TBank notification: missing TerminalKey");
   }
-  return { ...notification, terminalKey, currencyCode: "rub" };
+  const amount = payload["Amount"];
+  const amountProvided = amount !== undefined && amount !== null && amount !== "";
+  return { ...notification, terminalKey, currencyCode: "rub", amountProvided };
 }
 
 function hasExpectedSuccess(status: string, success: boolean): boolean {
@@ -83,11 +96,13 @@ export function correlateNotification(
   if (session.provider_id !== TBANK_PAYMENT_PROVIDER_ID) mismatches.push("provider");
   if (notification.paymentId !== data["paymentId"]) mismatches.push("PaymentId");
   if (notification.orderId !== session.id || notification.orderId !== data["orderId"]) mismatches.push("OrderId");
-  try {
-    if (notification.amountKopecks !== rublesToKopecks(session.amount)) mismatches.push("amount");
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    mismatches.push("amount");
+  if (notification.amountProvided || notification.status !== "CANCELED") {
+    try {
+      if (notification.amountKopecks !== rublesToKopecks(session.amount)) mismatches.push("amount");
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      mismatches.push("amount");
+    }
   }
   if (session.currency_code.toLowerCase() !== notification.currencyCode) mismatches.push("currency");
   if (!hasExpectedSuccess(notification.status, notification.success)) mismatches.push("Success/status");

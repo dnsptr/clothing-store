@@ -11,12 +11,16 @@ export class Migration20260909120000 extends Migration {
     this.addSql(`create index "IDX_tbank_notification_lifecycle_state_next_attempt_at_lease_expires_at" on "tbank_notification" ("lifecycle_state", "next_attempt_at", "lease_expires_at") where deleted_at is null;`);
     this.addSql(`create table "tbank_notification_conflict" ("id" text not null, "canonical_notification_id" text null, "terminal_key" text not null, "payment_id" text not null, "status" text not null, "canonical_payload_hash" text null, "conflicting_payload_hash" text not null, "conflict_kind" text not null, "correlation_failures" text null, "lifecycle_state" text not null default 'manual_review', "created_at" timestamptz not null default now(), "updated_at" timestamptz not null default now(), "deleted_at" timestamptz null, constraint "tbank_notification_conflict_pkey" primary key ("id"), constraint "CHK_tbank_notification_conflict_state" check ("lifecycle_state" = 'manual_review'));`);
     this.addSql(`create index "IDX_tbank_notification_conflict_deleted_at" on "tbank_notification_conflict" ("deleted_at") where deleted_at is null;`);
-    this.addSql(`create index "IDX_tbank_notification_conflict_payment_status" on "tbank_notification_conflict" ("payment_id", "status") where deleted_at is null;`);
+    this.addSql(`create index "IDX_tbank_notification_conflict_payment_id_status" on "tbank_notification_conflict" ("payment_id", "status") where deleted_at is null;`);
     this.addSql(`create index "IDX_tbank_notification_conflict_canonical_notification_id" on "tbank_notification_conflict" ("canonical_notification_id") where deleted_at is null;`);
   }
 
-  override down(): Promise<void> {
-    // Payment inbox and conflict facts are intentionally retained on rollback.
-    return Promise.resolve();
+  override async down(): Promise<void> {
+    this.addSql(`drop table if exists "tbank_notification_conflict" cascade;`);
+    this.addSql(`drop index if exists "IDX_tbank_notification_lifecycle_state_next_attempt_at_lease_expires_at";`);
+    this.addSql(`drop index if exists "IDX_tbank_notification_terminal_key_payment_id_status_unique";`);
+    this.addSql(`alter table "tbank_notification" drop constraint if exists "CHK_tbank_notification_lifecycle", drop constraint if exists "CHK_tbank_notification_attempt_count";`);
+    this.addSql(`alter table "tbank_notification" drop column if exists "terminal_key", drop column if exists "currency_code", drop column if exists "canonical_payload_hash", drop column if exists "lifecycle_state", drop column if exists "attempt_count", drop column if exists "next_attempt_at", drop column if exists "last_attempt_at", drop column if exists "last_error_at", drop column if exists "lease_token", drop column if exists "lease_expires_at", drop column if exists "processed_at", drop column if exists "manual_review_at";`);
+    this.addSql(`create unique index if not exists "IDX_tbank_notification_payment_id_status_unique" on "tbank_notification" ("payment_id", "status") where deleted_at is null;`);
   }
 }

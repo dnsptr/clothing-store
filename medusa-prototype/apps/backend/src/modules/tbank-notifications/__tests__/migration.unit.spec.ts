@@ -14,13 +14,18 @@ describe("T-Bank notification inbox migration", () => {
     expect(sql).toContain('"attempt_count" between 0 and 5');
     expect(sql).toContain('create table "tbank_notification_conflict"');
     expect(sql).toContain('"terminal_key", "payment_id", "status"');
+    expect(sql).toContain('"IDX_tbank_notification_conflict_payment_id_status"');
   });
 
-  it("retains payment evidence when application code is rolled back", async () => {
+  it("restores the previous schema so rollback can be reapplied safely", async () => {
     const migration = new Migration20260909120000({} as never, {} as never);
 
     await migration.down();
+    const sql = migration.getQueries().join("\n");
 
-    expect(migration.getQueries()).toEqual([]);
+    expect(sql).toContain('drop table if exists "tbank_notification_conflict"');
+    expect(sql).toContain('drop constraint if exists "CHK_tbank_notification_lifecycle"');
+    expect(sql).toContain('drop column if exists "terminal_key"');
+    expect(sql).toContain('"IDX_tbank_notification_payment_id_status_unique"');
   });
 });

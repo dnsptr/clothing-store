@@ -1,11 +1,22 @@
 import {
   canonicalNotificationHash,
+  correlateNotification,
   INBOX_LEASE_MS,
   MAX_INBOX_ATTEMPTS,
   RETRY_BACKOFF_MS,
   nextFailureState,
+  toAuthenticatedNotification,
 } from "../lifecycle";
 import TbankNotificationModuleService, { InboxClaimLimitError } from "../service";
+import { generateToken, verifyNotificationToken } from "../../tbank/lib/token";
+
+const SESSION = {
+  id: "payses_01JABCDEF",
+  provider_id: "pp_tbank_tbank",
+  currency_code: "rub",
+  amount: 18990,
+  data: { paymentId: "3456789", orderId: "payses_01JABCDEF" },
+};
 
 describe("T-Bank inbox lease and retry lifecycle", () => {
   it("canonicalizes bank numeric identifiers before hashing and excludes the token", () => {
@@ -13,6 +24,73 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
     const textual = { PaymentId: "123", Amount: "500", Token: "second", Status: "CONFIRMED" };
 
     expect(canonicalNotificationHash(numeric)).toBe(canonicalNotificationHash(textual));
+  });
+
+  it("keeps canonical identity independent from credential and unknown fields", () => {
+    const password = "secret";
+    const business = {
+      TerminalKey: "terminal",
+      OrderId: SESSION.id,
+      PaymentId: 3456789,
+      Status: "CONFIRMED",
+      Amount: 1899000,
+      Success: true,
+    };
+    const token = generateToken(business, password);
+    const credentialInjection = { ...business, Token: token, Password: "injected" };
+    const unknownInjection = { ...business, Token: token, Unrecognized: "injected" };
+
+    expect(verifyNotificationToken(credentialInjection, password)).toBe(true);
+    expect(verifyNotificationToken(unknownInjection, password)).toBe(false);
+    expect(canonicalNotificationHash(credentialInjection)).toBe(canonicalNotificationHash(business));
+    expect(canonicalNotificationHash(unknownInjection)).toBe(canonicalNotificationHash(business));
+  });
+
+  it("correlates an amount-less cancellation but rejects a provided wrong amount", () => {
+    const cancellation = toAuthenticatedNotification({
+      TerminalKey: "terminal",
+      OrderId: SESSION.id,
+      PaymentId: 3456789,
+      Status: "CANCELED",
+      Success: false,
+    });
+    const wrongAmount = toAuthenticatedNotification({
+      TerminalKey: "terminal",
+      OrderId: SESSION.id,
+      PaymentId: 3456789,
+      Status: "CANCELED",
+      Success: false,
+      Amount: 1,
+    });
+
+    expect(correlateNotification(cancellation, SESSION as never, "terminal")).toEqual({ kind: "correlated" });
+    expect(correlateNotification(wrongAmount, SESSION as never, "terminal")).toEqual({ kind: "mismatch", fields: ["amount"] });
+  });
+
+  it.each([
+    ["NEW", true],
+    ["FORM_SHOWED", true],
+    ["AUTHORIZING", true],
+    ["3DS_CHECKING", true],
+    ["AUTHORIZED", true],
+    ["CONFIRMED", true],
+    ["REJECTED", false],
+    ["DEADLINE_EXPIRED", false],
+    ["CANCELED", false],
+    ["REVERSED", false],
+    ["REFUNDED", true],
+    ["PARTIAL_REFUNDED", true],
+  ])("accepts the expected Success value for %s", (status, success) => {
+    const notification = toAuthenticatedNotification({
+      TerminalKey: "terminal",
+      OrderId: SESSION.id,
+      PaymentId: 3456789,
+      Status: status,
+      Amount: 1899000,
+      Success: success,
+    });
+
+    expect(correlateNotification(notification, SESSION as never, "terminal")).toEqual({ kind: "correlated" });
   });
 
   it("claims a bounded batch atomically with a renewable 60-second lease", async () => {
@@ -25,7 +103,7 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
 
     expect(rows).toEqual([{ id: "tbnotif_1", lifecycle_state: "leased" }]);
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE SKIP LOCKED"), [
-      now, now, 20, "lease-1", new Date(now.getTime() + INBOX_LEASE_MS), now, now,
+      now, now, now, now, now, 20, "lease-1", new Date(now.getTime() + INBOX_LEASE_MS), now, now,
     ]);
   });
 
@@ -82,6 +160,7 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
     );
 
     expect(rows.map((row) => row.id)).toEqual(["tbnotif_expired"]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("OR (lifecycle_state = 'leased'"), expect.any(Array));
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("lease_expires_at <= ?"), expect.arrayContaining([now]));
   });
 
@@ -94,17 +173,16 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
     expect(nextFailureState(5, now)).toEqual({ lifecycleState: "manual_review", nextAttemptAt: new Date(now.getTime() + 43_200_000) });
   });
 
-  it("writes retry and exhaustion state with the active lease token", async () => {
+  it("derives retry and exhaustion state from the persisted attempt count", async () => {
     const execute = jest.fn().mockResolvedValue([{ id: "tbnotif_1" }]);
     const now = new Date("2026-09-06T12:00:00.000Z");
 
     await TbankNotificationModuleService.prototype.failInbox.call(
-      {}, { id: "tbnotif_1", leaseToken: "lease-1", attemptCount: 5, now }, { manager: { execute } } as never,
+      {}, { id: "tbnotif_1", leaseToken: "lease-1", now }, { manager: { execute } } as never,
     );
 
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("lifecycle_state = ?"), [
-      "manual_review", new Date(now.getTime() + 43_200_000), "manual_review", now, now, now, "tbnotif_1", "lease-1",
-    ]);
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("CASE WHEN attempt_count >= 5"), expect.any(Array));
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("lease_expires_at > ?"), expect.arrayContaining([now]));
   });
 
   it("marks only the active lease as processed", async () => {
@@ -116,7 +194,7 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
     );
 
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("lifecycle_state = 'processed'"), [
-      now, now, "tbnotif_1", "lease-1",
+      now, now, "tbnotif_1", "lease-1", now,
     ]);
   });
 });
