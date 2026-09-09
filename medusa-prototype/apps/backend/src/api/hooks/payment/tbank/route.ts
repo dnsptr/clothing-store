@@ -159,8 +159,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
     }
   }
 
+  let createdNotification: { id?: string } | undefined;
   try {
-    await notifications.createTbankNotifications({
+    createdNotification = (await notifications.createTbankNotifications({
       ...key,
       order_id: notification.orderId,
       amount_kopecks: notification.amountKopecks,
@@ -171,7 +172,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
       canonical_payload_hash: incomingHash,
       lifecycle_state: lifecycleState,
       attempt_count: 0,
-    });
+    })) as { id?: string };
   } catch (error) {
     const raced = await notifications.listTbankNotifications(key);
     const canonical = raced[0];
@@ -197,6 +198,27 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
         res.status(500).send("failed to record notification conflict");
         return;
       }
+    }
+  }
+
+  const notificationId =
+    createdNotification?.id ??
+    (Array.isArray(createdNotification) ? createdNotification[0]?.id : undefined);
+  if (notificationId) {
+    try {
+      const eventBus = req.scope.resolve<{
+        emit(event: { name: string; data: unknown }): Promise<void>;
+      }>("event_bus");
+      await eventBus.emit({
+        name: "tbank.notification.received",
+        data: { id: notificationId },
+      });
+    } catch (emitError) {
+      logger.warn(
+        `tbank webhook: acceleration event emission failed for ${notificationId}: ${
+          emitError instanceof Error ? emitError.message : String(emitError)
+        }`,
+      );
     }
   }
 

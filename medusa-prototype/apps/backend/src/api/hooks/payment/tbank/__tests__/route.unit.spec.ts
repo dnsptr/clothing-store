@@ -110,10 +110,19 @@ describe("T-Bank authenticated webhook inbox", () => {
     expect(eventBus.emit).not.toHaveBeenCalled();
   });
 
-  it("persists one correlated pending inbox fact and performs no projection", async () => {
+  it("accelerates processing only after persisting the correlated inbox fact", async () => {
     const notifications = makeNotifications();
     const payment = makePayment();
-    const eventBus = { emit: jest.fn() };
+    const order: string[] = [];
+    notifications.createTbankNotifications.mockImplementation(async () => {
+      order.push("journal");
+      return { id: "tbnotif_1" };
+    });
+    const eventBus = {
+      emit: jest.fn(async () => {
+        order.push("event");
+      }),
+    };
     const body = signed();
     const response = makeRes();
 
@@ -131,7 +140,11 @@ describe("T-Bank authenticated webhook inbox", () => {
       canonical_payload_hash: canonicalNotificationHash(body),
       attempt_count: 0,
     }));
-    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(eventBus.emit).toHaveBeenCalledWith({
+      name: "tbank.notification.received",
+      data: { id: "tbnotif_1" },
+    });
+    expect(order).toEqual(["journal", "event"]);
     expect(response.body).toBe("OK");
   });
 
@@ -147,7 +160,7 @@ describe("T-Bank authenticated webhook inbox", () => {
     expect(notifications.createTbankNotificationConflicts).not.toHaveBeenCalled();
   });
 
-  it("persists reordered AUTHORIZED and CONFIRMED callbacks without projecting either", async () => {
+  it("persists reordered AUTHORIZED and CONFIRMED callbacks and accelerates both", async () => {
     const notifications = makeNotifications();
     const eventBus = { emit: jest.fn() };
 
@@ -161,7 +174,7 @@ describe("T-Bank authenticated webhook inbox", () => {
     expect(notifications.createTbankNotifications).toHaveBeenNthCalledWith(
       2, expect.objectContaining({ status: "CONFIRMED", lifecycle_state: "pending" }),
     );
-    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(eventBus.emit).toHaveBeenCalledTimes(2);
   });
 
   it("durably quarantines a malformed authenticated callback", async () => {

@@ -96,6 +96,62 @@ class TbankNotificationModuleService extends MedusaService({
       [input.now, input.now, input.now, input.now, input.id, input.leaseToken, input.now],
     );
   }
+
+  @InjectManager()
+  async claimNotificationById(input: LeaseInput, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<InboxRow[]>(
+      `UPDATE tbank_notification AS inbox
+       SET lifecycle_state = 'leased', lease_token = ?, lease_expires_at = ?,
+           last_attempt_at = ?, attempt_count = attempt_count + 1, updated_at = ?
+       WHERE inbox.id = ?
+         AND ((lifecycle_state IN ('pending', 'awaiting_correlation')
+             AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+           OR (lifecycle_state = 'leased' AND lease_expires_at <= ?))
+         AND attempt_count < ${MAX_INBOX_ATTEMPTS} AND deleted_at IS NULL
+       RETURNING inbox.*`,
+      [input.leaseToken, new Date(input.now.getTime() + INBOX_LEASE_MS), input.now, input.now, input.id, input.now, input.now],
+    );
+  }
+
+  @InjectManager()
+  async quarantineManualReview(input: LeaseInput, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<InboxRow[]>(
+      `UPDATE tbank_notification
+       SET lifecycle_state = 'manual_review', manual_review_at = ?,
+           lease_token = NULL, lease_expires_at = NULL, last_error_at = ?, updated_at = ?
+       WHERE id = ? AND lifecycle_state = 'leased' AND lease_token = ?
+       RETURNING *`,
+      [input.now, input.now, input.now, input.id, input.leaseToken],
+    );
+  }
+
+  @InjectManager()
+  async retryManualReview(input: { readonly id: string; readonly now: Date }, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<InboxRow[]>(
+      `UPDATE tbank_notification
+       SET lifecycle_state = 'pending', attempt_count = 0, next_attempt_at = ?,
+           lease_token = NULL, lease_expires_at = NULL, manual_review_at = NULL, updated_at = ?
+       WHERE id = ? AND lifecycle_state = 'manual_review' AND deleted_at IS NULL
+       RETURNING *`,
+      [input.now, input.now, input.id],
+    );
+  }
+
+  @InjectManager()
+  async resolveManualReview(input: { readonly id: string; readonly now: Date }, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<InboxRow[]>(
+      `UPDATE tbank_notification
+       SET lifecycle_state = 'processed', processed_at = ?,
+           lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+       WHERE id = ? AND lifecycle_state = 'manual_review' AND deleted_at IS NULL
+       RETURNING *`,
+      [input.now, input.now, input.id],
+    );
+  }
 }
 
 export default TbankNotificationModuleService;
