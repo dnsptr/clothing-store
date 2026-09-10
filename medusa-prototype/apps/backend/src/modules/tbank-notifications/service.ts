@@ -128,9 +128,12 @@ class TbankNotificationModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async retryManualReview(input: { readonly id: string; readonly now: Date }, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+  async retryManualReview(
+    input: { readonly id: string; readonly now: Date; readonly operatorId?: string; readonly reason?: string },
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly InboxRow[]> {
     if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<InboxRow[]>(
+    const rows = await context.manager.execute<InboxRow[]>(
       `UPDATE tbank_notification
        SET lifecycle_state = 'pending', attempt_count = 0, next_attempt_at = ?,
            lease_token = NULL, lease_expires_at = NULL, manual_review_at = NULL, updated_at = ?
@@ -138,12 +141,39 @@ class TbankNotificationModuleService extends MedusaService({
        RETURNING *`,
       [input.now, input.now, input.id],
     );
+    if (rows.length > 0 && (input.operatorId || input.reason)) {
+      await context.manager.execute(
+        `INSERT INTO tbank_notification_conflict
+          (id, canonical_notification_id, terminal_key, payment_id, status, canonical_payload_hash,
+           conflicting_payload_hash, conflict_kind, correlation_failures, lifecycle_state, created_at, updated_at)
+         SELECT
+           'tbconf_' || substr(md5(random()::text), 1, 16),
+           id, terminal_key, payment_id, status, canonical_payload_hash,
+           repeat('0', 64),
+           'operator_retry',
+           ?,
+           'manual_review',
+           ?,
+           ?
+         FROM tbank_notification WHERE id = ?`,
+        [
+          JSON.stringify({ operatorId: input.operatorId, reason: input.reason, action: "retry" }),
+          input.now,
+          input.now,
+          input.id,
+        ],
+      );
+    }
+    return rows;
   }
 
   @InjectManager()
-  async resolveManualReview(input: { readonly id: string; readonly now: Date }, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+  async resolveManualReview(
+    input: { readonly id: string; readonly now: Date; readonly operatorId?: string; readonly reason?: string },
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly InboxRow[]> {
     if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<InboxRow[]>(
+    const rows = await context.manager.execute<InboxRow[]>(
       `UPDATE tbank_notification
        SET lifecycle_state = 'processed', processed_at = ?,
            lease_token = NULL, lease_expires_at = NULL, updated_at = ?
@@ -151,6 +181,30 @@ class TbankNotificationModuleService extends MedusaService({
        RETURNING *`,
       [input.now, input.now, input.id],
     );
+    if (rows.length > 0 && (input.operatorId || input.reason)) {
+      await context.manager.execute(
+        `INSERT INTO tbank_notification_conflict
+          (id, canonical_notification_id, terminal_key, payment_id, status, canonical_payload_hash,
+           conflicting_payload_hash, conflict_kind, correlation_failures, lifecycle_state, created_at, updated_at)
+         SELECT
+           'tbconf_' || substr(md5(random()::text), 1, 16),
+           id, terminal_key, payment_id, status, canonical_payload_hash,
+           repeat('0', 64),
+           'operator_resolve',
+           ?,
+           'manual_review',
+           ?,
+           ?
+         FROM tbank_notification WHERE id = ?`,
+        [
+          JSON.stringify({ operatorId: input.operatorId, reason: input.reason, action: "resolve" }),
+          input.now,
+          input.now,
+          input.id,
+        ],
+      );
+    }
+    return rows;
   }
 }
 

@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: payment_fixture
+      POSTGRES_USER: payment_fixture
+      POSTGRES_PASSWORD: payment_fixture
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment_fixture -d payment_fixture"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 60s
+    volumes:
+      - payment_fixture_postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "payment_fixture"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "payment_fixture", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 10s
+
+volumes:
+  payment_fixture_postgres:

@@ -2,7 +2,10 @@ import { Client } from "pg";
 import { Migration20260726153050 } from "../../tbank-notifications/migrations/Migration20260726153050";
 import { Migration20260909120000 } from "../../tbank-notifications/migrations/Migration20260909120000";
 import TbankNotificationModuleService from "../../tbank-notifications/service";
-import { PaymentReconcilerService } from "../services/payment-reconciler";
+import {
+  PaymentReconcilerService,
+  type TbankNotificationStore,
+} from "../services/payment-reconciler";
 
 const DATABASE_URL = process.env.TBANK_INBOX_TEST_DATABASE_URL;
 const describePostgres = DATABASE_URL ? describe : describe.skip;
@@ -44,10 +47,122 @@ async function rebuildSchema(client: Client): Promise<void> {
   await applyQueries(client, inbox);
 }
 
+function createNotificationStore(client: Client): TbankNotificationStore {
+  const manager = queryManager(client);
+  return {
+    claimNotificationById: (input) =>
+      TbankNotificationModuleService.prototype.claimNotificationById.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    claimInbox: (input) =>
+      TbankNotificationModuleService.prototype.claimInbox.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    renewInboxLease: (input) =>
+      TbankNotificationModuleService.prototype.renewInboxLease.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    completeInbox: (input) =>
+      TbankNotificationModuleService.prototype.completeInbox.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    failInbox: (input) =>
+      TbankNotificationModuleService.prototype.failInbox.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    quarantineManualReview: (input) =>
+      TbankNotificationModuleService.prototype.quarantineManualReview.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    retryManualReview: (input) =>
+      TbankNotificationModuleService.prototype.retryManualReview.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    resolveManualReview: (input) =>
+      TbankNotificationModuleService.prototype.resolveManualReview.call(
+        {},
+        input,
+        { manager } as never,
+      ),
+    listTbankNotifications: async (filters: Record<string, unknown>) => {
+      const conditions: string[] = [];
+      const values: unknown[] = [];
+      let i = 1;
+      for (const [key, val] of Object.entries(filters)) {
+        conditions.push(`"${key}" = $${i++}`);
+        values.push(val);
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const res = await client.query(`SELECT * FROM tbank_notification ${where}`, values);
+      return res.rows;
+    },
+    listTbankPaymentAttempts: async (filters: Record<string, unknown>) => {
+      const conditions: string[] = [];
+      const values: unknown[] = [];
+      let i = 1;
+      for (const [key, val] of Object.entries(filters)) {
+        conditions.push(`"${key}" = $${i++}`);
+        values.push(val);
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const res = await client.query(`SELECT * FROM tbank_payment_attempt ${where}`, values);
+      return res.rows;
+    },
+    listTbankNotificationConflicts: async (filters: Record<string, unknown>) => {
+      const conditions: string[] = [];
+      const values: unknown[] = [];
+      let i = 1;
+      for (const [key, val] of Object.entries(filters)) {
+        conditions.push(`"${key}" = $${i++}`);
+        values.push(val);
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const res = await client.query(`SELECT * FROM tbank_notification_conflict ${where}`, values);
+      return res.rows;
+    },
+    createTbankNotificationConflicts: async (input: Record<string, unknown>) => {
+      const res = await client.query(
+        `INSERT INTO tbank_notification_conflict
+          (id, canonical_notification_id, terminal_key, payment_id, status,
+           canonical_payload_hash, conflicting_payload_hash, conflict_kind,
+           correlation_failures, lifecycle_state)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          `tbconf_${Math.random().toString(36).slice(2, 10)}`,
+          input.canonical_notification_id ?? null,
+          input.terminal_key,
+          input.payment_id,
+          input.status,
+          input.canonical_payload_hash ?? null,
+          input.conflicting_payload_hash ?? "",
+          input.conflict_kind,
+          input.correlation_failures ?? null,
+          input.lifecycle_state ?? "manual_review",
+        ],
+      );
+      return res.rows[0];
+    },
+  };
+}
+
 describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
   const clients: Client[] = [];
   let database: Client;
-  let notificationService: TbankNotificationModuleService;
 
   async function connect(): Promise<Client> {
     const client = new Client({ connectionString: DATABASE_URL });
@@ -59,7 +174,6 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
   beforeEach(async () => {
     database = await connect();
     await rebuildSchema(database);
-    notificationService = new TbankNotificationModuleService();
   });
 
   afterEach(async () => {
@@ -89,36 +203,19 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
         id: "payses_rec_1",
         amount: 100,
         currency_code: "rub",
+        provider_id: "pp_tbank_tbank",
         status: "pending",
-        data: {},
+        data: { paymentId: "pay_rec_1", orderId: "payses_rec_1" },
       }),
       updatePaymentSession: jest.fn().mockResolvedValue({}),
     };
 
-    const serviceWithManager = {
-      claimInbox: (input: any) =>
-        notificationService.claimInbox(input, { manager: queryManager(database) as any }),
-      claimNotificationById: (input: any) =>
-        notificationService.claimNotificationById(input, { manager: queryManager(database) as any }),
-      completeInbox: (input: any) =>
-        notificationService.completeInbox(input, { manager: queryManager(database) as any }),
-      failInbox: (input: any) =>
-        notificationService.failInbox(input, { manager: queryManager(database) as any }),
-      quarantineManualReview: (input: any) =>
-        notificationService.quarantineManualReview(input, { manager: queryManager(database) as any }),
-      retryManualReview: (input: any) =>
-        notificationService.retryManualReview(input, { manager: queryManager(database) as any }),
-      resolveManualReview: (input: any) =>
-        notificationService.resolveManualReview(input, { manager: queryManager(database) as any }),
-      listTbankNotifications: async (filters: any) => {
-        const rows = await database.query("SELECT * FROM tbank_notification WHERE id = $1", [filters.id]);
-        return rows.rows;
-      },
-    };
+    const notificationStore = createNotificationStore(database);
 
     const reconciler = new PaymentReconcilerService({
-      notifications: serviceWithManager as any,
+      notifications: notificationStore,
       payment: mockPaymentService,
+      expectedTerminalKey: "term",
       workflowRunner: mockWorkflowRunner,
     });
 
@@ -129,7 +226,9 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     expect(projectionsCount).toBe(1);
 
     // Verify row is marked processed in PostgreSQL
-    const res = await database.query("SELECT lifecycle_state, processed_at FROM tbank_notification WHERE id = 'tbnotif_rec_1'");
+    const res = await database.query(
+      "SELECT lifecycle_state, processed_at FROM tbank_notification WHERE id = 'tbnotif_rec_1'",
+    );
     expect(res.rows[0].lifecycle_state).toBe("processed");
     expect(res.rows[0].processed_at).not.toBeNull();
 
@@ -137,5 +236,220 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     const reRun = await reconciler.processPendingBatch(10);
     expect(reRun.claimed).toBe(0);
     expect(projectionsCount).toBe(1);
+  });
+
+  it("replay barrier: completes inbox without re-executing workflow if order already exists", async () => {
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES ('tbnotif_replay', 'term', 'pay_replay', 'CONFIRMED', 'payses_replay', 10000, 'rub', true, repeat('2', 64), 'pending', 0)`,
+    );
+
+    const mockWorkflowRunner = jest.fn();
+    const mockPaymentService: any = {
+      retrievePaymentSession: jest.fn().mockResolvedValue({
+        id: "payses_replay",
+        amount: 100,
+        currency_code: "rub",
+        provider_id: "pp_tbank_tbank",
+        status: "captured", // Already captured in Medusa
+        data: { paymentId: "pay_replay", orderId: "payses_replay" },
+      }),
+      updatePaymentSession: jest.fn().mockResolvedValue({}),
+    };
+
+    const durableLinkageChecker = jest.fn().mockResolvedValue({
+      orderLinked: true,
+      orderId: "order_existing_123",
+      paymentCaptured: true,
+    });
+
+    const reconciler = new PaymentReconcilerService({
+      notifications: createNotificationStore(database),
+      payment: mockPaymentService,
+      expectedTerminalKey: "term",
+      workflowRunner: mockWorkflowRunner,
+      durableLinkageChecker,
+    });
+
+    const result = await reconciler.processNotification("tbnotif_replay");
+    expect(result.status).toBe("processed");
+    expect(result).toHaveProperty("action", "already_captured");
+    expect(mockWorkflowRunner).not.toHaveBeenCalled();
+
+    // Row is marked processed in PostgreSQL
+    const res = await database.query(
+      "SELECT lifecycle_state, processed_at FROM tbank_notification WHERE id = 'tbnotif_replay'",
+    );
+    expect(res.rows[0].lifecycle_state).toBe("processed");
+  });
+
+  it("quarantines to manual_review when cart completion silently fails", async () => {
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES ('tbnotif_silent_fail', 'term', 'pay_silent', 'CONFIRMED', 'payses_silent', 10000, 'rub', true, repeat('3', 64), 'pending', 0)`,
+    );
+
+    const mockWorkflowRunner = jest.fn().mockResolvedValue({ errors: [], result: {} });
+    const mockPaymentService: any = {
+      retrievePaymentSession: jest.fn().mockResolvedValue({
+        id: "payses_silent",
+        amount: 100,
+        currency_code: "rub",
+        provider_id: "pp_tbank_tbank",
+        status: "pending",
+        data: { paymentId: "pay_silent", orderId: "payses_silent" },
+      }),
+      updatePaymentSession: jest.fn().mockResolvedValue({}),
+    };
+
+    // Pre-check: not linked. Post-check: payment captured, but order NOT linked!
+    const durableLinkageChecker = jest
+      .fn()
+      .mockResolvedValueOnce({ orderLinked: false, paymentCaptured: false })
+      .mockResolvedValueOnce({ orderLinked: false, paymentCaptured: true });
+
+    const reconciler = new PaymentReconcilerService({
+      notifications: createNotificationStore(database),
+      payment: mockPaymentService,
+      expectedTerminalKey: "term",
+      workflowRunner: mockWorkflowRunner,
+      durableLinkageChecker,
+    });
+
+    const result = await reconciler.processNotification("tbnotif_silent_fail");
+    expect(result.status).toBe("manual_review");
+    expect(result).toHaveProperty("reason", "Payment captured but order creation failed");
+
+    // Row is quarantined to manual_review in PostgreSQL
+    const res = await database.query(
+      "SELECT lifecycle_state, manual_review_at FROM tbank_notification WHERE id = 'tbnotif_silent_fail'",
+    );
+    expect(res.rows[0].lifecycle_state).toBe("manual_review");
+    expect(res.rows[0].manual_review_at).not.toBeNull();
+  });
+
+  it("fences stale worker whose lease expired during execution", async () => {
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES ('tbnotif_fence', 'term', 'pay_fence', 'CONFIRMED', 'payses_fence', 10000, 'rub', true, repeat('4', 64), 'pending', 0)`,
+    );
+
+    const mockPaymentService: any = {
+      retrievePaymentSession: jest.fn().mockResolvedValue({
+        id: "payses_fence",
+        amount: 100,
+        currency_code: "rub",
+        provider_id: "pp_tbank_tbank",
+        status: "pending",
+        data: { paymentId: "pay_fence", orderId: "payses_fence" },
+      }),
+      updatePaymentSession: jest.fn().mockResolvedValue({}),
+    };
+
+    // Simulate worker 1 claiming row at T0
+    const worker1Lease = "lease_worker_1";
+    const t0 = new Date("2026-09-10T12:00:00.000Z");
+    await TbankNotificationModuleService.prototype.claimNotificationById.call(
+      {},
+      { id: "tbnotif_fence", leaseToken: worker1Lease, now: t0 },
+      { manager: queryManager(database) } as never,
+    );
+
+    // Time advances past lease expiration (61 seconds)
+    const tAfterExpiry = new Date("2026-09-10T12:01:02.000Z");
+
+    // Worker 2 (recovery) claims the expired row
+    const worker2Lease = "lease_worker_2";
+    const reclaimed = await TbankNotificationModuleService.prototype.claimInbox.call(
+      {},
+      { limit: 1, leaseToken: worker2Lease, now: tAfterExpiry },
+      { manager: queryManager(database) } as never,
+    );
+    expect(reclaimed).toHaveLength(1);
+    expect((reclaimed[0] as any).lease_token).toBe(worker2Lease);
+
+    // Worker 1 now attempts to complete with its stale lease
+    const staleCompletion = await TbankNotificationModuleService.prototype.completeInbox.call(
+      {},
+      { id: "tbnotif_fence", leaseToken: worker1Lease, now: tAfterExpiry },
+      { manager: queryManager(database) } as never,
+    );
+
+    // Zero rows affected: worker 1 was successfully fenced!
+    expect(staleCompletion).toHaveLength(0);
+
+    // Row in DB still belongs to worker 2 and is leased
+    const check = await database.query(
+      "SELECT lifecycle_state, lease_token FROM tbank_notification WHERE id = 'tbnotif_fence'",
+    );
+    expect(check.rows[0].lifecycle_state).toBe("leased");
+    expect(check.rows[0].lease_token).toBe(worker2Lease);
+  });
+
+  it("audits operator retry and resolve actions in database", async () => {
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES ('tbnotif_audit', 'term', 'pay_audit', 'CONFIRMED', 'payses_audit', 10000, 'rub', true, repeat('5', 64), 'manual_review', 5)`,
+    );
+
+    const mockPaymentService: any = {
+      retrievePaymentSession: jest.fn(),
+    };
+
+    const reconciler = new PaymentReconcilerService({
+      notifications: createNotificationStore(database),
+      payment: mockPaymentService,
+      expectedTerminalKey: "term",
+    });
+
+    // 1. Operator retries
+    await reconciler.retryManualReview("tbnotif_audit", {
+      operatorId: "op_carol",
+      reason: "Verified network connectivity",
+    });
+
+    // Verify row is back to pending and conflict audit was inserted
+    const afterRetry = await database.query(
+      "SELECT lifecycle_state, attempt_count FROM tbank_notification WHERE id = 'tbnotif_audit'",
+    );
+    expect(afterRetry.rows[0].lifecycle_state).toBe("pending");
+    expect(afterRetry.rows[0].attempt_count).toBe(0);
+
+    const retryConflicts = await database.query(
+      "SELECT conflict_kind, correlation_failures FROM tbank_notification_conflict WHERE canonical_notification_id = 'tbnotif_audit' AND conflict_kind = 'operator_retry'",
+    );
+    expect(retryConflicts.rows).toHaveLength(1);
+    expect(retryConflicts.rows[0].correlation_failures).toContain("op_carol");
+
+    // Move back to manual_review to test resolve
+    await database.query(
+      "UPDATE tbank_notification SET lifecycle_state = 'manual_review' WHERE id = 'tbnotif_audit'",
+    );
+
+    // 2. Operator resolves
+    await reconciler.resolveManualReview("tbnotif_audit", {
+      operatorId: "op_dave",
+      reason: "Confirmed payment manually in banking dashboard",
+    });
+
+    const afterResolve = await database.query(
+      "SELECT lifecycle_state, processed_at FROM tbank_notification WHERE id = 'tbnotif_audit'",
+    );
+    expect(afterResolve.rows[0].lifecycle_state).toBe("processed");
+    expect(afterResolve.rows[0].processed_at).not.toBeNull();
+
+    const resolveConflicts = await database.query(
+      "SELECT conflict_kind, correlation_failures FROM tbank_notification_conflict WHERE canonical_notification_id = 'tbnotif_audit' AND conflict_kind = 'operator_resolve'",
+    );
+    expect(resolveConflicts.rows).toHaveLength(1);
+    expect(resolveConflicts.rows[0].correlation_failures).toContain("op_dave");
   });
 });

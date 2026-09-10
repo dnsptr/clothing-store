@@ -10,9 +10,20 @@ import { Modules } from "@medusajs/framework/utils";
 import { processPaymentWorkflow } from "@medusajs/core-flows";
 
 import { TBANK_NOTIFICATION_MODULE } from "../../tbank-notifications";
-import type TbankNotificationModuleService from "../../tbank-notifications/service";
+import {
+  correlateNotification,
+  type AuthenticatedNotification,
+} from "../../tbank-notifications/lifecycle";
 import { kopecksToRubles } from "../lib/money";
-import type { TBankClient } from "../lib/client";
+import { parseTbankEnvironment } from "../config";
+import { TBankClient, type TBankGetStateResult } from "../lib/client";
+
+export class StaleLeaseError extends Error {
+  readonly name = "StaleLeaseError";
+  constructor(id: string, leaseToken: string) {
+    super(`T-Bank inbox lease lost or expired for notification ${id} (token: ${leaseToken})`);
+  }
+}
 
 export type ReconcilerWorkflowRunner = (
   input: {
@@ -28,15 +39,27 @@ export type ReconcilerWorkflowRunner = (
 export interface TbankNotificationStore {
   claimNotificationById(input: { id: string; leaseToken: string; now: Date }): Promise<readonly unknown[]>;
   claimInbox(input: { limit: number; leaseToken: string; now: Date }): Promise<readonly unknown[]>;
+  renewInboxLease?(input: { id: string; leaseToken: string; now: Date }): Promise<readonly unknown[]>;
   completeInbox(input: { id: string; leaseToken: string; now: Date }): Promise<readonly unknown[]>;
   failInbox(input: { id: string; leaseToken: string; now: Date }): Promise<readonly unknown[]>;
   quarantineManualReview(input: { id: string; leaseToken: string; now: Date }): Promise<readonly unknown[]>;
-  retryManualReview(input: { id: string; now: Date }): Promise<readonly unknown[]>;
-  resolveManualReview(input: { id: string; now: Date }): Promise<readonly unknown[]>;
+  retryManualReview(input: { id: string; now: Date; operatorId?: string; reason?: string }): Promise<readonly unknown[]>;
+  resolveManualReview(input: { id: string; now: Date; operatorId?: string; reason?: string }): Promise<readonly unknown[]>;
   listTbankNotifications?(filters: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
   listTbankPaymentAttempts?(filters: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
   listTbankNotificationConflicts?(filters: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
+  createTbankNotificationConflicts?(input: Record<string, unknown>): Promise<unknown>;
 }
+
+export type DurableLinkageChecker = (session: PaymentSessionDTO) => Promise<{
+  orderLinked: boolean;
+  orderId?: string;
+  paymentCaptured: boolean;
+}>;
+
+export type EventBusService = {
+  emit(event: { name: string; data: unknown }): Promise<void>;
+};
 
 export type PaymentReconcilerDependencies = {
   logger?: Logger;
@@ -47,7 +70,17 @@ export type PaymentReconcilerDependencies = {
   [Modules.LOCKING]?: ILockingModule;
   locking?: ILockingModule;
   tbankClient?: Pick<TBankClient, "getState">;
+  expectedTerminalKey?: string;
   workflowRunner?: ReconcilerWorkflowRunner;
+  durableLinkageChecker?: DurableLinkageChecker;
+  eventBus?: EventBusService;
+  query?: {
+    graph: (input: {
+      entity: string;
+      fields: string[];
+      filters?: Record<string, unknown>;
+    }) => Promise<{ data: any[] }>;
+  };
   container?: MedusaContainer;
 };
 
@@ -78,7 +111,17 @@ export class PaymentReconcilerService {
   private readonly paymentService_: IPaymentModuleService;
   private readonly lockingService_?: ILockingModule;
   private readonly tbankClient_?: Pick<TBankClient, "getState">;
+  private readonly expectedTerminalKey_?: string;
   private readonly workflowRunner_?: ReconcilerWorkflowRunner;
+  private readonly durableLinkageChecker_?: DurableLinkageChecker;
+  private readonly eventBus_?: EventBusService;
+  private readonly query_?: {
+    graph: (input: {
+      entity: string;
+      fields: string[];
+      filters?: Record<string, unknown>;
+    }) => Promise<{ data: any[] }>;
+  };
   private readonly container_?: MedusaContainer;
 
   constructor(deps: PaymentReconcilerDependencies) {
@@ -95,9 +138,38 @@ export class PaymentReconcilerService {
       deps[Modules.LOCKING] ??
       deps.locking ??
       (deps.container?.resolve(Modules.LOCKING, { allowUnregistered: true }) as ILockingModule | undefined);
+    this.eventBus_ =
+      deps.eventBus ??
+      (deps.container?.resolve("event_bus", { allowUnregistered: true }) as EventBusService | undefined);
+    this.query_ =
+      deps.query ??
+      (deps.container?.resolve("query", { allowUnregistered: true }) as any);
     this.tbankClient_ = deps.tbankClient;
+    this.expectedTerminalKey_ = deps.expectedTerminalKey;
     this.workflowRunner_ = deps.workflowRunner;
+    this.durableLinkageChecker_ = deps.durableLinkageChecker;
     this.container_ = deps.container;
+
+    // Auto-wire TBankClient & expectedTerminalKey from environment if not provided
+    if (!this.tbankClient_ || !this.expectedTerminalKey_) {
+      try {
+        const config = parseTbankEnvironment(process.env);
+        if (config.enabled) {
+          if (!this.tbankClient_) {
+            this.tbankClient_ = new TBankClient({
+              terminalKey: config.options.terminalKey,
+              password: config.options.password,
+              apiBaseUrl: config.options.apiBaseUrl,
+            });
+          }
+          if (!this.expectedTerminalKey_) {
+            this.expectedTerminalKey_ = config.options.terminalKey;
+          }
+        }
+      } catch {
+        // Environment not configured or test environment
+      }
+    }
 
     if (!this.notificationService_) {
       throw new Error("PaymentReconcilerService requires TbankNotificationModuleService");
@@ -109,11 +181,12 @@ export class PaymentReconcilerService {
 
   /**
    * Run an asynchronous job under a per-payment mutex.
+   * Lock timeout is set to 30 seconds (not milliseconds, as @medusajs/locking-redis timeout is in seconds).
    */
   private async withPaymentLock<T>(paymentId: string, fn: () => Promise<T>): Promise<T> {
     const lockKey = `tbank:payment:${paymentId}`;
     if (this.lockingService_?.execute) {
-      return await this.lockingService_.execute(lockKey, fn, { timeout: 30_000 });
+      return await this.lockingService_.execute(lockKey, fn, { timeout: 30 });
     }
 
     // Process-level sequential lock fallback for local environments / tests without Redis locking
@@ -133,6 +206,244 @@ export class PaymentReconcilerService {
         IN_MEMORY_MUTEXES.delete(lockKey);
       }
     }
+  }
+
+  /**
+   * Fenced completion: asserts affected row count > 0; throws StaleLeaseError otherwise.
+   */
+  private async completeInboxWithFencing_(id: string, leaseToken: string): Promise<void> {
+    const updated = await this.notificationService_.completeInbox({ id, leaseToken, now: new Date() });
+    if (!updated || updated.length === 0) {
+      throw new StaleLeaseError(id, leaseToken);
+    }
+  }
+
+  /**
+   * Fenced failure: asserts affected row count > 0; throws StaleLeaseError otherwise.
+   */
+  private async failInboxWithFencing_(
+    id: string,
+    leaseToken: string,
+  ): Promise<{ lifecycle_state?: string; attempt_count?: number }> {
+    const updated = await this.notificationService_.failInbox({ id, leaseToken, now: new Date() });
+    if (!updated || updated.length === 0) {
+      throw new StaleLeaseError(id, leaseToken);
+    }
+    return (updated[0] as { lifecycle_state?: string; attempt_count?: number }) ?? {};
+  }
+
+  /**
+   * Fenced quarantine: asserts affected row count > 0; throws StaleLeaseError otherwise.
+   */
+  private async quarantineWithFencing_(id: string, leaseToken: string): Promise<void> {
+    const updated = await this.notificationService_.quarantineManualReview({ id, leaseToken, now: new Date() });
+    if (!updated || updated.length === 0) {
+      throw new StaleLeaseError(id, leaseToken);
+    }
+  }
+
+  /**
+   * Fenced lease renewal: asserts affected row count > 0; throws StaleLeaseError otherwise.
+   */
+  private async renewLeaseWithFencing_(id: string, leaseToken: string): Promise<void> {
+    if (this.notificationService_.renewInboxLease) {
+      const updated = await this.notificationService_.renewInboxLease({ id, leaseToken, now: new Date() });
+      if (!updated || updated.length === 0) {
+        throw new StaleLeaseError(id, leaseToken);
+      }
+    }
+  }
+
+  /**
+   * Emit operational alert when a notification enters manual review.
+   */
+  private async emitManualReviewAlert_(
+    row: { id: string; payment_id?: string; order_id?: string },
+    reason: string,
+  ): Promise<void> {
+    try {
+      if (this.eventBus_) {
+        await this.eventBus_.emit({
+          name: "tbank.manual_review.alert",
+          data: {
+            id: row.id,
+            paymentId: row.payment_id,
+            orderId: row.order_id,
+            reason,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+    } catch (err) {
+      this.logger_.error(`tbank reconciler: failed to emit manual review alert: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Check durable linkage (payment captured, cart completed, order linked).
+   */
+  private async checkDurableLinkage_(session: PaymentSessionDTO): Promise<{
+    orderLinked: boolean;
+    orderId?: string;
+    paymentCaptured: boolean;
+  }> {
+    if (this.durableLinkageChecker_) {
+      return await this.durableLinkageChecker_(session);
+    }
+
+    if (this.query_) {
+      try {
+        let cartId: string | undefined;
+        if (session.payment_collection_id) {
+          const { data: cartLinks } = await this.query_.graph({
+            entity: "cart_payment_collection",
+            fields: ["cart_id"],
+            filters: { payment_collection_id: session.payment_collection_id },
+          });
+          cartId = cartLinks?.[0]?.cart_id;
+        }
+
+        let orderId: string | undefined;
+        if (cartId) {
+          const { data: orderLinks } = await this.query_.graph({
+            entity: "order_cart",
+            fields: ["order_id"],
+            filters: { cart_id: cartId },
+          });
+          orderId = orderLinks?.[0]?.order_id;
+        }
+
+        const { data: payments } = await this.query_.graph({
+          entity: "payment",
+          fields: ["id", "captured_at"],
+          filters: { payment_session_id: session.id },
+        });
+        const paymentCaptured = (payments?.length ?? 0) > 0 && payments[0].captured_at !== null;
+
+        return {
+          orderLinked: Boolean(orderId),
+          orderId,
+          paymentCaptured,
+        };
+      } catch (err) {
+        this.logger_.warn(`tbank reconciler: query graph linkage check failed: ${String(err)}`);
+      }
+    }
+
+    // Fallback: check session status
+    let isCaptured = session.status === "captured";
+    try {
+      const retrieved = await this.paymentService_.retrievePaymentSession(session.id);
+      if (retrieved.status === "captured") {
+        isCaptured = true;
+      }
+    } catch {
+      // Ignored
+    }
+    return {
+      orderLinked: isCaptured,
+      paymentCaptured: isCaptured,
+    };
+  }
+
+  /**
+   * Re-correlate notification against session and expected terminal before projection.
+   */
+  private async verifyCorrelation_(
+    row: {
+      id: string;
+      terminal_key: string;
+      payment_id: string;
+      status: string;
+      order_id: string;
+      amount_kopecks: number;
+      success: boolean;
+      canonical_payload_hash?: string;
+    },
+    session: PaymentSessionDTO,
+    leaseToken: string,
+  ): Promise<{ correlated: true } | { correlated: false; reason: string }> {
+    const authNotif: AuthenticatedNotification = {
+      terminalKey: row.terminal_key,
+      orderId: row.order_id,
+      paymentId: row.payment_id,
+      status: row.status,
+      amountKopecks: row.amount_kopecks,
+      amountProvided: row.amount_kopecks !== undefined && row.amount_kopecks !== null,
+      currencyCode: "rub",
+      success: row.success,
+    };
+
+    const expectedTerminal = this.expectedTerminalKey_ ?? row.terminal_key;
+    const correlation = correlateNotification(authNotif, session, expectedTerminal);
+
+    if (correlation.kind === "mismatch") {
+      const reason = `Correlation mismatch: ${correlation.fields.join(", ")}`;
+      this.logger_.error(`tbank reconciler: notification ${row.id} failed correlation: ${reason}`);
+
+      if (this.notificationService_.createTbankNotificationConflicts) {
+        try {
+          await this.notificationService_.createTbankNotificationConflicts({
+            canonical_notification_id: row.id,
+            terminal_key: row.terminal_key,
+            payment_id: row.payment_id,
+            status: row.status,
+            canonical_payload_hash: row.canonical_payload_hash ?? null,
+            conflicting_payload_hash: row.canonical_payload_hash ?? "",
+            conflict_kind: "correlation_mismatch",
+            correlation_failures: correlation.fields.join(","),
+            lifecycle_state: "manual_review",
+          });
+        } catch (conflictError) {
+          this.logger_.error(
+            `tbank reconciler: failed to record correlation conflict: ${
+              conflictError instanceof Error ? conflictError.message : String(conflictError)
+            }`,
+          );
+        }
+      }
+
+      await this.quarantineWithFencing_(row.id, leaseToken);
+      await this.emitManualReviewAlert_(row, reason);
+      return { correlated: false, reason };
+    }
+
+    return { correlated: true };
+  }
+
+  /**
+   * Strictly validate GetState bank response.
+   */
+  private validateGetStateResponse_(
+    bankState: TBankGetStateResult,
+    row: { payment_id: string; amount_kopecks: number; terminal_key: string },
+  ): { valid: true } | { valid: false; reason: string } {
+    if (bankState.Success !== true) {
+      return {
+        valid: false,
+        reason: `Bank GetState Success is not true (${bankState.ErrorCode ?? "unknown"})`,
+      };
+    }
+    if (String(bankState.PaymentId) !== String(row.payment_id)) {
+      return {
+        valid: false,
+        reason: `Bank GetState PaymentId mismatch (${bankState.PaymentId} != ${row.payment_id})`,
+      };
+    }
+    const expectedTerminal = this.expectedTerminalKey_ ?? row.terminal_key;
+    if (bankState["TerminalKey"] && String(bankState["TerminalKey"]) !== expectedTerminal) {
+      return {
+        valid: false,
+        reason: `Bank GetState TerminalKey mismatch (${bankState["TerminalKey"]} != ${expectedTerminal})`,
+      };
+    }
+    if (bankState.Amount !== undefined && Number(bankState.Amount) !== Number(row.amount_kopecks)) {
+      return {
+        valid: false,
+        reason: `Bank GetState Amount mismatch (${bankState.Amount} != ${row.amount_kopecks})`,
+      };
+    }
+    return { valid: true };
   }
 
   /**
@@ -172,6 +483,7 @@ export class PaymentReconcilerService {
       success: boolean;
       lifecycle_state: string;
       attempt_count: number;
+      canonical_payload_hash?: string;
     };
 
     return await this.withPaymentLock(row.payment_id, async () => {
@@ -208,9 +520,21 @@ export class PaymentReconcilerService {
         success: boolean;
         lifecycle_state: string;
         attempt_count: number;
+        canonical_payload_hash?: string;
       };
 
       const result = await this.withPaymentLock(row.payment_id, async () => {
+        try {
+          await this.renewLeaseWithFencing_(row.id, leaseToken);
+        } catch (leaseError) {
+          if (leaseError instanceof StaleLeaseError) {
+            return {
+              status: "ignored",
+              id: row.id,
+              reason: "stale_lease_fenced",
+            } as ProcessNotificationResult;
+          }
+        }
         return await this.processLeasedRow_(row, leaseToken);
       });
       results.push(result);
@@ -232,82 +556,102 @@ export class PaymentReconcilerService {
       terminal_key: string;
       success: boolean;
       attempt_count: number;
+      canonical_payload_hash?: string;
     },
     leaseToken: string,
   ): Promise<ProcessNotificationResult> {
-    const now = new Date();
-
-    let session: PaymentSessionDTO | undefined;
     try {
-      session = await this.paymentService_.retrievePaymentSession(row.order_id);
-    } catch (error) {
-      this.logger_.warn(
-        `tbank reconciler: payment session ${row.order_id} not found for notification ${row.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      await this.notificationService_.failInbox({ id: row.id, leaseToken, now });
-      return {
-        status: "retry_scheduled",
-        id: row.id,
-        error: `Session ${row.order_id} not found`,
-      };
-    }
+      let session: PaymentSessionDTO | undefined;
+      try {
+        session = await this.paymentService_.retrievePaymentSession(row.order_id);
+      } catch (error) {
+        this.logger_.warn(
+          `tbank reconciler: payment session ${row.order_id} not found for notification ${row.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        const failResult = await this.failInboxWithFencing_(row.id, leaseToken);
+        if (failResult.lifecycle_state === "manual_review") {
+          await this.emitManualReviewAlert_(row, `Payment session ${row.order_id} not found after retries`);
+          return { status: "manual_review", id: row.id, reason: `Session ${row.order_id} not found` };
+        }
+        return {
+          status: "retry_scheduled",
+          id: row.id,
+          error: `Session ${row.order_id} not found`,
+        };
+      }
 
-    const currentSessionStatus = session.status;
-    const notifStatus = row.status;
+      // Re-correlate notification against retrieved session
+      const correlationCheck = await this.verifyCorrelation_(row, session, leaseToken);
+      if (!correlationCheck.correlated) {
+        return { status: "manual_review", id: row.id, reason: correlationCheck.reason };
+      }
 
-    try {
+      const currentSessionStatus = session.status;
+      const notifStatus = row.status;
+
       // 1. CONFIRMED
       if (notifStatus === "CONFIRMED") {
-        if (currentSessionStatus === "captured") {
-          // Idempotent: already captured, mark inbox processed
-          await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
+        // Replay barrier: check if order already exists and payment is captured
+        const linkageBefore = await this.checkDurableLinkage_(session);
+        if (linkageBefore.paymentCaptured && linkageBefore.orderLinked) {
+          this.logger_.info(
+            `tbank reconciler: replay barrier: order already linked and payment captured for session ${session.id}`,
+          );
+          await this.completeInboxWithFencing_(row.id, leaseToken);
           return { status: "processed", id: row.id, action: "already_captured" };
         }
 
-        // Failure-first cannot suppress a later verified CONFIRMED:
-        // Even if currentSessionStatus is 'error' or 'canceled', we project CONFIRMED.
+        // Renew lease before executing projection
+        await this.renewLeaseWithFencing_(row.id, leaseToken);
+
         const projectionSuccess = await this.projectConfirmedPayment_(row, session);
-        if (projectionSuccess.success) {
-          // Durable linkage achieved: complete inbox
-          await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
-          return { status: "processed", id: row.id, action: "captured_projected" };
+        if (!projectionSuccess.success) {
+          await this.quarantineWithFencing_(row.id, leaseToken);
+          const reason = projectionSuccess.error ?? "Projection failed";
+          await this.emitManualReviewAlert_(row, reason);
+          return { status: "manual_review", id: row.id, reason };
         }
 
-        // Projection failed permanently for a valid confirmed payment -> move to manual_review
-        await this.notificationService_.quarantineManualReview({
-          id: row.id,
-          leaseToken,
-          now: new Date(),
-        });
-        this.logger_.error(
-          `tbank reconciler: valid confirmed payment ${row.payment_id} (session ${row.order_id}) cannot project - transitioned to manual_review: ${projectionSuccess.error}`,
-        );
-        return {
-          status: "manual_review",
-          id: row.id,
-          reason: projectionSuccess.error ?? "Projection failed",
-        };
+        // Verify durable linkage post-projection
+        const linkageAfter = await this.checkDurableLinkage_(session);
+        if (!linkageAfter.paymentCaptured) {
+          await this.quarantineWithFencing_(row.id, leaseToken);
+          const reason = "Payment was not captured after projection";
+          await this.emitManualReviewAlert_(row, reason);
+          return { status: "manual_review", id: row.id, reason };
+        }
+
+        if (!linkageAfter.orderLinked) {
+          await this.quarantineWithFencing_(row.id, leaseToken);
+          const reason = "Payment captured but order creation failed";
+          await this.emitManualReviewAlert_(row, reason);
+          return { status: "manual_review", id: row.id, reason };
+        }
+
+        // Fully verified: complete inbox
+        await this.completeInboxWithFencing_(row.id, leaseToken);
+        return { status: "processed", id: row.id, action: "captured_projected" };
       }
 
       // 2. AUTHORIZED
       if (notifStatus === "AUTHORIZED") {
-        // AUTHORIZED stays pending; cannot regress CONFIRMED/captured
         if (currentSessionStatus === "captured") {
-          await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
+          await this.completeInboxWithFencing_(row.id, leaseToken);
           return { status: "processed", id: row.id, action: "ignored_captured_precedence" };
         }
 
+        // AUTHORIZED stays pending (never transitions to authorized in 1-stage acquiring)
         await this.paymentService_.updatePaymentSession({
           id: session.id,
           data: { ...(session.data ?? {}), status: "AUTHORIZED" },
           currency_code: session.currency_code,
           amount: session.amount,
-          status: "authorized",
+          status: "pending",
         });
 
-        await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
+        await this.completeInboxWithFencing_(row.id, leaseToken);
         return { status: "processed", id: row.id, action: "authorized" };
       }
 
@@ -319,35 +663,42 @@ export class PaymentReconcilerService {
         notifStatus === "REVERSED";
 
       if (isTerminalFailure) {
-        // CONFIRMED cannot regress
         if (currentSessionStatus === "captured") {
           this.logger_.warn(
             `tbank reconciler: ignored terminal failure ${notifStatus} for already captured payment ${row.payment_id}`,
           );
-          await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
+          await this.completeInboxWithFencing_(row.id, leaseToken);
           return { status: "processed", id: row.id, action: "ignored_captured_precedence" };
         }
 
-        // Check for contradictory terminal events
         let resolvedStatus = notifStatus;
         const contradictions = await this.detectContradiction_(row, session);
         if (contradictions && this.tbankClient_) {
           try {
             const bankState = await this.tbankClient_.getState(row.payment_id);
+            const validation = this.validateGetStateResponse_(bankState, row);
+            if (!validation.valid) {
+              await this.quarantineWithFencing_(row.id, leaseToken);
+              await this.emitManualReviewAlert_(row, validation.reason);
+              return { status: "manual_review", id: row.id, reason: validation.reason };
+            }
+
             if (bankState.Status === "CONFIRMED") {
-              // Bank reports payment is confirmed despite incoming failure notification!
+              await this.renewLeaseWithFencing_(row.id, leaseToken);
               const projectionSuccess = await this.projectConfirmedPayment_(row, session);
               if (projectionSuccess.success) {
-                await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
-                return { status: "processed", id: row.id, action: "contradiction_resolved_confirmed" };
+                const verified = await this.checkDurableLinkage_(session);
+                if (verified.orderLinked && verified.paymentCaptured) {
+                  await this.completeInboxWithFencing_(row.id, leaseToken);
+                  return { status: "processed", id: row.id, action: "contradiction_resolved_confirmed" };
+                }
               }
-              await this.notificationService_.quarantineManualReview({
-                id: row.id,
-                leaseToken,
-                now: new Date(),
-              });
-              return { status: "manual_review", id: row.id, reason: projectionSuccess.error ?? "Projection failed" };
+              await this.quarantineWithFencing_(row.id, leaseToken);
+              const reason = projectionSuccess.error ?? "Projection verification failed";
+              await this.emitManualReviewAlert_(row, reason);
+              return { status: "manual_review", id: row.id, reason };
             }
+
             if (bankState.Status) {
               resolvedStatus = bankState.Status;
             }
@@ -357,8 +708,11 @@ export class PaymentReconcilerService {
                 stateError instanceof Error ? stateError.message : String(stateError)
               }`,
             );
-            // Retry later
-            await this.notificationService_.failInbox({ id: row.id, leaseToken, now: new Date() });
+            const failResult = await this.failInboxWithFencing_(row.id, leaseToken);
+            if (failResult.lifecycle_state === "manual_review") {
+              await this.emitManualReviewAlert_(row, "Max retries on contradiction GetState");
+              return { status: "manual_review", id: row.id, reason: "Max retries on contradiction GetState" };
+            }
             return {
               status: "retry_scheduled",
               id: row.id,
@@ -378,20 +732,46 @@ export class PaymentReconcilerService {
           status: targetStatus,
         });
 
-        await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
+        await this.completeInboxWithFencing_(row.id, leaseToken);
         return { status: "processed", id: row.id, action: targetStatus };
       }
 
       // Non-terminal / unrecognized status (e.g. NEW, FORM_SHOWED)
-      await this.notificationService_.completeInbox({ id: row.id, leaseToken, now: new Date() });
+      await this.completeInboxWithFencing_(row.id, leaseToken);
       return { status: "processed", id: row.id, action: "no_op" };
     } catch (processingError) {
+      if (processingError instanceof StaleLeaseError) {
+        this.logger_.warn(
+          `tbank reconciler: fencing violation: lease for notification ${row.id} expired or reclaimed by another worker`,
+        );
+        return { status: "ignored", id: row.id, reason: "stale_lease_fenced" };
+      }
+
       this.logger_.error(
         `tbank reconciler: unexpected error processing row ${row.id}: ${
           processingError instanceof Error ? processingError.message : String(processingError)
         }`,
       );
-      await this.notificationService_.failInbox({ id: row.id, leaseToken, now: new Date() });
+
+      try {
+        const failResult = await this.failInboxWithFencing_(row.id, leaseToken);
+        if (failResult.lifecycle_state === "manual_review") {
+          await this.emitManualReviewAlert_(
+            row,
+            `Exhausted retries: ${processingError instanceof Error ? processingError.message : String(processingError)}`,
+          );
+          return {
+            status: "manual_review",
+            id: row.id,
+            reason: `Exhausted retries: ${processingError instanceof Error ? processingError.message : String(processingError)}`,
+          };
+        }
+      } catch (failErr) {
+        if (failErr instanceof StaleLeaseError) {
+          return { status: "ignored", id: row.id, reason: "stale_lease_fenced" };
+        }
+      }
+
       return {
         status: "retry_scheduled",
         id: row.id,
@@ -500,7 +880,7 @@ export class PaymentReconcilerService {
    * Operator method: Inspect full state of a manual review row.
    */
   async inspectManualReview(id: string): Promise<ManualReviewDetails> {
-    const notifications = await this.notificationService_.listTbankNotifications({ id });
+    const notifications = await this.notificationService_.listTbankNotifications?.({ id });
     if (!notifications || notifications.length === 0) {
       throw new Error(`Notification ${id} not found`);
     }
@@ -551,10 +931,22 @@ export class PaymentReconcilerService {
   /**
    * Operator method: Reset manual review row to pending for automatic re-execution.
    */
-  async retryManualReview(id: string): Promise<void> {
+  async retryManualReview(
+    id: string,
+    options?: { operatorId?: string; reason?: string },
+  ): Promise<void> {
     const now = new Date();
-    await this.notificationService_.retryManualReview({ id, now });
-    this.logger_.info(`tbank reconciler: operator reset manual review row ${id} to pending`);
+    await this.notificationService_.retryManualReview({
+      id,
+      now,
+      operatorId: options?.operatorId,
+      reason: options?.reason,
+    });
+    this.logger_.info(
+      `tbank reconciler: operator ${options?.operatorId ?? "unknown"} reset manual review row ${id} to pending: ${
+        options?.reason ?? "no reason provided"
+      }`,
+    );
   }
 
   /**
@@ -565,7 +957,12 @@ export class PaymentReconcilerService {
     resolution: { reason: string; operatorId?: string },
   ): Promise<void> {
     const now = new Date();
-    await this.notificationService_.resolveManualReview({ id, now });
+    await this.notificationService_.resolveManualReview({
+      id,
+      now,
+      operatorId: resolution.operatorId,
+      reason: resolution.reason,
+    });
     this.logger_.info(
       `tbank reconciler: operator ${resolution.operatorId ?? "unknown"} resolved manual review row ${id}: ${resolution.reason}`,
     );

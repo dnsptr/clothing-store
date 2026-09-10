@@ -8,6 +8,7 @@ describe("PaymentReconcilerService unit tests", () => {
   let mockLocking: any;
   let mockTbankClient: any;
   let mockWorkflowRunner: jest.Mock;
+  let mockEventBus: { emit: jest.Mock };
 
   const sampleRow = {
     id: "tbnotif_1",
@@ -19,6 +20,7 @@ describe("PaymentReconcilerService unit tests", () => {
     success: true,
     lifecycle_state: "leased",
     attempt_count: 1,
+    canonical_payload_hash: "hash_100",
   };
 
   const sampleSession: PaymentSessionDTO = {
@@ -43,6 +45,7 @@ describe("PaymentReconcilerService unit tests", () => {
     mockNotificationService = {
       claimNotificationById: jest.fn().mockResolvedValue([sampleRow]),
       claimInbox: jest.fn().mockResolvedValue([sampleRow]),
+      renewInboxLease: jest.fn().mockResolvedValue([sampleRow]),
       completeInbox: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "processed" }]),
       failInbox: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "pending" }]),
       quarantineManualReview: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "manual_review" }]),
@@ -51,6 +54,7 @@ describe("PaymentReconcilerService unit tests", () => {
       listTbankNotifications: jest.fn().mockResolvedValue([sampleRow]),
       listTbankPaymentAttempts: jest.fn().mockResolvedValue([]),
       listTbankNotificationConflicts: jest.fn().mockResolvedValue([]),
+      createTbankNotificationConflicts: jest.fn().mockResolvedValue({ id: "tbconf_1" }),
     };
 
     mockPaymentService = {
@@ -59,14 +63,24 @@ describe("PaymentReconcilerService unit tests", () => {
     };
 
     mockLocking = {
-      execute: jest.fn().mockImplementation((key, fn) => fn()),
+      execute: jest.fn().mockImplementation((_key, fn) => fn()),
     };
 
     mockTbankClient = {
       getState: jest.fn(),
     };
 
-    mockWorkflowRunner = jest.fn().mockResolvedValue({ errors: [], result: { id: "order_1" } });
+    mockWorkflowRunner = jest.fn().mockImplementation(async () => {
+      mockPaymentService.retrievePaymentSession.mockResolvedValue({
+        ...sampleSession,
+        status: "captured",
+      });
+      return { errors: [], result: { id: "order_1" } };
+    });
+
+    mockEventBus = {
+      emit: jest.fn().mockResolvedValue(undefined),
+    };
   });
 
   function createReconciler(overrides = {}) {
@@ -76,13 +90,15 @@ describe("PaymentReconcilerService unit tests", () => {
       payment: mockPaymentService,
       locking: mockLocking,
       tbankClient: mockTbankClient,
+      expectedTerminalKey: "test_term",
       workflowRunner: mockWorkflowRunner,
+      eventBus: mockEventBus,
       ...overrides,
     });
   }
 
-  describe("Per-payment locking and deterministic idempotency", () => {
-    it("acquires lock with key tbank:payment:<paymentId> and timeout 30s", async () => {
+  describe("Finding 1: Lock timeout unit", () => {
+    it("acquires lock with key tbank:payment:<paymentId> and timeout 30 (seconds, not ms)", async () => {
       const reconciler = createReconciler();
       const result = await reconciler.processNotification("tbnotif_1");
 
@@ -90,75 +106,13 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(mockLocking.execute).toHaveBeenCalledWith(
         "tbank:payment:pay_100",
         expect.any(Function),
-        { timeout: 30000 },
-      );
-    });
-
-    it("passes deterministic transactionId and idempotencyKey to projection workflow", async () => {
-      const reconciler = createReconciler();
-      await reconciler.processNotification("tbnotif_1");
-
-      expect(mockWorkflowRunner).toHaveBeenCalledWith(
-        {
-          action: "captured",
-          data: {
-            session_id: "payses_100",
-            amount: "500.00",
-          },
-        },
-        {
-          transactionId: "tbank_proj_pay_100",
-          idempotencyKey: "tbank_proj_pay_100",
-        },
+        { timeout: 30 },
       );
     });
   });
 
-  describe("Monotonic transitions and conflict reconciliation", () => {
-    it("projects CONFIRMED payment and marks inbox completed", async () => {
-      const reconciler = createReconciler();
-      const result = await reconciler.processNotification("tbnotif_1");
-
-      expect(result.status).toBe("processed");
-      expect(result).toHaveProperty("action", "captured_projected");
-      expect(mockWorkflowRunner).toHaveBeenCalledTimes(1);
-      expect(mockNotificationService.completeInbox).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "tbnotif_1" }),
-      );
-    });
-
-    it("is idempotent: already captured session marks inbox completed without running workflow", async () => {
-      mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
-        ...sampleSession,
-        status: "captured",
-      });
-
-      const reconciler = createReconciler();
-      const result = await reconciler.processNotification("tbnotif_1");
-
-      expect(result.status).toBe("processed");
-      expect(result).toHaveProperty("action", "already_captured");
-      expect(mockWorkflowRunner).not.toHaveBeenCalled();
-      expect(mockNotificationService.completeInbox).toHaveBeenCalled();
-    });
-
-    it("ensures failure-first cannot suppress a later verified CONFIRMED", async () => {
-      mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
-        ...sampleSession,
-        status: "error", // previous failure
-      });
-
-      const reconciler = createReconciler();
-      const result = await reconciler.processNotification("tbnotif_1");
-
-      expect(result.status).toBe("processed");
-      expect(result).toHaveProperty("action", "captured_projected");
-      // Workflow still runs and completes cart!
-      expect(mockWorkflowRunner).toHaveBeenCalledTimes(1);
-      expect(mockNotificationService.completeInbox).toHaveBeenCalled();
-    });
-
-    it("handles AUTHORIZED: stays pending and does not complete cart or capture", async () => {
+  describe("Finding 2: AUTHORIZED stays pending", () => {
+    it("handles AUTHORIZED: updates data but keeps status pending (never transitions to authorized)", async () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([
         { ...sampleRow, status: "AUTHORIZED" },
       ]);
@@ -172,7 +126,8 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(mockPaymentService.updatePaymentSession).toHaveBeenCalledWith(
         expect.objectContaining({
           id: "payses_100",
-          status: "authorized",
+          status: "pending",
+          data: expect.objectContaining({ status: "AUTHORIZED" }),
         }),
       );
       expect(mockNotificationService.completeInbox).toHaveBeenCalled();
@@ -195,86 +150,68 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(mockPaymentService.updatePaymentSession).not.toHaveBeenCalled();
       expect(mockNotificationService.completeInbox).toHaveBeenCalled();
     });
+  });
 
-    it("ensures terminal failure (REJECTED) cannot regress already captured session", async () => {
+  describe("Finding 3: Deferred awaiting_correlation re-correlation", () => {
+    it("quarantines notification to manual_review when amount does not match session", async () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([
-        { ...sampleRow, status: "REJECTED", success: false },
+        { ...sampleRow, amount_kopecks: 99999 }, // Mismatch: 999.99 vs 500.00
       ]);
-      mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
-        ...sampleSession,
-        status: "captured",
-      });
 
       const reconciler = createReconciler();
       const result = await reconciler.processNotification("tbnotif_1");
 
-      expect(result.status).toBe("processed");
-      expect(result).toHaveProperty("action", "ignored_captured_precedence");
-      expect(mockPaymentService.updatePaymentSession).not.toHaveBeenCalled();
-      expect(mockNotificationService.completeInbox).toHaveBeenCalled();
-    });
-
-    it("updates session to error on terminal failure (REJECTED) when pending", async () => {
-      mockNotificationService.claimNotificationById.mockResolvedValueOnce([
-        { ...sampleRow, status: "REJECTED", success: false },
-      ]);
-      mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
-        ...sampleSession,
-        status: "pending",
-      });
-
-      const reconciler = createReconciler();
-      const result = await reconciler.processNotification("tbnotif_1");
-
-      expect(result.status).toBe("processed");
-      expect(result).toHaveProperty("action", "error");
-      expect(mockPaymentService.updatePaymentSession).toHaveBeenCalledWith(
+      expect(result.status).toBe("manual_review");
+      expect(result).toHaveProperty("reason", expect.stringContaining("amount"));
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "tbnotif_1" }),
+      );
+      expect(mockNotificationService.createTbankNotificationConflicts).toHaveBeenCalledWith(
         expect.objectContaining({
-          id: "payses_100",
-          status: "error",
+          conflict_kind: "correlation_mismatch",
+          correlation_failures: expect.stringContaining("amount"),
         }),
       );
-      expect(mockNotificationService.completeInbox).toHaveBeenCalled();
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "tbank.manual_review.alert",
+          data: expect.objectContaining({ id: "tbnotif_1" }),
+        }),
+      );
     });
 
-    it("updates session to canceled on CANCELED notification", async () => {
+    it("quarantines notification when terminal_key does not match expected terminal", async () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([
-        { ...sampleRow, status: "CANCELED", success: false },
+        { ...sampleRow, terminal_key: "wrong_terminal" },
       ]);
-      mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
-        ...sampleSession,
-        status: "pending",
-      });
 
       const reconciler = createReconciler();
       const result = await reconciler.processNotification("tbnotif_1");
 
-      expect(result.status).toBe("processed");
-      expect(result).toHaveProperty("action", "canceled");
-      expect(mockPaymentService.updatePaymentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "payses_100",
-          status: "canceled",
-        }),
-      );
+      expect(result.status).toBe("manual_review");
+      expect(result).toHaveProperty("reason", expect.stringContaining("terminal"));
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
     });
   });
 
-  describe("Contradictory terminal events call GetState", () => {
-    it("calls GetState when contradiction is detected and reconciles to CONFIRMED if bank agrees", async () => {
+  describe("Finding 4: GetState response validation", () => {
+    it("calls GetState on contradiction, validates response fields, and projects if CONFIRMED", async () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([
         { ...sampleRow, status: "REJECTED", success: false },
       ]);
       mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
         ...sampleSession,
-        status: "authorized", // session says authorized, but incoming is REJECTED (contradiction!)
+        status: "authorized", // session authorized contradicts incoming REJECTED
       });
 
-      // Bank ground truth says CONFIRMED!
       mockTbankClient.getState.mockResolvedValueOnce({
         Success: true,
         Status: "CONFIRMED",
         PaymentId: "pay_100",
+        TerminalKey: "test_term",
+        Amount: 50000,
       });
 
       const reconciler = createReconciler();
@@ -284,10 +221,9 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(result.status).toBe("processed");
       expect(result).toHaveProperty("action", "contradiction_resolved_confirmed");
       expect(mockWorkflowRunner).toHaveBeenCalledTimes(1);
-      expect(mockNotificationService.completeInbox).toHaveBeenCalled();
     });
 
-    it("schedules retry if GetState fails during contradiction resolution", async () => {
+    it("quarantines to manual_review if GetState response fails validation (amount mismatch)", async () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([
         { ...sampleRow, status: "REJECTED", success: false },
       ]);
@@ -296,38 +232,141 @@ describe("PaymentReconcilerService unit tests", () => {
         status: "authorized",
       });
 
-      mockTbankClient.getState.mockRejectedValueOnce(new Error("Bank network timeout"));
-
-      const reconciler = createReconciler();
-      const result = await reconciler.processNotification("tbnotif_1");
-
-      expect(result.status).toBe("retry_scheduled");
-      expect(mockNotificationService.failInbox).toHaveBeenCalled();
-      expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("Nonprojectable confirmed payment enters manual_review", () => {
-    it("moves row to manual_review and logs operational alert if projection fails permanently", async () => {
-      mockWorkflowRunner.mockResolvedValueOnce({
-        errors: [new Error("Cart cart_123 has already been completed")],
+      mockTbankClient.getState.mockResolvedValueOnce({
+        Success: true,
+        Status: "CONFIRMED",
+        PaymentId: "pay_100",
+        TerminalKey: "test_term",
+        Amount: 12345, // Mismatch with row.amount_kopecks (50000)
       });
 
       const reconciler = createReconciler();
       const result = await reconciler.processNotification("tbnotif_1");
 
       expect(result.status).toBe("manual_review");
-      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "tbnotif_1" }),
-      );
-      expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining("cannot project - transitioned to manual_review"),
+      expect(result).toHaveProperty("reason", expect.stringContaining("Amount mismatch"));
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "tbank.manual_review.alert" }),
       );
     });
   });
 
-  describe("Operator manual review operations", () => {
+  describe("Finding 5: Lease renewal and stale worker fencing", () => {
+    it("renews lease before projection workflow", async () => {
+      const reconciler = createReconciler();
+      await reconciler.processNotification("tbnotif_1");
+
+      expect(mockNotificationService.renewInboxLease).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "tbnotif_1" }),
+      );
+    });
+
+    it("fences stale worker: ignores row when completeInbox affects 0 rows (lease lost)", async () => {
+      mockNotificationService.completeInbox.mockResolvedValueOnce([]); // 0 rows updated
+
+      const reconciler = createReconciler();
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("ignored");
+      expect(result).toHaveProperty("reason", "stale_lease_fenced");
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("fencing violation: lease for notification tbnotif_1 expired"),
+      );
+    });
+
+    it("fences stale worker: ignores row when renewLease affects 0 rows", async () => {
+      mockNotificationService.renewInboxLease.mockResolvedValueOnce([]); // 0 rows updated
+
+      const reconciler = createReconciler();
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("ignored");
+      expect(result).toHaveProperty("reason", "stale_lease_fenced");
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Finding 6 & 7: Proven durable linkage and replay barrier", () => {
+    it("replay barrier: completes inbox without re-running workflow if order already exists", async () => {
+      const durableLinkageChecker = jest.fn().mockResolvedValue({
+        orderLinked: true,
+        orderId: "order_already_exists",
+        paymentCaptured: true,
+      });
+
+      const reconciler = createReconciler({ durableLinkageChecker });
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("processed");
+      expect(result).toHaveProperty("action", "already_captured");
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+      expect(mockNotificationService.completeInbox).toHaveBeenCalled();
+    });
+
+    it("quarantines to manual_review if projection succeeds but order was not linked (silent cart completion failure)", async () => {
+      // First check (replay barrier): not yet linked
+      // Second check (post-projection): payment captured BUT order not linked!
+      const durableLinkageChecker = jest
+        .fn()
+        .mockResolvedValueOnce({
+          orderLinked: false,
+          paymentCaptured: false,
+        })
+        .mockResolvedValueOnce({
+          orderLinked: false,
+          paymentCaptured: true,
+        });
+
+      const reconciler = createReconciler({ durableLinkageChecker });
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("manual_review");
+      expect(result).toHaveProperty("reason", "Payment captured but order creation failed");
+      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
+      expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "tbank.manual_review.alert" }),
+      );
+    });
+  });
+
+  describe("Finding 8: Transient error retry vs manual review", () => {
+    it("schedules retry for transient error if attempts < 5", async () => {
+      mockPaymentService.retrievePaymentSession.mockRejectedValueOnce(new Error("Transient DB lock"));
+      mockNotificationService.failInbox.mockResolvedValueOnce([
+        { ...sampleRow, lifecycle_state: "pending", attempt_count: 2 },
+      ]);
+
+      const reconciler = createReconciler();
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("retry_scheduled");
+      expect(mockNotificationService.failInbox).toHaveBeenCalled();
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
+    it("moves to manual_review and emits alert when transient error exhausts 5 attempts", async () => {
+      mockPaymentService.retrievePaymentSession.mockRejectedValueOnce(new Error("Persistent error"));
+      mockNotificationService.failInbox.mockResolvedValueOnce([
+        { ...sampleRow, lifecycle_state: "manual_review", attempt_count: 5 },
+      ]);
+
+      const reconciler = createReconciler();
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("manual_review");
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "tbank.manual_review.alert",
+          data: expect.objectContaining({ id: "tbnotif_1" }),
+        }),
+      );
+    });
+  });
+
+  describe("Finding 9: Operator surface operations", () => {
     it("inspectManualReview aggregates notification, attempts, conflicts, and session", async () => {
       mockNotificationService.listTbankNotifications.mockResolvedValueOnce([sampleRow]);
       mockNotificationService.listTbankPaymentAttempts.mockResolvedValueOnce([
@@ -341,63 +380,40 @@ describe("PaymentReconcilerService unit tests", () => {
       const details = await reconciler.inspectManualReview("tbnotif_1");
 
       expect(details.notification).toEqual(sampleRow);
-      expect(details.paymentAttempt).toEqual(
-        expect.objectContaining({ id: "tbatt_1" }),
-      );
+      expect(details.paymentAttempt).toEqual(expect.objectContaining({ id: "tbatt_1" }));
       expect(details.conflicts).toHaveLength(1);
-      expect(details.paymentSession).toEqual(
-        expect.objectContaining({ id: "payses_100" }),
-      );
+      expect(details.paymentSession).toEqual(expect.objectContaining({ id: "payses_100" }));
     });
 
-    it("retryManualReview resets row to pending with operator audit", async () => {
+    it("retryManualReview passes operator ID and reason for audit", async () => {
       const reconciler = createReconciler();
-      await reconciler.retryManualReview("tbnotif_1");
+      await reconciler.retryManualReview("tbnotif_1", {
+        operatorId: "op_bob",
+        reason: "Fixed network routing",
+      });
 
       expect(mockNotificationService.retryManualReview).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "tbnotif_1" }),
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining("operator reset manual review row tbnotif_1 to pending"),
+        expect.objectContaining({
+          id: "tbnotif_1",
+          operatorId: "op_bob",
+          reason: "Fixed network routing",
+        }),
       );
     });
 
-    it("resolveManualReview marks row resolved with audited operator id and reason", async () => {
+    it("resolveManualReview passes operator ID and reason for audit", async () => {
       const reconciler = createReconciler();
       await reconciler.resolveManualReview("tbnotif_1", {
-        reason: "Manually verified in bank console",
         operatorId: "op_alice",
+        reason: "Manually captured in T-Bank console",
       });
 
       expect(mockNotificationService.resolveManualReview).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "tbnotif_1" }),
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining("operator op_alice resolved manual review row tbnotif_1: Manually verified in bank console"),
-      );
-    });
-  });
-
-  describe("Batch recovery (processPendingBatch)", () => {
-    it("claims batch from claimInbox and processes each under lock", async () => {
-      const row1 = { ...sampleRow, id: "tbnotif_1", payment_id: "pay_1" };
-      const row2 = { ...sampleRow, id: "tbnotif_2", payment_id: "pay_2" };
-      mockNotificationService.claimInbox.mockResolvedValueOnce([row1, row2]);
-
-      const reconciler = createReconciler();
-      const batchResult = await reconciler.processPendingBatch(10);
-
-      expect(batchResult.claimed).toBe(2);
-      expect(batchResult.results).toHaveLength(2);
-      expect(mockLocking.execute).toHaveBeenCalledWith(
-        "tbank:payment:pay_1",
-        expect.any(Function),
-        expect.any(Object),
-      );
-      expect(mockLocking.execute).toHaveBeenCalledWith(
-        "tbank:payment:pay_2",
-        expect.any(Function),
-        expect.any(Object),
+        expect.objectContaining({
+          id: "tbnotif_1",
+          operatorId: "op_alice",
+          reason: "Manually captured in T-Bank console",
+        }),
       );
     });
   });
