@@ -440,3 +440,13 @@
   }
 
 }
+.taxonomy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  padding: 12px 0;
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.taxonomy a[aria-current="page"] { text-decoration: underline; text-underline-offset: 4px; }

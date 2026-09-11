@@ -558,3 +558,18 @@
     gap: 8px;
   }
 }
+.characteristics {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-light);
+  font-size: 13px;
+  line-height: 21px;
+  overflow-wrap: anywhere;
+}
+
+.characteristics dl > div { margin-top: 12px; }
+.characteristics dt { color: var(--text-secondary); }
+.characteristics dd { margin: 0; white-space: pre-line; }
+.characteristics a { display: inline-block; margin-top: 16px; text-decoration: underline; }
+.labelImages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.labelImages img { width: 100%; height: auto; object-fit: contain; }

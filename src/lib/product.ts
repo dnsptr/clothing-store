@@ -22,6 +22,10 @@ export interface Product {
    * описания — валидное состояние, витрина в этом случае не показывает блок.
    */
   description?: string;
+  characteristics?: { label: string; value: string }[];
+  registryUrl?: string;
+  labelImages?: { name: string; url: string }[];
+  categorySlugs?: string[];
   price: number;
   category: string;
   categorySlug: string;

@@ -96,6 +96,28 @@ test('zero revalidation and cancellation are passed to fetch', async () => {
   assert.equal(requests[0].options.cache, 'no-store');
 });
 
+test('public product characteristics use only supported fields and HTTPS registry links', async () => {
+  const { api } = client([fixture({ metadata: { catalog_profile: {
+    composition: '70% viscose, 30% polyester', lining: 'old lining', no_lining: true,
+    registry_url: 'javascript:alert(1)', internal_note: 'not public',
+    label_images: [{ name: 'label', url: 'https://assets.example/label.jpg' }, { url: 'javascript:alert(1)' }],
+  } } })]);
+  const product = await api.fetchMedusaProductByFrontendId('prod_admin');
+  assert.equal(product.characteristics.length, 2);
+  assert.equal(product.characteristics[0].value, '70% viscose, 30% polyester');
+  assert.equal(product.registryUrl, undefined);
+  assert.equal(product.labelImages.length, 1);
+  assert.equal(JSON.stringify(product).includes('not public'), false);
+});
+
+test('collection and category filters are both sent to Medusa', async () => {
+  const { api, requests } = client();
+  await api.fetchMedusaProducts({ limit: 24, offset: 24, categoryId: 'pcat_1', collectionId: 'pcol_1' });
+  assert.equal(requests[0].url.searchParams.get('collection_id[]'), 'pcol_1');
+  assert.equal(requests[0].url.searchParams.get('category_id[]'), 'pcat_1');
+  assert.equal(requests[0].url.searchParams.get('offset'), '24');
+});
+
 test('only the Pages export declares static product parameters', async () => {
   const page = ts.transpileModule(
     readFileSync(new URL('../../src/app/product/[id]/page.tsx', import.meta.url), 'utf8'),

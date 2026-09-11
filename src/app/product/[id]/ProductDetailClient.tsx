@@ -439,11 +439,21 @@ function ProductView({ product }: { product: Product }) {
               </div>
             )}
 
-            {/* Здесь были аккордеоны «Наличие в магазинах», «Обмеры изделия» и
-                «Состав и уход». Их содержимое было одинаковым для всех товаров и
-                ничем не подкреплено: примерки в магазине нет, обмеров изделий в
-                данных нет, состав неизвестен. Разделы вернутся, когда эти данные
-                появятся у товара, а не раньше. */}
+            {!!product.characteristics?.length && (
+              <section className={styles.characteristics} aria-label="Характеристики изделия">
+                <h2 className={styles.optionTitle}>Информация об изделии</h2>
+                <dl>{product.characteristics.map((item) => (
+                  <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>
+                ))}</dl>
+                {product.registryUrl && <a href={product.registryUrl} target="_blank" rel="noopener noreferrer">Запись в реестре деклараций и сертификатов</a>}
+              </section>
+            )}
+            {!!product.labelImages?.length && <details className={styles.characteristics}>
+              <summary>Этикетки и вшивные ярлыки</summary>
+              <div className={styles.labelImages}>{product.labelImages.map((image, index) => <a key={`${image.url}-${index}`} href={withBasePath(image.url)} target="_blank" rel="noopener noreferrer" aria-label={`Открыть фото этикетки ${index + 1}`}>
+                <Image src={withBasePath(image.url)} alt={`Этикетка ${product.name}, ${index + 1}`} width={400} height={500} sizes="(max-width: 768px) 45vw, 200px" />
+              </a>)}</div>
+            </details>}
           </div>
         </aside>
       </div>

@@ -8,7 +8,7 @@ import Footer from "../../components/Footer";
 import ProductCard from "../../components/ProductCard";
 import type { Product } from "../../data/mockData";
 import { useCatalog } from "../../context/CatalogContext";
-import { fetchMedusaCategories, fetchMedusaProducts } from "../../lib/medusa";
+import { fetchMedusaCategories, fetchMedusaCollections, fetchMedusaProducts } from "../../lib/medusa";
 import {
   CATALOG_PRIMARY_NAV,
   CLOTHING_SECTION_CATEGORY_SLUGS,
@@ -50,6 +50,9 @@ function CatalogContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
+  const collectionParam = searchParams.get("collection");
+  const [catalogCategories, setCatalogCategories] = useState<{ id: string; name: string; handle: string }[]>([]);
+  const [collections, setCollections] = useState<{ id: string; title: string; handle: string }[]>([]);
   const sectionParam = searchParams.get("section");
   const materialParam = searchParams.get("material");
   const sizeParam = searchParams.get("size");
@@ -87,7 +90,7 @@ function CatalogContent() {
 
   // Slug (== Medusa category handle) → id, resolved for server-side filtering.
   const categoryId = categoryParam ? categoryMap?.get(categoryParam) : undefined;
-  const queryKey = categoryParam ?? "__all__";
+  const queryKey = JSON.stringify([categoryParam, collectionParam]);
   const categoriesReady = categoryMap !== null;
   const hasPageForKey = pageData?.key === queryKey;
   const pageErroredForKey = pageErrorKey === queryKey;
@@ -99,6 +102,7 @@ function CatalogContent() {
     fetchMedusaCategories(controller.signal)
       .then((categories) => {
         if (controller.signal.aborted) return;
+        setCatalogCategories(categories);
         setCategoryMap(
           new Map(categories.map((category): [string, string] => [category.handle, category.id])),
         );
@@ -113,6 +117,17 @@ function CatalogContent() {
     return () => controller.abort();
   }, [isMedusa]);
 
+  useEffect(() => {
+    if (!isMedusa) return;
+    const controller = new AbortController();
+    fetchMedusaCollections(controller.signal).then((items) => {
+      if (!controller.signal.aborted) setCollections(items);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) console.error("Не удалось загрузить коллекции", error);
+    });
+    return () => controller.abort();
+  }, [isMedusa]);
+
   // Load the first page whenever the selected category changes. Loading/error are
   // DERIVED below from whether pageData matches queryKey, so this effect never
   // sets state synchronously (keeps react-hooks/set-state-in-effect satisfied).
@@ -122,7 +137,7 @@ function CatalogContent() {
     if (hasPageForKey || pageErroredForKey) return;
 
     const controller = new AbortController();
-    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset: 0, categoryId }, controller.signal)
+    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset: 0, categoryId, collectionId: collectionParam ?? undefined }, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return;
         setPageData({ key: queryKey, products: page.products, count: page.count });
@@ -134,7 +149,7 @@ function CatalogContent() {
         setPageErrorKey(queryKey);
       });
     return () => controller.abort();
-  }, [isMedusa, categoryParam, categoriesReady, hasPageForKey, pageErroredForKey, categoryId, queryKey]);
+  }, [isMedusa, categoryParam, collectionParam, categoriesReady, hasPageForKey, pageErroredForKey, categoryId, queryKey]);
 
   // Abort any in-flight "load more" on unmount.
   useEffect(() => () => loadMoreAbortRef.current?.abort(), []);
@@ -150,7 +165,7 @@ function CatalogContent() {
     const offset = pageData.products.length;
 
     setIsLoadingMore(true);
-    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset, categoryId }, controller.signal)
+    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset, categoryId, collectionId: collectionParam ?? undefined }, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return;
         setPageData((previous) => {
@@ -243,7 +258,7 @@ function CatalogContent() {
     return 0;
   });
 
-  const title = getCatalogTitle({
+  const title = collections.find((collection) => collection.id === collectionParam)?.title ?? catalogCategories.find((category) => category.handle === categoryParam)?.name ?? getCatalogTitle({
     category: categoryParam,
     material: materialParam,
     section: sectionParam,
@@ -257,7 +272,7 @@ function CatalogContent() {
     if (params.has("material")) return params.get("material") === materialParam;
     if (params.has("category")) return params.get("category") === categoryParam;
 
-    return !categoryParam && !sectionParam && !materialParam;
+    return !categoryParam && !sectionParam && !materialParam && !collectionParam;
   };
 
   const updateCatalogParam = (key: string, value: string) => {
@@ -325,6 +340,12 @@ function CatalogContent() {
           <section className={styles.titleBlock}>
             <h1 className={styles.title}>{title}</h1>
           </section>
+          {isMedusa && (catalogCategories.length > 0 || collections.length > 0) && (
+            <nav className={styles.taxonomy} aria-label="Категории и коллекции">
+              {catalogCategories.map((category) => <Link key={category.id} href={`/catalog?category=${encodeURIComponent(category.handle)}`} aria-current={categoryParam === category.handle ? "page" : undefined}>{category.name}</Link>)}
+              {collections.map((collection) => <Link key={collection.id} href={`/catalog?collection=${encodeURIComponent(collection.id)}`} aria-current={collectionParam === collection.id ? "page" : undefined}>{collection.title}</Link>)}
+            </nav>
+          )}
         </div>
 
         <div className={styles.filtersBand}>
