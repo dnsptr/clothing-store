@@ -44,6 +44,22 @@ export type TBankGetStateResult = TBankResponse & {
   OrderId?: string;
 };
 
+export type TBankCheckOrderPayment = {
+  PaymentId: string | number;
+  Amount?: number;
+  Status?: string;
+  Rrn?: string;
+  Success?: boolean;
+  ErrorCode?: string;
+  Message?: string;
+};
+
+export type TBankCheckOrderResult = TBankResponse & {
+  OrderId?: string;
+  Status?: string;
+  Payments?: TBankCheckOrderPayment[];
+};
+
 /**
  * Ошибка вызова Т-Банка. Отдельный класс, потому что `ErrorCode` нужен
  * вызывающему коду: по нему различаются «отказ банка» (обрабатываем как
@@ -187,6 +203,16 @@ export class TBankClient {
   /** Текущее состояние платежа. Основа reconciliation-джобы (PAY-005). */
   async getState(paymentId: string): Promise<TBankGetStateResult> {
     return this.call<TBankGetStateResult>("GetState", { PaymentId: paymentId });
+  }
+
+  /**
+   * Проверка заказа по OrderId.
+   *
+   * Используется для устранения неопределённости (indeterminate), когда `Init`
+   * завершился сетевым таймаутом до получения `PaymentId`.
+   */
+  async checkOrder(orderId: string): Promise<TBankCheckOrderResult> {
+    return this.call<TBankCheckOrderResult>("CheckOrder", { OrderId: orderId });
   }
 
   /**

@@ -49,10 +49,22 @@ export type StoredNotification = {
   readonly canonical_payload_hash: string;
 };
 
+export interface TbankPaymentAttemptRow {
+  readonly id: string;
+  readonly payment_session_id: string;
+  readonly provider_id: string;
+  readonly terminal_key: string;
+  readonly order_id: string;
+  readonly expected_amount_kopecks: number;
+  readonly currency_code: string;
+}
+
 export interface TbankNotificationStore {
   listTbankNotifications(filters: Readonly<Record<string, string>>): Promise<readonly StoredNotification[]>;
   createTbankNotifications(input: Readonly<Record<string, unknown>>): Promise<unknown>;
   createTbankNotificationConflicts(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+  listTbankPaymentAttempts?(filters: Readonly<Record<string, unknown>>): Promise<readonly TbankPaymentAttemptRow[]>;
+  createTbankPaymentAttempts?(input: Readonly<Record<string, unknown>>): Promise<TbankPaymentAttemptRow>;
 }
 
 export function canonicalNotificationHash(payload: Readonly<Record<string, unknown>>): string {
