@@ -17,6 +17,7 @@ export default async function tbankReconcilerJob(container: MedusaContainer) {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    throw error;
   }
 }
 

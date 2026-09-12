@@ -1,6 +1,7 @@
 import {
   defineMiddlewares,
   validateAndTransformBody,
+  validateAndTransformQuery,
 } from "@medusajs/framework/http";
 
 import {
@@ -8,6 +9,10 @@ import {
   ReorderSchema,
   UpdateSlideSchema,
 } from "./admin/content/validators";
+import {
+  ManualReviewActionSchema,
+  ManualReviewListQuerySchema,
+} from "./admin/tbank/manual-review/validators";
 
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
@@ -46,6 +51,23 @@ export default defineMiddlewares({
       matcher: "/admin/content/reorder",
       method: "POST",
       middlewares: [validateAndTransformBody(ReorderSchema)],
+    },
+    {
+      matcher: "/admin/tbank/manual-review/:id/retry",
+      method: "POST",
+      middlewares: [validateAndTransformBody(ManualReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/manual-review/:id/resolve",
+      method: "POST",
+      middlewares: [validateAndTransformBody(ManualReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/manual-review",
+      method: "GET",
+      middlewares: [
+        validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
+      ],
     },
   ],
 });

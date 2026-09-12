@@ -20,6 +20,7 @@ export default async function tbankNotificationProcessor({
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    throw error;
   }
 }
 

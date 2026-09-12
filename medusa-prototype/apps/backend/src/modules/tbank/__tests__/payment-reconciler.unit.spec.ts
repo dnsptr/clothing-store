@@ -1,14 +1,17 @@
-import { PaymentReconcilerService } from "../services/payment-reconciler";
+import {
+  PaymentReconcilerService,
+  type PaymentReconcilerDependencies,
+} from "../services/payment-reconciler";
 import type { PaymentSessionDTO } from "@medusajs/types";
 
 describe("PaymentReconcilerService unit tests", () => {
   let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock };
-  let mockNotificationService: any;
-  let mockPaymentService: any;
-  let mockLocking: any;
-  let mockTbankClient: any;
+  let mockNotificationService: Record<string, jest.Mock>;
+  let mockPaymentService: Record<string, jest.Mock>;
+  let mockLocking: Record<string, jest.Mock>;
+  let mockTbankClient: { getState: jest.Mock };
   let mockWorkflowRunner: jest.Mock;
-  let mockEventBus: { emit: jest.Mock };
+  let projectionCompleted: boolean;
 
   const sampleRow = {
     id: "tbnotif_1",
@@ -36,6 +39,7 @@ describe("PaymentReconcilerService unit tests", () => {
   };
 
   beforeEach(() => {
+    projectionCompleted = false;
     mockLogger = {
       info: jest.fn(),
       warn: jest.fn(),
@@ -43,6 +47,7 @@ describe("PaymentReconcilerService unit tests", () => {
     };
 
     mockNotificationService = {
+      quarantineExpiredExhausted: jest.fn().mockResolvedValue([]),
       claimNotificationById: jest.fn().mockResolvedValue([sampleRow]),
       claimInbox: jest.fn().mockResolvedValue([sampleRow]),
       renewInboxLease: jest.fn().mockResolvedValue([sampleRow]),
@@ -71,6 +76,7 @@ describe("PaymentReconcilerService unit tests", () => {
     };
 
     mockWorkflowRunner = jest.fn().mockImplementation(async () => {
+      projectionCompleted = true;
       mockPaymentService.retrievePaymentSession.mockResolvedValue({
         ...sampleSession,
         status: "captured",
@@ -78,23 +84,25 @@ describe("PaymentReconcilerService unit tests", () => {
       return { errors: [], result: { id: "order_1" } };
     });
 
-    mockEventBus = {
-      emit: jest.fn().mockResolvedValue(undefined),
-    };
   });
 
-  function createReconciler(overrides = {}) {
-    return new PaymentReconcilerService({
-      logger: mockLogger as any,
+  function createReconciler(overrides: Partial<PaymentReconcilerDependencies> = {}) {
+    const dependencies = {
+      logger: mockLogger,
       notifications: mockNotificationService,
       payment: mockPaymentService,
       locking: mockLocking,
       tbankClient: mockTbankClient,
       expectedTerminalKey: "test_term",
       workflowRunner: mockWorkflowRunner,
-      eventBus: mockEventBus,
+      durableLinkageChecker: jest.fn().mockImplementation(async () => ({
+        orderLinked: projectionCompleted,
+        paymentCaptured: projectionCompleted,
+      })),
       ...overrides,
-    });
+    };
+    const reconciler: PaymentReconcilerService = Reflect.construct(PaymentReconcilerService, [dependencies]);
+    return reconciler;
   }
 
   describe("Finding 1: Lock timeout unit", () => {
@@ -137,7 +145,7 @@ describe("PaymentReconcilerService unit tests", () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([
         { ...sampleRow, status: "AUTHORIZED" },
       ]);
-      mockPaymentService.retrievePaymentSession.mockResolvedValueOnce({
+      mockPaymentService.retrievePaymentSession.mockResolvedValue({
         ...sampleSession,
         status: "captured",
       });
@@ -173,12 +181,7 @@ describe("PaymentReconcilerService unit tests", () => {
           correlation_failures: expect.stringContaining("amount"),
         }),
       );
-      expect(mockEventBus.emit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: "tbank.manual_review.alert",
-          data: expect.objectContaining({ id: "tbnotif_1" }),
-        }),
-      );
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("tbank.manual_review"));
     });
 
     it("quarantines notification when terminal_key does not match expected terminal", async () => {
@@ -211,6 +214,7 @@ describe("PaymentReconcilerService unit tests", () => {
         Status: "CONFIRMED",
         PaymentId: "pay_100",
         TerminalKey: "test_term",
+        OrderId: "payses_100",
         Amount: 50000,
       });
 
@@ -237,6 +241,7 @@ describe("PaymentReconcilerService unit tests", () => {
         Status: "CONFIRMED",
         PaymentId: "pay_100",
         TerminalKey: "test_term",
+        OrderId: "payses_100",
         Amount: 12345, // Mismatch with row.amount_kopecks (50000)
       });
 
@@ -244,12 +249,10 @@ describe("PaymentReconcilerService unit tests", () => {
       const result = await reconciler.processNotification("tbnotif_1");
 
       expect(result.status).toBe("manual_review");
-      expect(result).toHaveProperty("reason", expect.stringContaining("Amount mismatch"));
+      expect(result).toHaveProperty("reason", expect.stringContaining("Amount"));
       expect(mockWorkflowRunner).not.toHaveBeenCalled();
       expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
-      expect(mockEventBus.emit).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "tbank.manual_review.alert" }),
-      );
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("tbank.manual_review"));
     });
   });
 
@@ -272,7 +275,7 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(result.status).toBe("ignored");
       expect(result).toHaveProperty("reason", "stale_lease_fenced");
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("fencing violation: lease for notification tbnotif_1 expired"),
+        expect.stringContaining("stale lease fenced for tbnotif_1"),
       );
     });
 
@@ -305,7 +308,7 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(mockNotificationService.completeInbox).toHaveBeenCalled();
     });
 
-    it("quarantines to manual_review if projection succeeds but order was not linked (silent cart completion failure)", async () => {
+    it("retries if projection succeeds but order was not linked (silent cart completion failure)", async () => {
       // First check (replay barrier): not yet linked
       // Second check (post-projection): payment captured BUT order not linked!
       const durableLinkageChecker = jest
@@ -322,13 +325,11 @@ describe("PaymentReconcilerService unit tests", () => {
       const reconciler = createReconciler({ durableLinkageChecker });
       const result = await reconciler.processNotification("tbnotif_1");
 
-      expect(result.status).toBe("manual_review");
-      expect(result).toHaveProperty("reason", "Payment captured but order creation failed");
-      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
+      expect(result.status).toBe("retry_scheduled");
+      expect(result).toHaveProperty("error", expect.stringContaining("order creation"));
+      expect(mockNotificationService.failInbox).toHaveBeenCalled();
+      expect(mockNotificationService.quarantineManualReview).not.toHaveBeenCalled();
       expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
-      expect(mockEventBus.emit).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "tbank.manual_review.alert" }),
-      );
     });
   });
 
@@ -344,7 +345,6 @@ describe("PaymentReconcilerService unit tests", () => {
 
       expect(result.status).toBe("retry_scheduled");
       expect(mockNotificationService.failInbox).toHaveBeenCalled();
-      expect(mockEventBus.emit).not.toHaveBeenCalled();
     });
 
     it("moves to manual_review and emits alert when transient error exhausts 5 attempts", async () => {
@@ -357,18 +357,15 @@ describe("PaymentReconcilerService unit tests", () => {
       const result = await reconciler.processNotification("tbnotif_1");
 
       expect(result.status).toBe("manual_review");
-      expect(mockEventBus.emit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: "tbank.manual_review.alert",
-          data: expect.objectContaining({ id: "tbnotif_1" }),
-        }),
-      );
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("tbank.manual_review"));
     });
   });
 
   describe("Finding 9: Operator surface operations", () => {
+    const manualReviewRow = { ...sampleRow, lifecycle_state: "manual_review" };
+
     it("inspectManualReview aggregates notification, attempts, conflicts, and session", async () => {
-      mockNotificationService.listTbankNotifications.mockResolvedValueOnce([sampleRow]);
+      mockNotificationService.listTbankNotifications.mockResolvedValueOnce([manualReviewRow]);
       mockNotificationService.listTbankPaymentAttempts.mockResolvedValueOnce([
         { id: "tbatt_1", payment_session_id: "payses_100" },
       ]);
@@ -379,13 +376,26 @@ describe("PaymentReconcilerService unit tests", () => {
       const reconciler = createReconciler();
       const details = await reconciler.inspectManualReview("tbnotif_1");
 
-      expect(details.notification).toEqual(sampleRow);
+      expect(details.notification).toEqual(manualReviewRow);
       expect(details.paymentAttempt).toEqual(expect.objectContaining({ id: "tbatt_1" }));
       expect(details.conflicts).toHaveLength(1);
       expect(details.paymentSession).toEqual(expect.objectContaining({ id: "payses_100" }));
+      expect(mockNotificationService.listTbankNotifications).toHaveBeenCalledWith(
+        { id: "tbnotif_1" },
+        { take: 1 },
+      );
+      expect(mockNotificationService.listTbankPaymentAttempts).toHaveBeenCalledWith(
+        { order_id: "payses_100" },
+        { take: 1 },
+      );
+      expect(mockNotificationService.listTbankNotificationConflicts).toHaveBeenCalledWith(
+        { payment_id: "pay_100" },
+        { take: 100 },
+      );
     });
 
     it("retryManualReview passes operator ID and reason for audit", async () => {
+      mockNotificationService.listTbankNotifications.mockResolvedValueOnce([manualReviewRow]);
       const reconciler = createReconciler();
       await reconciler.retryManualReview("tbnotif_1", {
         operatorId: "op_bob",
@@ -402,6 +412,7 @@ describe("PaymentReconcilerService unit tests", () => {
     });
 
     it("resolveManualReview passes operator ID and reason for audit", async () => {
+      mockNotificationService.listTbankNotifications.mockResolvedValueOnce([manualReviewRow]);
       const reconciler = createReconciler();
       await reconciler.resolveManualReview("tbnotif_1", {
         operatorId: "op_alice",

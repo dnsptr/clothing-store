@@ -1,16 +1,25 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { PaymentReconcilerService } from "../../../../../modules/tbank/services/payment-reconciler";
+import {
+  ManualReviewNotFoundError,
+  ManualReviewStateError,
+} from "../../../../../modules/tbank/services/manual-review-operations";
+import { manualReviewDetailsDto } from "../dto";
 
 export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void> {
   const { id } = req.params;
   try {
-    const reconciler = new PaymentReconcilerService({ container: req.scope as any });
+    const reconciler = new PaymentReconcilerService({ container: req.scope });
     const details = await reconciler.inspectManualReview(id);
-    res.json({ details });
+    res.json({ details: manualReviewDetailsDto(details) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("not found")) {
+    if (err instanceof ManualReviewNotFoundError) {
       res.status(404).json({ message });
+      return;
+    }
+    if (err instanceof ManualReviewStateError) {
+      res.status(409).json({ message });
       return;
     }
     req.scope.resolve("logger").error(`Failed to inspect manual review row ${id}: ${message}`);

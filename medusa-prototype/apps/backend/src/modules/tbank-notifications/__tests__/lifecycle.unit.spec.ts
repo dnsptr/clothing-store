@@ -106,7 +106,7 @@ describe("T-Bank inbox lease and retry lifecycle", () => {
 
     expect(rows).toEqual([{ id: "tbnotif_1", lifecycle_state: "leased" }]);
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE SKIP LOCKED"), [
-      now, now, now, now, now, 20, "lease-1", new Date(now.getTime() + INBOX_LEASE_MS), now, now,
+      now, now, 20, "lease-1", new Date(now.getTime() + INBOX_LEASE_MS), now, now,
     ]);
   });
 

@@ -50,6 +50,12 @@ async function rebuildSchema(client: Client): Promise<void> {
 function createNotificationStore(client: Client): TbankNotificationStore {
   const manager = queryManager(client);
   return {
+    quarantineExpiredExhausted: (input) =>
+      TbankNotificationModuleService.prototype.quarantineExpiredExhausted.call(
+        {},
+        input,
+        { manager } as never,
+      ),
     claimNotificationById: (input) =>
       TbankNotificationModuleService.prototype.claimNotificationById.call(
         {},
@@ -285,7 +291,7 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     expect(res.rows[0].lifecycle_state).toBe("processed");
   });
 
-  it("quarantines to manual_review when cart completion silently fails", async () => {
+  it("schedules a retry when capture succeeds before order linkage", async () => {
     await database.query(
       `INSERT INTO tbank_notification
         (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
@@ -321,15 +327,14 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     });
 
     const result = await reconciler.processNotification("tbnotif_silent_fail");
-    expect(result.status).toBe("manual_review");
-    expect(result).toHaveProperty("reason", "Payment captured but order creation failed");
+    expect(result.status).toBe("retry_scheduled");
 
-    // Row is quarantined to manual_review in PostgreSQL
+    // Row remains retryable because durable order linkage can still converge.
     const res = await database.query(
-      "SELECT lifecycle_state, manual_review_at FROM tbank_notification WHERE id = 'tbnotif_silent_fail'",
+      "SELECT lifecycle_state, next_attempt_at FROM tbank_notification WHERE id = 'tbnotif_silent_fail'",
     );
-    expect(res.rows[0].lifecycle_state).toBe("manual_review");
-    expect(res.rows[0].manual_review_at).not.toBeNull();
+    expect(res.rows[0].lifecycle_state).toBe("pending");
+    expect(res.rows[0].next_attempt_at).not.toBeNull();
   });
 
   it("fences stale worker whose lease expired during execution", async () => {
@@ -372,7 +377,7 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
       { manager: queryManager(database) } as never,
     );
     expect(reclaimed).toHaveLength(1);
-    expect((reclaimed[0] as any).lease_token).toBe(worker2Lease);
+    expect(reclaimed[0]).toEqual(expect.objectContaining({ lease_token: worker2Lease }));
 
     // Worker 1 now attempts to complete with its stale lease
     const staleCompletion = await TbankNotificationModuleService.prototype.completeInbox.call(
