@@ -47,7 +47,7 @@ const CatalogEditorPage = () => {
           options: [{ title: "Размер", values: [normalizedSize] }, { title: "Цвет", values: [color.trim()] }],
           variants: [{ title: `${color.trim()} / ${normalizedSize}`, sku: sku.trim(), manage_inventory: true, allow_backorder: false,
             options: { "Размер": normalizedSize, "Цвет": color.trim() }, prices: price ? [{ currency_code: "rub", amount }] : [] }],
-        } : {}),
+        } : { options: [{ title: "Размер", values: [] }, { title: "Цвет", values: [] }], variants: [] }),
       })
       setSelected(product.id); setName(""); setArticle(""); setSku(""); setColor(""); setSize(""); setPrice("")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Не удалось создать черновик") }
