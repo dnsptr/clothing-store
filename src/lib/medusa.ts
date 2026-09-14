@@ -657,6 +657,31 @@ function parseCompleteCartResponse(
   throw new MedusaContractError(endpoint, "type", 'is neither "order" nor "cart"');
 }
 
+function parsePaymentStatusResponse(
+  data: unknown,
+  endpoint: string,
+): MedusaPaymentStatus {
+  const root = expectRecord(data, endpoint, "$");
+  const payment = expectString(root.payment, endpoint, "payment");
+  const order = expectString(root.order, endpoint, "order");
+
+  if (payment !== "pending" && payment !== "confirmed" && payment !== "failed") {
+    throw new MedusaContractError(endpoint, "payment", `is invalid: ${payment}`);
+  }
+  if (order !== "pending" && order !== "ready") {
+    throw new MedusaContractError(endpoint, "order", `is invalid: ${order}`);
+  }
+  if (order === "ready" && payment !== "confirmed") {
+    throw new MedusaContractError(
+      endpoint,
+      "order",
+      `cannot be ready when payment is ${payment}`,
+    );
+  }
+
+  return { payment, order } as MedusaPaymentStatus;
+}
+
 async function readBodySnippet(response: Response): Promise<string | undefined> {
   try {
     const text = await response.text();
@@ -1001,4 +1026,27 @@ export async function completeMedusaCart(cartId: string) {
     body: {},
     parse: parseCompleteCartResponse,
   });
+}
+
+export type MedusaPaymentStatus =
+  | { readonly payment: "pending"; readonly order: "pending" }
+  | { readonly payment: "failed"; readonly order: "pending" }
+  | { readonly payment: "confirmed"; readonly order: "pending" | "ready" };
+
+export async function getMedusaPaymentStatus(
+  cartId: string,
+  signal?: AbortSignal,
+): Promise<MedusaPaymentStatus | null> {
+  const endpoint = `/store/payment-status/${encodeURIComponent(cartId)}`;
+  try {
+    return await medusaRequest<MedusaPaymentStatus>(endpoint, {
+      signal,
+      parse: parsePaymentStatusResponse,
+    });
+  } catch (error) {
+    if (error instanceof MedusaRequestError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }

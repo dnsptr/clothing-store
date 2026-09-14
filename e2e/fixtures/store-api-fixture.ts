@@ -12,6 +12,14 @@ export const PAYMENT_SCENARIOS = [
   "wrong_provider",
 ] as const;
 
+export const FIXTURE_RETURN_CARTS = {
+  pending: "cart_01J00000000000000000000000",
+  confirmed: "cart_01J00000000000000000000001",
+  ready: "cart_01J00000000000000000000002",
+  failed: "cart_01J00000000000000000000003",
+  foreign: "cart_01J00000000000000000000004",
+} as const;
+
 export type PaymentScenario = (typeof PAYMENT_SCENARIOS)[number];
 
 type RequestObservation = {
@@ -115,13 +123,19 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  if (chunks.length === 0) return null;
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (text.length === 0) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 export async function startStoreApiFixture(port: number): Promise<StoreApiFixture> {
   let scenario: PaymentScenario = "valid";
   let observations: RequestObservation[] = [];
+  const statusOverrides = new Map<string, object | "not_found">();
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://fixture.local");
     const method = request.method ?? "GET";
@@ -135,6 +149,7 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
     }
     if (requestUrl.pathname === "/__control/reset" && method === "POST") {
       observations = [];
+      statusOverrides.clear();
       sendJson(response, 200, { reset: true });
       return;
     }
@@ -151,6 +166,20 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       sendJson(response, 200, { scenario });
       return;
     }
+    if (requestUrl.pathname === "/__control/payment-status" && method === "POST") {
+      const body = (await readJsonBody(request)) as { cartId?: string; status?: object | "not_found" } | null;
+      if (body?.cartId) {
+        if (body.status === undefined || body.status === null) {
+          statusOverrides.delete(body.cartId);
+        } else {
+          statusOverrides.set(body.cartId, body.status);
+        }
+        sendJson(response, 200, { updated: true });
+        return;
+      }
+      sendJson(response, 400, { error: "missing_cart_id" });
+      return;
+    }
     if (requestUrl.pathname === "/__control/observations") {
       sendJson(response, 200, { observations });
       return;
@@ -161,16 +190,59 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       sendJson(response, 200, { products: [PRODUCT], count: 1 });
       return;
     }
-    if (requestUrl.pathname === "/store/carts/cart_baseline") {
-      sendJson(response, 200, { cart: CART });
+
+    const paymentStatusPrefix = "/store/payment-status/";
+    if (requestUrl.pathname.startsWith(paymentStatusPrefix)) {
+      const cartId = decodeURIComponent(requestUrl.pathname.slice(paymentStatusPrefix.length));
+      response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+
+      if (statusOverrides.has(cartId)) {
+        const override = statusOverrides.get(cartId);
+        if (override === "not_found") {
+          sendJson(response, 404, { error: "cart_not_found" });
+          return;
+        }
+        sendJson(response, 200, override as object);
+        return;
+      }
+
+      if (cartId === FIXTURE_RETURN_CARTS.pending) {
+        sendJson(response, 200, { payment: "pending", order: "pending" });
+        return;
+      }
+      if (cartId === FIXTURE_RETURN_CARTS.confirmed) {
+        sendJson(response, 200, { payment: "confirmed", order: "pending" });
+        return;
+      }
+      if (cartId === FIXTURE_RETURN_CARTS.ready) {
+        sendJson(response, 200, { payment: "confirmed", order: "ready" });
+        return;
+      }
+      if (cartId === FIXTURE_RETURN_CARTS.failed) {
+        sendJson(response, 200, { payment: "failed", order: "pending" });
+        return;
+      }
+      sendJson(response, 404, { error: "cart_not_found" });
+      return;
+    }
+
+    if (
+      requestUrl.pathname.startsWith("/store/carts/") &&
+      !requestUrl.pathname.includes("/shipping-methods") &&
+      !requestUrl.pathname.includes("/complete") &&
+      !requestUrl.pathname.includes("/line-items")
+    ) {
+      const id = requestUrl.pathname.slice("/store/carts/".length);
+      sendJson(response, 200, { cart: { ...CART, id } });
       return;
     }
     if (requestUrl.pathname === "/store/shipping-options") {
       sendJson(response, 200, { shipping_options: [{ id: "shipping_baseline", name: "Fixture delivery", amount: 0 }] });
       return;
     }
-    if (requestUrl.pathname === "/store/carts/cart_baseline/shipping-methods") {
-      sendJson(response, 200, { cart: CART });
+    if (requestUrl.pathname.startsWith("/store/carts/") && requestUrl.pathname.endsWith("/shipping-methods")) {
+      const id = requestUrl.pathname.slice("/store/carts/".length, -"/shipping-methods".length);
+      sendJson(response, 200, { cart: { ...CART, id } });
       return;
     }
     if (requestUrl.pathname === "/store/payment-collections") {
@@ -181,7 +253,7 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       sendJson(response, 200, { payment_collection: { id: "paycol_baseline", payment_sessions: [sessionFor(scenario)] } });
       return;
     }
-    if (requestUrl.pathname === "/store/carts/cart_baseline/complete") {
+    if (requestUrl.pathname.startsWith("/store/carts/") && requestUrl.pathname.endsWith("/complete")) {
       sendJson(response, 200, { type: "order", order: { id: "order_unexpected" } });
       return;
     }

@@ -137,6 +137,9 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BASE_PATH: githubPagesBasePath,
   },
+  turbopack: {
+    root: process.cwd().replace(/\\/g, "/"),
+  },
 };
 
 export default nextConfig;

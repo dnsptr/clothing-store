@@ -77,6 +77,7 @@ interface CartContextType {
   cartTaxTotal: number | null;
   cartDiscountTotal: number | null;
   isCartMutating: boolean;
+  clearCart: () => void;
   /** Последняя неудавшаяся операция с корзиной, текстом для покупателя. */
   cartError: string | null;
   dismissCartError: () => void;
@@ -93,9 +94,19 @@ interface CartContextType {
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
-const CART_STORAGE_KEY = `clothing-store-cart-${storefrontDataMode}`;
-const MEDUSA_CART_STORAGE_KEY = "clothing-store-medusa-cart";
-const FAVORITES_STORAGE_KEY = "clothing-store-favorites";
+export const CART_STORAGE_KEY = `clothing-store-cart-${storefrontDataMode}`;
+export const MEDUSA_CART_STORAGE_KEY = "clothing-store-medusa-cart";
+export const FAVORITES_STORAGE_KEY = "clothing-store-favorites";
+
+export function getStoredCartId(): string | null {
+  if (typeof window === "undefined") return null;
+  return (
+    window.localStorage.getItem(MEDUSA_CART_STORAGE_KEY) ||
+    window.localStorage.getItem("medusa_cart_id") ||
+    window.localStorage.getItem("medusa_cart_id_v1") ||
+    null
+  );
+}
 
 function isCartItem(value: unknown): value is CartItem {
   if (!value || typeof value !== "object") return false;
@@ -228,6 +239,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   const restoreRemoteCart = useEffectEvent((cart: Awaited<ReturnType<typeof retrieveMedusaCart>>) => {
+    const currentCartId = window.localStorage.getItem(MEDUSA_CART_STORAGE_KEY);
+    if (!currentCartId || currentCartId !== cart.id) return;
     syncRemoteCart(cart);
   });
 
@@ -585,12 +598,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       throw new Error(response.error.message);
     }
 
+    clearCart();
+    return { type: "order", id: response.order.id, displayId: response.order.display_id };
+  });
+
+  const clearCart = () => {
     window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY);
+    window.localStorage.removeItem(CART_STORAGE_KEY);
+    window.localStorage.removeItem("medusa_cart_id");
+    window.localStorage.removeItem("medusa_cart_id_v1");
     cartItemsRef.current = [];
     setCartItems([]);
     setServerCartTotal(null);
-    return { type: "order", id: response.order.id, displayId: response.order.display_id };
-  });
+    setServerCartTotals({ subtotal: 0, shipping: 0, tax: 0, discount: 0 });
+  };
 
   const toggleFavorite = (productId: string) => {
     setFavoriteProductIds((previous) =>
@@ -627,6 +648,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         prepareCheckout,
         getShippingOptions,
         completeCheckout,
+        clearCart,
         toggleCart,
         setIsCartOpen,
         cartCount,
