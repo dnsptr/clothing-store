@@ -18,7 +18,11 @@ $RunError = $null
 $ComposeAttempted = $false
 $StartedAt = [DateTime]::UtcNow
 if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
-    $TaskSubdir = if ($Mode -eq "reconciler") { "task-4" } else { "task-1" }
+    $TaskSubdir = switch ($Mode) {
+        "reconciler" { "task-4" }
+        "status" { "task-6" }
+        default { "task-1" }
+    }
     $EvidenceDirectory = Join-Path $RepositoryRoot ".omo\evidence\payment-lifecycle-hardening\$TaskSubdir\harness-$PID"
 }
 [System.IO.Directory]::CreateDirectory($EvidenceDirectory) | Out-Null
@@ -61,20 +65,119 @@ function Inspect-DockerResource {
     }
 }
 
-try {
-    $ComposeAttempted = $true
-    $ComposeExitCode = Invoke-CommandForHarness -Command @{
-        Name = "Compose up"
-        FilePath = "docker"
-        Arguments = @("compose", "-p", $ProjectName, "-f", $ComposeFile, "up", "-d", "--wait")
-        TimeoutSeconds = $ComposeTimeoutSeconds
-        LogPrefix = "compose-up"
+function Invoke-StatusProbe {
+    param(
+        [string]$Name,
+        [string]$Path,
+        [int]$ExpectedStatus,
+        [string]$ExpectedPayment,
+        [string]$ExpectedOrder
+    )
+
+    $LogPrefix = "status-$Name"
+    $BodyFile = Join-Path $EvidenceDirectory "$LogPrefix.body.json"
+    $HeadersFile = Join-Path $EvidenceDirectory "$LogPrefix.headers.txt"
+    $ExitCode = Invoke-CommandForHarness -Command @{
+        Name = "Payment status $Name"
+        FilePath = "curl.exe"
+        Arguments = @("--silent", "--show-error", "--output", $BodyFile, "--dump-header", $HeadersFile, "--write-out", "%{http_code}", "http://127.0.0.1:4174$Path")
+        TimeoutSeconds = 30
+        LogPrefix = $LogPrefix
     }
-    if ($ComposeExitCode -ne 0) {
-        throw "Payment fixture Compose services failed to start with code $ComposeExitCode."
+    if ($ExitCode -ne 0) {
+        throw "Payment status $Name curl failed with code $ExitCode."
+    }
+    $StatusCode = (Get-Content -LiteralPath (Join-Path $EvidenceDirectory "$LogPrefix.stdout.log") -Raw).Trim()
+    if ($StatusCode -ne [string]$ExpectedStatus) {
+        throw "Payment status $Name returned HTTP $StatusCode instead of $ExpectedStatus."
+    }
+    $Headers = Get-Content -LiteralPath $HeadersFile -Raw
+    if ($Headers -notmatch '(?im)^Cache-Control:\s*no-store, no-cache, must-revalidate, proxy-revalidate\s*$') {
+        throw "Payment status $Name omitted the required Cache-Control policy."
+    }
+    $RawBody = Get-Content -LiteralPath $BodyFile -Raw
+    if ($ExpectedStatus -eq 404) {
+        if (-not [string]::IsNullOrWhiteSpace($RawBody)) {
+            throw "Payment status $Name returned a body for the non-enumerating 404 contract."
+        }
+        return
+    }
+    $Body = $RawBody | ConvertFrom-Json
+    $Properties = @($Body.PSObject.Properties.Name | Sort-Object) -join ","
+    if ($Properties -ne "order,payment" -or $Body.payment -ne $ExpectedPayment -or $Body.order -ne $ExpectedOrder) {
+        throw "Payment status $Name returned an unexpected public projection."
+    }
+}
+
+try {
+    if ($Mode -ne "status") {
+        $ComposeAttempted = $true
+        $ComposeExitCode = Invoke-CommandForHarness -Command @{
+            Name = "Compose up"
+            FilePath = "docker"
+            Arguments = @("compose", "-p", $ProjectName, "-f", $ComposeFile, "up", "-d", "--wait")
+            TimeoutSeconds = $ComposeTimeoutSeconds
+            LogPrefix = "compose-up"
+        }
+        if ($ComposeExitCode -ne 0) {
+            throw "Payment fixture Compose services failed to start with code $ComposeExitCode."
+        }
     }
 
-    if ($Mode -eq "reconciler") {
+    if ($Mode -eq "status") {
+        $FixturePath = Join-Path $RepositoryRoot "e2e\fixtures\payment-status.ts"
+        $FixtureStdout = Join-Path $EvidenceDirectory "status-fixture.stdout.log"
+        $FixtureStderr = Join-Path $EvidenceDirectory "status-fixture.stderr.log"
+        $FixtureProcess = Start-Process -FilePath (Get-Command node -ErrorAction Stop).Source `
+            -ArgumentList @("--import", "tsx", $FixturePath) `
+            -WorkingDirectory (Join-Path $RepositoryRoot "medusa-prototype") `
+            -RedirectStandardOutput $FixtureStdout -RedirectStandardError $FixtureStderr `
+            -PassThru -NoNewWindow
+        $Context.TrackedProcessIds.Add($FixtureProcess.Id) | Out-Null
+
+        $Ready = $false
+        for ($Attempt = 0; $Attempt -lt 40; $Attempt++) {
+            if ($FixtureProcess.HasExited) {
+                throw "Payment status fixture exited before readiness with code $($FixtureProcess.ExitCode)."
+            }
+            $HealthCode = Invoke-CommandForHarness -Command @{
+                Name = "Payment status fixture readiness"
+                FilePath = "curl.exe"
+                Arguments = @("--silent", "--show-error", "--output", (Join-Path $EvidenceDirectory "status-health.body.json"), "--write-out", "%{http_code}", "http://127.0.0.1:4174/health")
+                TimeoutSeconds = 5
+                LogPrefix = "status-health"
+            }
+            if ($HealthCode -eq 0 -and (Get-Content -LiteralPath (Join-Path $EvidenceDirectory "status-health.stdout.log") -Raw).Trim() -eq "200") {
+                $Ready = $true
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $Ready) {
+            throw "Payment status fixture did not become ready."
+        }
+
+        Invoke-StatusProbe -Name "pending" -Path "/store/payment-status/cart_01J00000000000000000000000" -ExpectedStatus 200 -ExpectedPayment "pending" -ExpectedOrder "pending"
+        Invoke-StatusProbe -Name "confirmed" -Path "/store/payment-status/cart_01J00000000000000000000001" -ExpectedStatus 200 -ExpectedPayment "confirmed" -ExpectedOrder "pending"
+        Invoke-StatusProbe -Name "ready" -Path "/store/payment-status/cart_01J00000000000000000000002" -ExpectedStatus 200 -ExpectedPayment "confirmed" -ExpectedOrder "ready"
+        Invoke-StatusProbe -Name "failed" -Path "/store/payment-status/cart_01J00000000000000000000003" -ExpectedStatus 200 -ExpectedPayment "failed" -ExpectedOrder "pending"
+        Invoke-StatusProbe -Name "malformed" -Path "/store/payment-status/payses_01J00000000000000000000000" -ExpectedStatus 404
+        Invoke-StatusProbe -Name "unknown" -Path "/store/payment-status/cart_01J00000000000000000000009" -ExpectedStatus 404
+        Invoke-StatusProbe -Name "foreign" -Path "/store/payment-status/cart_01J00000000000000000000004" -ExpectedStatus 404
+
+        $ObservationExitCode = Invoke-CommandForHarness -Command @{
+            Name = "Payment status bank-call observation"
+            FilePath = "curl.exe"
+            Arguments = @("--silent", "--show-error", "--fail", "http://127.0.0.1:4174/__control/observations")
+            TimeoutSeconds = 30
+            LogPrefix = "status-observations"
+        }
+        $Observations = Get-Content -LiteralPath (Join-Path $EvidenceDirectory "status-observations.stdout.log") -Raw | ConvertFrom-Json
+        if ($ObservationExitCode -ne 0 -or $Observations.bank_calls -ne 0) {
+            throw "Payment status fixture observed an external bank dependency call."
+        }
+    }
+    elseif ($Mode -eq "reconciler") {
         $WorktreeRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
         $WslWorktree = if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
             try { (wsl.exe wslpath -a $WorktreeRoot 2>$null).Trim() } catch { $null }
@@ -154,13 +257,15 @@ finally {
     }
     Stop-TrackedProcesses -Context $Context
 
-    try {
-        Inspect-DockerResource -Kind "containers" -Arguments @("ps", "-a", "--filter", "label=com.docker.compose.project=$ProjectName", "--format", "{{.ID}}")
-        Inspect-DockerResource -Kind "volumes" -Arguments @("volume", "ls", "--filter", "label=com.docker.compose.project=$ProjectName", "--format", "{{.Name}}")
-        Inspect-DockerResource -Kind "networks" -Arguments @("network", "ls", "--filter", "label=com.docker.compose.project=$ProjectName", "--format", "{{.ID}}")
-    }
-    catch {
-        $Context.CleanupErrors.Add("Docker resource inspection failed: $($_.Exception.Message)")
+    if ($ComposeAttempted) {
+        try {
+            Inspect-DockerResource -Kind "containers" -Arguments @("ps", "-a", "--filter", "label=com.docker.compose.project=$ProjectName", "--format", "{{.ID}}")
+            Inspect-DockerResource -Kind "volumes" -Arguments @("volume", "ls", "--filter", "label=com.docker.compose.project=$ProjectName", "--format", "{{.Name}}")
+            Inspect-DockerResource -Kind "networks" -Arguments @("network", "ls", "--filter", "label=com.docker.compose.project=$ProjectName", "--format", "{{.ID}}")
+        }
+        catch {
+            $Context.CleanupErrors.Add("Docker resource inspection failed: $($_.Exception.Message)")
+        }
     }
 
     $Listeners = @(Get-NetTCPConnection -State Listen -LocalPort 4173,4174 -ErrorAction SilentlyContinue |

@@ -53,7 +53,10 @@ import {
   toWebhookActionAndData,
 } from "./lib/status";
 import { verifyNotificationToken } from "./lib/token";
-import { TBANK_PROVIDER_IDENTIFIER } from "./provider-id";
+import {
+  TBANK_PAYMENT_PROVIDER_ID,
+  TBANK_PROVIDER_IDENTIFIER,
+} from "./provider-id";
 
 export type TBankOptions = {
   terminalKey: string;
@@ -408,7 +411,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         await this.notificationService_.createTbankPaymentAttempts({
           id: attemptId,
           payment_session_id: sessionId,
-          provider_id: this.getIdentifier(),
+          provider_id: TBANK_PAYMENT_PROVIDER_ID,
           terminal_key: this.options_.terminalKey,
           order_id: sessionId,
           expected_amount_kopecks: amountKopecks,

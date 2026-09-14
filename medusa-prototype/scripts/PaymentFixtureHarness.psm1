@@ -138,6 +138,7 @@ function Write-ProcessInspection {
             $Context.TrackedProcessIds.Contains([int]$_.ProcessId) -or
             ($_.CommandLine -match $WorktreePattern -and (
                 $_.CommandLine -match 'e2e[\\/]fixtures[\\/]payment-baseline\.ts' -or
+                $_.CommandLine -match 'e2e[\\/]fixtures[\\/]payment-status\.ts' -or
                 $_.CommandLine -match 'next[\\/]dist[\\/]bin[\\/]next.+--port 4173'
             ))
         } | Select-Object ProcessId, ParentProcessId, ExecutablePath, CommandLine)
