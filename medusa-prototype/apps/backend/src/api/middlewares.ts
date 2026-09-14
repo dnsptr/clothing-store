@@ -9,6 +9,7 @@ import {
   ReorderSchema,
   UpdateSlideSchema,
 } from "./admin/content/validators";
+import { catalogProfileGuard } from "./admin/catalog-profile-guard";
 import {
   ManualReviewActionSchema,
   ManualReviewListQuerySchema,
@@ -32,6 +33,16 @@ import {
  */
 export default defineMiddlewares({
   routes: [
+    {
+      matcher: "/admin/products/:id",
+      method: "POST",
+      middlewares: [catalogProfileGuard],
+    },
+    {
+      matcher: "/admin/products",
+      method: "POST",
+      middlewares: [catalogProfileGuard],
+    },
     {
       method: ["POST"],
       bodyParser: { preserveRawBody: true },

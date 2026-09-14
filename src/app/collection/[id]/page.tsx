@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { MOCK_OUTFITS, MOCK_PRODUCTS, type Product } from "../../../data/mockData";
@@ -17,10 +17,6 @@ import styles from "./collection.module.css";
 interface CollectionPageProps {
   params: Promise<{ id: string }>;
 }
-
-// Должно быть литералом: Next требует статически анализируемое значение сегмента.
-// Держать в согласии с CATALOG_REVALIDATE_SECONDS в lib/medusa.ts.
-export const revalidate = 300;
 
 // Сам образ (заголовок, подпись, баннер) — редакционный контент, которого в
 // Medusa пока нет: управление главной и коллекциями из админки вынесено в
@@ -64,6 +60,7 @@ async function resolveOutfitProducts(productIds: string[]): Promise<OutfitProduc
       ),
     };
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[Collection] Medusa недоступна при серверном рендеринге образа.", {
       productIds,
       error,

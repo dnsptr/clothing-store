@@ -16,7 +16,9 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  height: 48px;
+  min-height: 48px;
+  padding: 12px 0;
+  overflow-wrap: anywhere;
   color: var(--text-primary);
   font-size: 12.5px;
   line-height: 16px;
@@ -33,6 +35,7 @@
 }
 
 .hero h1 {
+  overflow-wrap: anywhere;
   font-family: var(--font-sans);
   font-size: 28px;
   font-weight: 400;
@@ -75,6 +78,7 @@
 }
 
 .section h2 {
+  overflow-wrap: anywhere;
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 500;
@@ -84,8 +88,21 @@
 
 /* Юридический текст — это несколько абзацев и перечни, а не одна строка. */
 .sectionBody {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 14px;
+}
+
+.documentLink {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.documentLink:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
 }
 
 .section p {

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import type { Product } from "../../../data/mockData";
 import { MOCK_PRODUCTS } from "../../../data/mockData";
 import {
   CATALOG_REVALIDATE_SECONDS,
-  fetchMedusaProductByHandle,
+  fetchMedusaProductByFrontendId,
   isMedusaConfigured,
   storefrontDataMode,
 } from "../../../lib/medusa";
@@ -18,10 +18,6 @@ interface ProductPageProps {
   params: Promise<{ id: string }>;
 }
 
-// Must be a literal: Next requires the segment value to be statically
-// analysable. Keep in sync with CATALOG_REVALIDATE_SECONDS in lib/medusa.ts.
-export const revalidate = 300;
-
 const isPagesExport = process.env.BUILD_TARGET === "pages";
 
 /**
@@ -29,20 +25,12 @@ const isPagesExport = process.env.BUILD_TARGET === "pages";
  *
  * Static export target: the demo ships the mock catalog, exactly as before.
  *
- * Server target: an empty array on purpose. Per the Next 16 docs
- * (generate-static-params → "All paths at runtime"), returning `[]` is what
- * enables paths to be rendered on first request and then cached by ISR. This is
- * the fix for the roadmap's "самый дорогой скрытый дефект": previously the only
- * product pages that existed were the 12 mock ids, so a product created in
- * Medusa Admin had no page at all — not a slow page, no page.
+ * Server target: resolve arbitrary products at request time. The uncached
+ * Medusa fetch keeps prices, publication status and descriptions current.
  */
-export async function generateStaticParams() {
-  if (!isPagesExport) return [];
-  return MOCK_PRODUCTS.map((product) => ({ id: product.id }));
-}
-
-/** The import convention mirrors the mock ids: `mario-mikke-<frontend id>`. */
-const handleFor = (id: string) => `mario-mikke-${id}`;
+export const generateStaticParams = isPagesExport
+  ? async () => MOCK_PRODUCTS.map((product) => ({ id: product.id }))
+  : undefined;
 
 type ProductResolution =
   | { status: "ok"; product: Product }
@@ -76,13 +64,14 @@ async function resolveProduct(id: string): Promise<ProductResolution> {
   }
 
   try {
-    const product = await fetchMedusaProductByHandle(
-      handleFor(id),
+    const product = await fetchMedusaProductByFrontendId(
+      id,
       undefined,
       CATALOG_REVALIDATE_SECONDS,
     );
     return product ? { status: "ok", product } : { status: "missing" };
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[PDP] Medusa недоступна при серверном рендеринге товара.", {
       id,
       error,

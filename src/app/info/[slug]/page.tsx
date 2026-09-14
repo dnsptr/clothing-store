@@ -4,6 +4,7 @@ import Link from "next/link";
 import Header from "../../../components/Header";
 import Footer from "../../../components/Footer";
 import { getInfoPage, INFO_PAGES } from "../../../lib/infoPages";
+import { withBasePath } from "../../../lib/assets";
 import styles from "./info.module.css";
 
 interface InfoPageProps {
@@ -78,6 +79,13 @@ export default async function InfoPage({ params }: InfoPageProps) {
           <section className={styles.hero}>
             <h1>{page.title}</h1>
             <p>{page.summary}</p>
+            {page.document && (
+              <p>
+                <a className={styles.documentLink} href={withBasePath(page.document.href)} download>
+                  {page.document.label}
+                </a>
+              </p>
+            )}
             {/* Статус документа — часть содержимого страницы, а не служебная
                 пометка в коде: черновик оферты не должен выглядеть как
                 действующая редакция ни для покупателя, ни для проверяющего. */}

@@ -13,8 +13,8 @@ const footerColumns = [
   {
     title: "Покупателям",
     links: [
-      { label: "Доставка", href: "/info/delivery" },
-      { label: "Возврат", href: "/info/returns" },
+      { label: "Доставка и оплата", href: "/info/delivery" },
+      { label: "Возврат и претензии", href: "/info/returns" },
       { label: "Вопросы и ответы", href: "/info/faq" },
       { label: "Личный кабинет", href: "/account" },
     ],
@@ -35,9 +35,12 @@ const footerColumns = [
 // видимой на каждой странице.
 const legalLinks = [
   { label: "Публичная оферта", href: "/info/offer" },
-  { label: "Обработка персональных данных", href: "/info/privacy" },
-  { label: "Условия возврата", href: "/info/returns" },
-  { label: "Реквизиты продавца", href: "/info/requisites" },
+  { label: "Политика обработки персональных данных", href: "/info/privacy" },
+  { label: "Согласие на обработку ПДн", href: "/info/consent" },
+  { label: "Доставка и оплата", href: "/info/delivery" },
+  { label: "Возврат и претензии", href: "/info/returns" },
+  { label: "Политика Cookie", href: "/info/cookies" },
+  { label: "Реквизиты и контакты", href: "/info/requisites" },
 ];
 
 export default function Footer() {

@@ -363,8 +363,23 @@ function normalizeImageUrl(url: string) {
 
 function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
   const metadata = isRecord(product.metadata) ? product.metadata : {};
-  const frontendId =
-    typeof metadata.frontend_id === "string" ? metadata.frontend_id : product.id;
+  const profile = isRecord(metadata.catalog_profile) ? metadata.catalog_profile : {};
+  const fields: [string, string][] = [
+    ["model", "Модель"], ["brand", "Бренд"], ["composition", "Состав изделия"],
+    ["lining", "Подкладка"], ["country", "Страна изготовления"],
+    ["manufacturer", "Изготовитель"], ["manufacturer_address", "Адрес изготовителя"],
+    ["manufactured_at", "Дата изготовления"], ["care", "Уход"],
+    ["conformity_document", "Документ о соответствии"],
+  ];
+  const characteristics = fields.flatMap(([key, label]) => {
+    const value = key === "lining" && profile.no_lining === true ? "Без подкладки" : profile[key];
+    return typeof value === "string" && value.trim() ? [{ label, value: value.trim() }] : [];
+  });
+  let registryUrl: string | undefined;
+  if (typeof profile.registry_url === "string") {
+    try { const url = new URL(profile.registry_url); if (url.protocol === "https:") registryUrl = url.href; } catch { /* Incomplete drafts have no registry link. */ }
+  }
+  const frontendId = frontendIdFromHandle(product.handle, product.id);
   const category = product.categories?.[0];
   const optionTitlesById = new Map(
     (product.options || []).flatMap((option) =>
@@ -436,6 +451,14 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
     handle: product.handle,
     name: product.title,
     description,
+    characteristics,
+    registryUrl,
+    labelImages: Array.isArray(profile.label_images) ? profile.label_images.flatMap((image) => {
+      if (!isRecord(image) || typeof image.url !== "string") return [];
+      if (!/^https?:\/\//.test(image.url) && !/^\/(?!\/)/.test(image.url)) return [];
+      return [{ name: typeof image.name === "string" ? image.name : "Этикетка", url: normalizeImageUrl(image.url) }];
+    }) : [],
+    categorySlugs: product.categories?.map((item) => item.handle || "").filter(Boolean),
     price,
     category: category?.name || "Каталог",
     categorySlug: category?.handle || "catalog",
@@ -692,15 +715,10 @@ async function readBodySnippet(response: Response): Promise<string | undefined> 
 }
 
 /**
- * Seconds a server-rendered catalog read stays fresh before Next revalidates it.
- *
- * Next 16 does NOT cache `fetch` by default (it did in 14), so ISR only happens
- * for requests that opt in explicitly via `next.revalidate` — a segment-level
- * `export const revalidate` alone is not enough to make an uncached fetch
- * cacheable. Callers that render on the server pass `revalidate`; browser calls
- * (cart mutations) leave it unset and the option is ignored there.
+ * Admin-managed prices and content must be fresh on a regular page reload.
+ * Zero disables persistent caching; request-level fetch memoization remains.
  */
-export const CATALOG_REVALIDATE_SECONDS = 300;
+export const CATALOG_REVALIDATE_SECONDS = 0;
 
 /**
  * Exported so sibling modules (lib/content.ts) reuse one HTTP client rather
@@ -733,9 +751,9 @@ export async function medusaRequest<T>(
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
-      ...(typeof options.revalidate === "number"
+      ...(typeof options.revalidate === "number" && options.revalidate > 0
         ? { next: { revalidate: options.revalidate } }
-        : {}),
+        : { cache: "no-store" as const }),
     });
   } catch (error) {
     unstable_rethrow(error);
@@ -794,6 +812,7 @@ export interface FetchMedusaProductsParams {
   limit: number;
   offset: number;
   categoryId?: string;
+  collectionId?: string;
 }
 
 export interface MedusaProductsPage {
@@ -820,6 +839,7 @@ export async function fetchMedusaProducts(
   if (regionId) query.set("region_id", regionId);
   // Medusa v2 accepts repeated/array category filters via `category_id[]`.
   if (params.categoryId) query.set("category_id[]", params.categoryId);
+  if (params.collectionId) query.set("collection_id[]", params.collectionId);
 
   const response = await medusaRequest(`/store/products?${query.toString()}`, {
     signal,
@@ -862,6 +882,28 @@ export async function fetchMedusaProductByHandle(
   return product ? mapMedusaProduct(product) : null;
 }
 
+/** Preserve imported URLs; admin-created products use their stable Medusa id. */
+export async function fetchMedusaProductByFrontendId(
+  id: string,
+  signal?: AbortSignal,
+  revalidate?: number,
+): Promise<Product | null> {
+  if (!id.startsWith("prod_")) {
+    return fetchMedusaProductByHandle(handleForFrontendId(id), signal, revalidate);
+  }
+
+  const regionId = await getRussianRegionId(signal, revalidate);
+  const query = new URLSearchParams({ "id[]": id, limit: "1", fields: PRODUCT_FIELDS });
+  if (regionId) query.set("region_id", regionId);
+  const response = await medusaRequest(`/store/products?${query.toString()}`, {
+    signal,
+    parse: parseProductsResponse,
+    revalidate,
+  });
+  const product = response.products?.find((item) => item.id === id);
+  return product ? mapMedusaProduct(product) : null;
+}
+
 /**
  * Разрешить несколько товаров по их handle одним серверным вызовом на товар.
  *
@@ -899,6 +941,18 @@ export async function fetchMedusaCategories(signal?: AbortSignal): Promise<Medus
       ? [{ id: category.id, name: category.name, handle: category.handle }]
       : [],
   );
+}
+
+export async function fetchMedusaCollections(signal?: AbortSignal): Promise<{ id: string; title: string; handle: string }[]> {
+  const response = await medusaRequest("/store/collections?limit=100&fields=id,title,handle", {
+    signal,
+    parse: (data) => {
+      if (!isRecord(data) || !Array.isArray(data.collections)) throw new Error("Invalid collections response");
+      return data.collections.flatMap((item) => isRecord(item) && typeof item.id === "string" && typeof item.title === "string" && typeof item.handle === "string"
+        ? [{ id: item.id, title: item.title, handle: item.handle }] : []);
+    },
+  });
+  return response;
 }
 
 export async function createMedusaCart() {

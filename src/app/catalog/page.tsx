@@ -8,7 +8,7 @@ import Footer from "../../components/Footer";
 import ProductCard from "../../components/ProductCard";
 import type { Product } from "../../data/mockData";
 import { useCatalog } from "../../context/CatalogContext";
-import { fetchMedusaCategories, fetchMedusaProducts } from "../../lib/medusa";
+import { fetchMedusaCategories, fetchMedusaCollections, fetchMedusaProducts } from "../../lib/medusa";
 import {
   CATALOG_PRIMARY_NAV,
   CLOTHING_SECTION_CATEGORY_SLUGS,
@@ -33,6 +33,12 @@ const AVAILABILITY_FILTERS = [
 // FE-004 A3: products fetched per page in medusa mode.
 const CATALOG_PAGE_SIZE = 24;
 
+const SORT_OPTIONS = [
+  { value: "default", label: "По умолчанию" },
+  { value: "price-low-to-high", label: "Цена: по возрастанию" },
+  { value: "price-high-to-low", label: "Цена: по убыванию" },
+];
+
 function CatalogContent() {
   const {
     products: contextProducts,
@@ -44,6 +50,9 @@ function CatalogContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
+  const collectionParam = searchParams.get("collection");
+  const [catalogCategories, setCatalogCategories] = useState<{ id: string; name: string; handle: string }[]>([]);
+  const [collections, setCollections] = useState<{ id: string; title: string; handle: string }[]>([]);
   const sectionParam = searchParams.get("section");
   const materialParam = searchParams.get("material");
   const sizeParam = searchParams.get("size");
@@ -53,6 +62,19 @@ function CatalogContent() {
 
   const [sortBy, setSortBy] = useState("default");
   const [openFacet, setOpenFacet] = useState<string | null>(null);
+  const sortRef = useRef<HTMLDivElement>(null);
+  const sortButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (openFacet !== "sort") return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !sortRef.current?.contains(event.target)) {
+        setOpenFacet(null);
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [openFacet]);
 
   // --- FE-004 A3/A5: catalog data source -----------------------------------
   // Mock mode keeps the previous behaviour: the global context holds the full
@@ -68,7 +90,7 @@ function CatalogContent() {
 
   // Slug (== Medusa category handle) → id, resolved for server-side filtering.
   const categoryId = categoryParam ? categoryMap?.get(categoryParam) : undefined;
-  const queryKey = categoryParam ?? "__all__";
+  const queryKey = JSON.stringify([categoryParam, collectionParam]);
   const categoriesReady = categoryMap !== null;
   const hasPageForKey = pageData?.key === queryKey;
   const pageErroredForKey = pageErrorKey === queryKey;
@@ -80,6 +102,7 @@ function CatalogContent() {
     fetchMedusaCategories(controller.signal)
       .then((categories) => {
         if (controller.signal.aborted) return;
+        setCatalogCategories(categories);
         setCategoryMap(
           new Map(categories.map((category): [string, string] => [category.handle, category.id])),
         );
@@ -94,6 +117,17 @@ function CatalogContent() {
     return () => controller.abort();
   }, [isMedusa]);
 
+  useEffect(() => {
+    if (!isMedusa) return;
+    const controller = new AbortController();
+    fetchMedusaCollections(controller.signal).then((items) => {
+      if (!controller.signal.aborted) setCollections(items);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) console.error("Не удалось загрузить коллекции", error);
+    });
+    return () => controller.abort();
+  }, [isMedusa]);
+
   // Load the first page whenever the selected category changes. Loading/error are
   // DERIVED below from whether pageData matches queryKey, so this effect never
   // sets state synchronously (keeps react-hooks/set-state-in-effect satisfied).
@@ -103,7 +137,7 @@ function CatalogContent() {
     if (hasPageForKey || pageErroredForKey) return;
 
     const controller = new AbortController();
-    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset: 0, categoryId }, controller.signal)
+    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset: 0, categoryId, collectionId: collectionParam ?? undefined }, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return;
         setPageData({ key: queryKey, products: page.products, count: page.count });
@@ -115,7 +149,7 @@ function CatalogContent() {
         setPageErrorKey(queryKey);
       });
     return () => controller.abort();
-  }, [isMedusa, categoryParam, categoriesReady, hasPageForKey, pageErroredForKey, categoryId, queryKey]);
+  }, [isMedusa, categoryParam, collectionParam, categoriesReady, hasPageForKey, pageErroredForKey, categoryId, queryKey]);
 
   // Abort any in-flight "load more" on unmount.
   useEffect(() => () => loadMoreAbortRef.current?.abort(), []);
@@ -131,7 +165,7 @@ function CatalogContent() {
     const offset = pageData.products.length;
 
     setIsLoadingMore(true);
-    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset, categoryId }, controller.signal)
+    fetchMedusaProducts({ limit: CATALOG_PAGE_SIZE, offset, categoryId, collectionId: collectionParam ?? undefined }, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return;
         setPageData((previous) => {
@@ -224,7 +258,7 @@ function CatalogContent() {
     return 0;
   });
 
-  const title = getCatalogTitle({
+  const title = collections.find((collection) => collection.id === collectionParam)?.title ?? catalogCategories.find((category) => category.handle === categoryParam)?.name ?? getCatalogTitle({
     category: categoryParam,
     material: materialParam,
     section: sectionParam,
@@ -238,7 +272,7 @@ function CatalogContent() {
     if (params.has("material")) return params.get("material") === materialParam;
     if (params.has("category")) return params.get("category") === categoryParam;
 
-    return !categoryParam && !sectionParam && !materialParam;
+    return !categoryParam && !sectionParam && !materialParam && !collectionParam;
   };
 
   const updateCatalogParam = (key: string, value: string) => {
@@ -306,6 +340,12 @@ function CatalogContent() {
           <section className={styles.titleBlock}>
             <h1 className={styles.title}>{title}</h1>
           </section>
+          {isMedusa && (catalogCategories.length > 0 || collections.length > 0) && (
+            <nav className={styles.taxonomy} aria-label="Категории и коллекции">
+              {catalogCategories.map((category) => <Link key={category.id} href={`/catalog?category=${encodeURIComponent(category.handle)}`} aria-current={categoryParam === category.handle ? "page" : undefined}>{category.name}</Link>)}
+              {collections.map((collection) => <Link key={collection.id} href={`/catalog?collection=${encodeURIComponent(collection.id)}`} aria-current={collectionParam === collection.id ? "page" : undefined}>{collection.title}</Link>)}
+            </nav>
+          )}
         </div>
 
         <div className={styles.filtersBand}>
@@ -454,19 +494,54 @@ function CatalogContent() {
                 </div>
               </div>
 
-              <label className={styles.sortControl}>
-                <span className={styles.sortLabel}>Сортировка</span>
-                <select
-                  className={styles.sortSelect}
-                  value={sortBy}
-                  onChange={(event) => setSortBy(event.target.value)}
-                  aria-label="Сортировка товаров"
+              <div
+                ref={sortRef}
+                className={styles.sortControl}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setOpenFacet((current) => current === "sort" ? null : current);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && openFacet === "sort") {
+                    event.preventDefault();
+                    setOpenFacet(null);
+                    sortButtonRef.current?.focus();
+                  }
+                }}
+              >
+                <button
+                  ref={sortButtonRef}
+                  type="button"
+                  className={`${styles.facetButton} ${styles.sortButton} ${openFacet === "sort" || sortBy !== "default" ? styles.facetButtonActive : ""}`}
+                  onClick={() => setOpenFacet(openFacet === "sort" ? null : "sort")}
+                  aria-expanded={openFacet === "sort"}
+                  aria-controls="catalog-sort-options"
+                  aria-label={`Сортировка товаров: ${SORT_OPTIONS.find((option) => option.value === sortBy)?.label}`}
                 >
-                  <option value="default">По умолчанию</option>
-                  <option value="price-low-to-high">Цена: по возрастанию</option>
-                  <option value="price-high-to-low">Цена: по убыванию</option>
-                </select>
-              </label>
+                  {SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
+                  <span className={styles.facetChevron} aria-hidden="true" />
+                </button>
+                {openFacet === "sort" && (
+                  <div id="catalog-sort-options" className={`${styles.facetPanel} ${styles.sortPanel}`}>
+                    {SORT_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`${styles.facetOption} ${sortBy === option.value ? styles.facetOptionActive : ""}`}
+                        aria-pressed={sortBy === option.value}
+                        onClick={() => {
+                          setSortBy(option.value);
+                          setOpenFacet(null);
+                          sortButtonRef.current?.focus();
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

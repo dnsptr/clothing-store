@@ -43,6 +43,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Catalog regression tests
+        run: npm run test:catalog
+
       # Two deployable artifacts exist, so CI builds both. Neither is allowed to
       # rot behind the other: the server build is what Vercel ships, the export
       # is what GitHub Pages ships, and a change that satisfies one can easily
