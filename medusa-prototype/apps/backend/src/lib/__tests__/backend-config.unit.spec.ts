@@ -55,10 +55,13 @@ describe("backend payment configuration", () => {
   it("propagates exactly eight T-Bank variables through rendered Compose config", () => {
     const composeFile = resolve(__dirname, "../../../../../compose.production.yml");
     const environmentFile = resolve(__dirname, "fixtures/compose.production.env");
+    const testEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !k.startsWith("TBANK_")),
+    );
     const rendered = spawnSync(
       "docker",
       ["compose", "--env-file", environmentFile, "-f", composeFile, "config", "--format", "json"],
-      { encoding: "utf8", timeout: 30_000 },
+      { encoding: "utf8", timeout: 30_000, env: testEnv },
     );
 
     if (rendered.status !== 0) {
