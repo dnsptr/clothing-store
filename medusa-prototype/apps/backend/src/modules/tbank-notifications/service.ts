@@ -9,6 +9,7 @@ import TbankNotificationConflict from "./models/tbank-notification-conflict";
 
 type ClaimInput = { readonly limit: number; readonly leaseToken: string; readonly now: Date };
 type LeaseInput = { readonly id: string; readonly leaseToken: string; readonly now: Date };
+type ConflictInput = LeaseInput & { readonly reason: string };
 type TransitionInput = { readonly now: Date };
 export type InboxRow = { readonly id: string; readonly lifecycle_state: string; readonly attempt_count: number };
 
@@ -143,15 +144,28 @@ class TbankNotificationModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async quarantineManualReview(input: LeaseInput, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
+  async quarantineConflict(input: ConflictInput, @MedusaContext() context: Context<EntityManager> = {}): Promise<readonly InboxRow[]> {
     if (!context.manager) throw new InboxPersistenceError();
     return context.manager.execute<InboxRow[]>(
-      `UPDATE tbank_notification
-       SET lifecycle_state = 'manual_review', manual_review_at = ?,
-           lease_token = NULL, lease_expires_at = NULL, last_error_at = ?, updated_at = ?
-       WHERE id = ? AND lifecycle_state = 'leased' AND lease_token = ? AND lease_expires_at > ?
-       RETURNING *`,
-      [input.now, input.now, input.now, input.id, input.leaseToken, input.now],
+      `WITH quarantined AS (
+         UPDATE tbank_notification
+         SET lifecycle_state = 'manual_review', manual_review_at = ?,
+             lease_token = NULL, lease_expires_at = NULL, last_error_at = ?, updated_at = ?
+         WHERE id = ? AND lifecycle_state = 'leased' AND lease_token = ? AND lease_expires_at > ?
+         RETURNING *
+       ), conflict AS (
+         INSERT INTO tbank_notification_conflict
+         (id, canonical_notification_id, terminal_key, payment_id, status, canonical_payload_hash,
+          conflicting_payload_hash, conflict_kind, correlation_failures, lifecycle_state, created_at, updated_at)
+         SELECT
+           'tbconf_' || substr(md5(random()::text), 1, 16),
+           id, terminal_key, payment_id, status, canonical_payload_hash,
+           COALESCE(canonical_payload_hash, ''), 'correlation_mismatch', ?, 'manual_review', ?, ?
+         FROM quarantined
+         RETURNING canonical_notification_id
+       ) SELECT quarantined.* FROM quarantined
+         INNER JOIN conflict ON conflict.canonical_notification_id = quarantined.id`,
+      [input.now, input.now, input.now, input.id, input.leaseToken, input.now, input.reason, input.now, input.now],
     );
   }
 

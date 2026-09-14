@@ -185,6 +185,91 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     expect(staleRenewal).toEqual([]);
   });
 
+  it("commits conflict audit and manual-review transition together for a valid lease", async () => {
+    await insertPending(database, "atomic-success");
+    const manager = queryManager(database);
+    const now = new Date("2026-09-09T12:00:00.000Z");
+    await TbankNotificationModuleService.prototype.claimNotificationById.call(
+      {}, { id: "atomic-success", leaseToken: "owner", now }, { manager } as never,
+    );
+
+    const operation = Reflect.get(TbankNotificationModuleService.prototype, "quarantineConflict");
+    if (typeof operation !== "function") throw new TypeError("quarantineConflict is unavailable");
+    const rows = await Reflect.apply(operation, {}, [
+      { id: "atomic-success", leaseToken: "owner", reason: "Correlation mismatch: amount", now },
+      { manager },
+    ]);
+
+    const state = await database.query(
+      `SELECT inbox.lifecycle_state, inbox.lease_token, count(conflict.id)::int AS conflicts
+       FROM tbank_notification inbox
+       LEFT JOIN tbank_notification_conflict conflict ON conflict.canonical_notification_id = inbox.id
+       WHERE inbox.id = 'atomic-success'
+       GROUP BY inbox.id`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(state.rows[0]).toEqual({ lifecycle_state: "manual_review", lease_token: null, conflicts: 1 });
+  });
+
+  it("inserts no conflict and preserves a reassigned lease for a stale owner", async () => {
+    await insertPending(database, "atomic-stale");
+    const manager = queryManager(database);
+    const claimedAt = new Date("2026-09-09T12:00:00.000Z");
+    await TbankNotificationModuleService.prototype.claimNotificationById.call(
+      {}, { id: "atomic-stale", leaseToken: "old-owner", now: claimedAt }, { manager } as never,
+    );
+    const afterExpiry = new Date("2026-09-09T12:01:01.000Z");
+    await TbankNotificationModuleService.prototype.claimInbox.call(
+      {}, { limit: 1, leaseToken: "new-owner", now: afterExpiry }, { manager } as never,
+    );
+
+    const operation = Reflect.get(TbankNotificationModuleService.prototype, "quarantineConflict");
+    if (typeof operation !== "function") throw new TypeError("quarantineConflict is unavailable");
+    const rows = await Reflect.apply(operation, {}, [
+      { id: "atomic-stale", leaseToken: "old-owner", reason: "Correlation mismatch: terminal", now: afterExpiry },
+      { manager },
+    ]);
+
+    const state = await database.query(
+      `SELECT inbox.lifecycle_state, inbox.lease_token, count(conflict.id)::int AS conflicts
+       FROM tbank_notification inbox
+       LEFT JOIN tbank_notification_conflict conflict ON conflict.canonical_notification_id = inbox.id
+       WHERE inbox.id = 'atomic-stale'
+       GROUP BY inbox.id`,
+    );
+    expect(rows).toEqual([]);
+    expect(state.rows[0]).toEqual({ lifecycle_state: "leased", lease_token: "new-owner", conflicts: 0 });
+  });
+
+  it("rolls back the inbox transition when conflict insertion fails", async () => {
+    await insertPending(database, "atomic-rollback");
+    const manager = queryManager(database);
+    const now = new Date("2026-09-09T12:00:00.000Z");
+    await TbankNotificationModuleService.prototype.claimNotificationById.call(
+      {}, { id: "atomic-rollback", leaseToken: "owner", now }, { manager } as never,
+    );
+    await database.query(
+      `ALTER TABLE tbank_notification_conflict
+       ADD CONSTRAINT reject_reconciler_conflict CHECK (conflict_kind <> 'correlation_mismatch')`,
+    );
+
+    const operation = Reflect.get(TbankNotificationModuleService.prototype, "quarantineConflict");
+    if (typeof operation !== "function") throw new TypeError("quarantineConflict is unavailable");
+    await expect(Reflect.apply(operation, {}, [
+      { id: "atomic-rollback", leaseToken: "owner", reason: "Correlation mismatch: amount", now },
+      { manager },
+    ])).rejects.toThrow("reject_reconciler_conflict");
+
+    const state = await database.query(
+      `SELECT inbox.lifecycle_state, inbox.lease_token, count(conflict.id)::int AS conflicts
+       FROM tbank_notification inbox
+       LEFT JOIN tbank_notification_conflict conflict ON conflict.canonical_notification_id = inbox.id
+       WHERE inbox.id = 'atomic-rollback'
+       GROUP BY inbox.id`,
+    );
+    expect(state.rows[0]).toEqual({ lifecycle_state: "leased", lease_token: "owner", conflicts: 0 });
+  });
+
   it("uses persisted attempts for exact backoff and moves the fifth failure to manual review", async () => {
     await insertPending(database, "retry");
     const manager = queryManager(database);

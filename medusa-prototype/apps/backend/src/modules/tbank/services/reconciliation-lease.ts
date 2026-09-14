@@ -44,10 +44,11 @@ export class LeaseController {
     return rows[0] ?? {};
   }
 
-  async quarantine(): Promise<void> {
-    this.requireMutation(await this.store.quarantineManualReview({
+  async quarantineConflict(reason: string): Promise<void> {
+    this.requireMutation(await this.store.quarantineConflict({
       id: this.id,
       leaseToken: this.leaseToken,
+      reason,
       now: new Date(),
     }));
   }

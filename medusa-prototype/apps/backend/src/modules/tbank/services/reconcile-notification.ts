@@ -39,21 +39,7 @@ async function quarantineConflict(
   lease: LeaseController,
   reason: string,
 ): Promise<ProcessNotificationResult> {
-  await lease.renew();
-  if (services.notifications.createTbankNotificationConflicts) {
-    await services.notifications.createTbankNotificationConflicts({
-      canonical_notification_id: row.id,
-      terminal_key: row.terminal_key,
-      payment_id: row.payment_id,
-      status: row.status,
-      canonical_payload_hash: row.canonical_payload_hash ?? null,
-      conflicting_payload_hash: row.canonical_payload_hash ?? "",
-      conflict_kind: "correlation_mismatch",
-      correlation_failures: reason,
-      lifecycle_state: "manual_review",
-    });
-  }
-  await lease.quarantine();
+  await lease.quarantineConflict(reason);
   services.logger.error(`tbank.manual_review: ${row.id}: ${reason}`);
   return { status: "manual_review", id: row.id, reason };
 }

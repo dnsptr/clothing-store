@@ -9,6 +9,11 @@ import {
 
 const DATABASE_URL = process.env.TBANK_INBOX_TEST_DATABASE_URL;
 const describePostgres = DATABASE_URL ? describe : describe.skip;
+const TEST_LOGGER = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+} as const;
 
 function postgresSql(sql: string): string {
   let parameter = 0;
@@ -86,8 +91,8 @@ function createNotificationStore(client: Client): TbankNotificationStore {
         input,
         { manager } as never,
       ),
-    quarantineManualReview: (input) =>
-      TbankNotificationModuleService.prototype.quarantineManualReview.call(
+    quarantineConflict: (input) =>
+      TbankNotificationModuleService.prototype.quarantineConflict.call(
         {},
         input,
         { manager } as never,
@@ -139,29 +144,6 @@ function createNotificationStore(client: Client): TbankNotificationStore {
       const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
       const res = await client.query(`SELECT * FROM tbank_notification_conflict ${where}`, values);
       return res.rows;
-    },
-    createTbankNotificationConflicts: async (input: Record<string, unknown>) => {
-      const res = await client.query(
-        `INSERT INTO tbank_notification_conflict
-          (id, canonical_notification_id, terminal_key, payment_id, status,
-           canonical_payload_hash, conflicting_payload_hash, conflict_kind,
-           correlation_failures, lifecycle_state)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING *`,
-        [
-          `tbconf_${Math.random().toString(36).slice(2, 10)}`,
-          input.canonical_notification_id ?? null,
-          input.terminal_key,
-          input.payment_id,
-          input.status,
-          input.canonical_payload_hash ?? null,
-          input.conflicting_payload_hash ?? "",
-          input.conflict_kind,
-          input.correlation_failures ?? null,
-          input.lifecycle_state ?? "manual_review",
-        ],
-      );
-      return res.rows[0];
     },
   };
 }
@@ -217,12 +199,18 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     };
 
     const notificationStore = createNotificationStore(database);
+    const durableLinkageChecker = jest.fn().mockImplementation(async () => ({
+      orderLinked: projectionsCount > 0,
+      paymentCaptured: projectionsCount > 0,
+    }));
 
     const reconciler = new PaymentReconcilerService({
+      logger: TEST_LOGGER,
       notifications: notificationStore,
       payment: mockPaymentService,
       expectedTerminalKey: "term",
       workflowRunner: mockWorkflowRunner,
+      durableLinkageChecker,
     });
 
     // Run batch recovery
@@ -272,6 +260,7 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     });
 
     const reconciler = new PaymentReconcilerService({
+      logger: TEST_LOGGER,
       notifications: createNotificationStore(database),
       payment: mockPaymentService,
       expectedTerminalKey: "term",
@@ -319,6 +308,7 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
       .mockResolvedValueOnce({ orderLinked: false, paymentCaptured: true });
 
     const reconciler = new PaymentReconcilerService({
+      logger: TEST_LOGGER,
       notifications: createNotificationStore(database),
       payment: mockPaymentService,
       expectedTerminalKey: "term",
@@ -410,6 +400,7 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     };
 
     const reconciler = new PaymentReconcilerService({
+      logger: TEST_LOGGER,
       notifications: createNotificationStore(database),
       payment: mockPaymentService,
       expectedTerminalKey: "term",

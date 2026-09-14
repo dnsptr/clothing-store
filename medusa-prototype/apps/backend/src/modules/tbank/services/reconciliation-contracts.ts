@@ -35,13 +35,12 @@ export interface TbankNotificationStore {
   renewInboxLease(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
   completeInbox(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
   failInbox(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly InboxMutationRow[]>;
-  quarantineManualReview(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
+  quarantineConflict(input: { readonly id: string; readonly leaseToken: string; readonly reason: string; readonly now: Date }): Promise<readonly unknown[]>;
   retryManualReview(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string }): Promise<readonly unknown[]>;
   resolveManualReview(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string }): Promise<readonly unknown[]>;
   listTbankNotifications?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
   listTbankPaymentAttempts?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
   listTbankNotificationConflicts?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
-  createTbankNotificationConflicts?(input: Record<string, unknown>): Promise<unknown>;
 }
 
 export type PaymentSessionService = Pick<

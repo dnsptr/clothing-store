@@ -50,11 +50,10 @@ function createHarness(overrides: Partial<PaymentReconcilerDependencies> = {}): 
     renewInboxLease: jest.fn().mockResolvedValue([ROW]),
     completeInbox: jest.fn().mockResolvedValue([ROW]),
     failInbox: jest.fn().mockResolvedValue([{ ...ROW, lifecycle_state: "pending", attempt_count: 2 }]),
-    quarantineManualReview: jest.fn().mockResolvedValue([ROW]),
+    quarantineConflict: jest.fn().mockResolvedValue([ROW]),
     retryManualReview: jest.fn().mockResolvedValue([ROW]),
     resolveManualReview: jest.fn().mockResolvedValue([ROW]),
     listTbankNotifications: jest.fn().mockResolvedValue([]),
-    createTbankNotificationConflicts: jest.fn().mockResolvedValue({}),
   };
   const payment = {
     retrievePaymentSession: jest.fn().mockResolvedValue({ ...SESSION }),
@@ -104,7 +103,7 @@ describe("Payment reconciler consolidated review regressions", () => {
       expect(result).toEqual(expect.objectContaining({ status: "manual_review" }));
       expect(harness.payment.updatePaymentSession).not.toHaveBeenCalled();
       expect(harness.notifications.completeInbox).not.toHaveBeenCalled();
-      expect(harness.notifications.quarantineManualReview).toHaveBeenCalledTimes(1);
+      expect(harness.notifications.quarantineConflict).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -231,16 +230,33 @@ describe("Payment reconciler consolidated review regressions", () => {
       .rejects.toThrow(ManualReviewStateError);
   });
 
-  it("fences quarantineConflict with lease renewal, aborting stale workers before conflict writes", async () => {
+  it("fences quarantineConflict before any conflict write when the lease is already stale", async () => {
     const harness = createHarness();
     harness.notifications.claimNotificationById.mockResolvedValueOnce([
       { ...ROW, terminal_key: "mismatched_terminal" }, // triggers correlation mismatch
     ]);
-    // Stale worker: lease renewal returns empty (lost lease)
-    harness.notifications.renewInboxLease.mockResolvedValueOnce([]);
+    harness.notifications.quarantineConflict.mockResolvedValueOnce([]);
 
     const result = await harness.reconciler.processNotification(ROW.id);
     expect(result).toEqual(expect.objectContaining({ status: "ignored", reason: "stale_lease_fenced" }));
-    expect(harness.notifications.createTbankNotificationConflicts).not.toHaveBeenCalled();
+  });
+
+  it("leaves no conflict audit when the lease is reassigned after renewal", async () => {
+    const persistedConflicts: Record<string, unknown>[] = [];
+    const harness = createHarness();
+    harness.notifications.claimNotificationById.mockResolvedValueOnce([
+      { ...ROW, terminal_key: "mismatched_terminal" },
+    ]);
+    const splitConflictWrite = jest.fn().mockImplementationOnce(async (conflict) => {
+      persistedConflicts.push(conflict);
+      return conflict;
+    });
+    harness.notifications.createTbankNotificationConflicts = splitConflictWrite;
+    harness.notifications.quarantineConflict.mockResolvedValueOnce([]);
+
+    const result = await harness.reconciler.processNotification(ROW.id);
+
+    expect(result).toEqual(expect.objectContaining({ status: "ignored", reason: "stale_lease_fenced" }));
+    expect(persistedConflicts).toEqual([]);
   });
 });

@@ -46,11 +46,10 @@ function createHarness(overrides: Partial<PaymentReconcilerDependencies> = {}): 
     renewInboxLease: jest.fn().mockResolvedValue([ROW]),
     completeInbox: jest.fn().mockResolvedValue([ROW]),
     failInbox: jest.fn().mockResolvedValue([{ ...ROW, lifecycle_state: "pending", attempt_count: 2 }]),
-    quarantineManualReview: jest.fn().mockResolvedValue([ROW]),
+    quarantineConflict: jest.fn().mockResolvedValue([ROW]),
     retryManualReview: jest.fn().mockResolvedValue([ROW]),
     resolveManualReview: jest.fn().mockResolvedValue([ROW]),
     listTbankNotifications: jest.fn().mockResolvedValue([]),
-    createTbankNotificationConflicts: jest.fn().mockResolvedValue({}),
   };
   const payment = {
     retrievePaymentSession: jest.fn().mockResolvedValue({ ...SESSION }),
@@ -242,7 +241,7 @@ describe("Payment reconciliation security regressions", () => {
 
     expect(result.status).toBe("retry_scheduled");
     expect(harness.notifications.failInbox).toHaveBeenCalled();
-    expect(harness.notifications.quarantineManualReview).not.toHaveBeenCalled();
+    expect(harness.notifications.quarantineConflict).not.toHaveBeenCalled();
   });
 
   it("renews ownership around AUTHORIZED session mutation", async () => {

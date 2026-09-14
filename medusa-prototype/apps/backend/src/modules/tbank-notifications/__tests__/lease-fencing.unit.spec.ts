@@ -1,18 +1,33 @@
 import TbankNotificationModuleService from "../service";
 
 describe("T-Bank notification lease fencing", () => {
-  it("requires an unexpired lease when quarantining a notification", async () => {
-    const execute = jest.fn().mockResolvedValue([]);
+  it("persists conflict audit and quarantine through one fenced statement", async () => {
+    const execute = jest.fn().mockResolvedValue([{ canonical_notification_id: "tbnotif_conflict" }]);
     const now = new Date("2026-09-12T00:00:00.000Z");
 
-    await Reflect.apply(TbankNotificationModuleService.prototype.quarantineManualReview, {}, [
-      { id: "tbnotif_expired", leaseToken: "lost-lease", now },
+    const operation = Reflect.get(TbankNotificationModuleService.prototype, "quarantineConflict");
+    if (typeof operation !== "function") throw new TypeError("quarantineConflict is unavailable");
+    const rows = await Reflect.apply(operation, {}, [
+      { id: "tbnotif_conflict", leaseToken: "current-lease", reason: "Correlation mismatch: amount", now },
       { manager: { execute } },
     ]);
 
+    expect(rows).toHaveLength(1);
+    expect(execute).toHaveBeenCalledTimes(1);
     const [sql, parameters] = execute.mock.calls[0];
+    expect(sql).toContain("WITH quarantined AS");
+    expect(sql).toContain("INSERT INTO tbank_notification_conflict");
+    expect(sql).toContain("conflict_kind");
+    expect(sql).toContain("correlation_mismatch");
+    expect(sql).toContain("lifecycle_state = 'leased'");
+    expect(sql).toContain("lease_token = ?");
     expect(sql).toContain("lease_expires_at > ?");
-    expect(parameters).toEqual(expect.arrayContaining([now]));
+    expect(parameters).toEqual(expect.arrayContaining([
+      "tbnotif_conflict",
+      "current-lease",
+      "Correlation mismatch: amount",
+      now,
+    ]));
   });
 
   it("persists retry transition and operator audit in one statement", async () => {

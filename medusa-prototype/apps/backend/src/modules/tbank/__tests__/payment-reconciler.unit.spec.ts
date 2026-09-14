@@ -53,13 +53,12 @@ describe("PaymentReconcilerService unit tests", () => {
       renewInboxLease: jest.fn().mockResolvedValue([sampleRow]),
       completeInbox: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "processed" }]),
       failInbox: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "pending" }]),
-      quarantineManualReview: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "manual_review" }]),
+      quarantineConflict: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "manual_review" }]),
       retryManualReview: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "pending" }]),
       resolveManualReview: jest.fn().mockResolvedValue([{ ...sampleRow, lifecycle_state: "processed" }]),
       listTbankNotifications: jest.fn().mockResolvedValue([sampleRow]),
       listTbankPaymentAttempts: jest.fn().mockResolvedValue([]),
       listTbankNotificationConflicts: jest.fn().mockResolvedValue([]),
-      createTbankNotificationConflicts: jest.fn().mockResolvedValue({ id: "tbconf_1" }),
     };
 
     mockPaymentService = {
@@ -172,13 +171,10 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(result.status).toBe("manual_review");
       expect(result).toHaveProperty("reason", expect.stringContaining("amount"));
       expect(mockWorkflowRunner).not.toHaveBeenCalled();
-      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "tbnotif_1" }),
-      );
-      expect(mockNotificationService.createTbankNotificationConflicts).toHaveBeenCalledWith(
+      expect(mockNotificationService.quarantineConflict).toHaveBeenCalledWith(
         expect.objectContaining({
-          conflict_kind: "correlation_mismatch",
-          correlation_failures: expect.stringContaining("amount"),
+          id: "tbnotif_1",
+          reason: expect.stringContaining("amount"),
         }),
       );
       expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("tbank.manual_review"));
@@ -195,7 +191,7 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(result.status).toBe("manual_review");
       expect(result).toHaveProperty("reason", expect.stringContaining("terminal"));
       expect(mockWorkflowRunner).not.toHaveBeenCalled();
-      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
+      expect(mockNotificationService.quarantineConflict).toHaveBeenCalled();
     });
   });
 
@@ -251,7 +247,7 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(result.status).toBe("manual_review");
       expect(result).toHaveProperty("reason", expect.stringContaining("Amount"));
       expect(mockWorkflowRunner).not.toHaveBeenCalled();
-      expect(mockNotificationService.quarantineManualReview).toHaveBeenCalled();
+      expect(mockNotificationService.quarantineConflict).toHaveBeenCalled();
       expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("tbank.manual_review"));
     });
   });
@@ -328,7 +324,7 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(result.status).toBe("retry_scheduled");
       expect(result).toHaveProperty("error", expect.stringContaining("order creation"));
       expect(mockNotificationService.failInbox).toHaveBeenCalled();
-      expect(mockNotificationService.quarantineManualReview).not.toHaveBeenCalled();
+      expect(mockNotificationService.quarantineConflict).not.toHaveBeenCalled();
       expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
     });
   });
