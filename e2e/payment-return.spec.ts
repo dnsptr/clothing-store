@@ -227,18 +227,25 @@ test.describe("Payment Return UI", () => {
     const concurrentCart = "cart_01J99999999999999999999999";
 
     await page.addInitScript(() => {
-      delete (window as unknown as { __PAYMENT_POLL_INTERVAL_MS?: number }).__PAYMENT_POLL_INTERVAL_MS;
-      delete (window as unknown as { __PAYMENT_POLL_MAX_ATTEMPTS?: number }).__PAYMENT_POLL_MAX_ATTEMPTS;
+      (window as unknown as { __PAYMENT_POLL_INTERVAL_MS: number }).__PAYMENT_POLL_INTERVAL_MS = 50;
+      (window as unknown as { __PAYMENT_POLL_MAX_ATTEMPTS: number }).__PAYMENT_POLL_MAX_ATTEMPTS = 20;
     });
 
     await seedCart(page, initialCart);
 
+    // Track the initial verification request to ensure client has hydrated and latched initialCart
+    const initialPollPromise = page.waitForResponse(
+      (res) => res.url().includes(`/store/payment-status/${initialCart}`),
+      { timeout: 10_000 },
+    );
+
     await page.goto(`${APP_URL}/checkout/success`);
 
-    // Verify initial neutral state
+    // Verify initial neutral state and that first poll for initial cart has started
     await expect(
       page.getByRole("heading", { name: "Проверяем статус оплаты..." }),
     ).toBeVisible();
+    await initialPollPromise;
 
     // Shopper opens new tab and adds items creating a new cart in localStorage
     await page.evaluate(({ newCartId }) => {
