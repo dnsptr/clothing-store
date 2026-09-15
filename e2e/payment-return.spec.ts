@@ -11,6 +11,8 @@ import {
 
 const APP_URL = process.env.PAYMENT_APP_URL ?? DEFAULT_APP_URL;
 const FIXTURE_URL = process.env.PAYMENT_FIXTURE_URL ?? DEFAULT_FIXTURE_URL;
+const RELEASE_HELD_CART_HYDRATION_EVENT = "e2e:release-held-cart-hydration";
+const HELD_CART_HYDRATION_ATTRIBUTE = "data-e2e-held-cart-hydration";
 
 test.describe("Payment Return UI", () => {
   test.beforeEach(async ({ request }) => {
@@ -103,6 +105,73 @@ test.describe("Payment Return UI", () => {
     }).toBe(true);
   });
 
+  test("confirmed ready cleanup cannot be overwritten by deferred cart hydration", async ({
+    page,
+  }) => {
+    // Given: cart hydration's zero-delay callbacks cannot run until after cleanup.
+    await page.addInitScript(({ heldAttribute, releaseEvent }) => {
+      const originalSetTimeout = window.setTimeout;
+      const heldCallbacks: (() => void)[] = [];
+      let isHolding = true;
+
+      window.setTimeout = Object.assign(
+        function holdCartHydration(...timeoutArgs: Parameters<typeof window.setTimeout>): number {
+          const [handler, timeout, ...args] = timeoutArgs;
+          if (isHolding && timeout === 0 && typeof handler === "function") {
+            heldCallbacks.push(() => handler(...args));
+            window.sessionStorage.setItem(heldAttribute, "true");
+            return 0;
+          }
+
+          return originalSetTimeout(...timeoutArgs);
+        },
+        originalSetTimeout,
+      );
+
+      window.addEventListener(releaseEvent, () => {
+        isHolding = false;
+        const callbacks = heldCallbacks.splice(0);
+        window.sessionStorage.removeItem(heldAttribute);
+        callbacks.forEach((callback) => callback());
+      }, { once: true });
+    }, {
+      heldAttribute: HELD_CART_HYDRATION_ATTRIBUTE,
+      releaseEvent: RELEASE_HELD_CART_HYDRATION_EVENT,
+    });
+    await seedCart(page, RETURN_CARTS.ready, [SAMPLE_CART_ITEM]);
+
+    // When: confirmed-ready payment cleanup wins before deferred hydration.
+    await page.goto(`${APP_URL}/checkout/success`);
+    await expect.poll(async () => page.evaluate(
+      (heldAttribute) => window.sessionStorage.getItem(heldAttribute),
+      HELD_CART_HYDRATION_ATTRIBUTE,
+    )).toBe("true");
+    await expect(
+      page.getByRole("heading", { name: "Оплата прошла успешно! Заказ оформлен." }),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // Then: capability keys are removed before held hydration can run.
+    await expect.poll(async () => page.evaluate(() => [
+      window.localStorage.getItem("clothing-store-medusa-cart"),
+      window.localStorage.getItem("medusa_cart_id"),
+      window.localStorage.getItem("medusa_cart_id_v1"),
+    ])).toEqual([null, null, null]);
+
+    // And: releasing the stale callback cannot restore cart items or a capability key.
+    await page.evaluate((releaseEvent) => {
+      window.dispatchEvent(new Event(releaseEvent));
+    }, RELEASE_HELD_CART_HYDRATION_EVENT);
+    await expect.poll(async () => page.evaluate(() => {
+      const storedItems = window.localStorage.getItem("clothing-store-cart-medusa");
+      return storedItems === null || storedItems === "[]";
+    })).toBe(true);
+    await expect.poll(async () => page.evaluate(() => [
+      window.localStorage.getItem("clothing-store-medusa-cart"),
+      window.localStorage.getItem("medusa_cart_id"),
+      window.localStorage.getItem("medusa_cart_id_v1"),
+    ])).toEqual([null, null, null]);
+  });
+
   test("backend failed state preserves cart items and offers retry link back to /checkout", async ({
     page,
   }) => {
@@ -118,6 +187,7 @@ test.describe("Payment Return UI", () => {
         name: "Оплата не была завершена или была отменена",
       }),
     ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("link", { name: "Корзина" }).locator("span")).toHaveText("1");
 
     // And: retry button is present
     const retryLink = page.getByRole("link", { name: "Вернуться к оформлению" });
@@ -195,12 +265,6 @@ test.describe("Payment Return UI", () => {
       order: "pending",
     });
 
-    // Speed up polling for test: 50ms interval, 2 max attempts
-    await page.addInitScript(() => {
-      (window as unknown as { __PAYMENT_POLL_INTERVAL_MS: number }).__PAYMENT_POLL_INTERVAL_MS = 50;
-      (window as unknown as { __PAYMENT_POLL_MAX_ATTEMPTS: number }).__PAYMENT_POLL_MAX_ATTEMPTS = 2;
-    });
-
     await page.goto(`${APP_URL}/checkout/success`);
 
     // Must transition to order_delayed, NEVER to failed/timeout
@@ -225,11 +289,6 @@ test.describe("Payment Return UI", () => {
   }) => {
     const initialCart = RETURN_CARTS.pending;
     const concurrentCart = "cart_01J99999999999999999999999";
-
-    await page.addInitScript(() => {
-      (window as unknown as { __PAYMENT_POLL_INTERVAL_MS: number }).__PAYMENT_POLL_INTERVAL_MS = 50;
-      (window as unknown as { __PAYMENT_POLL_MAX_ATTEMPTS: number }).__PAYMENT_POLL_MAX_ATTEMPTS = 20;
-    });
 
     await seedCart(page, initialCart);
 

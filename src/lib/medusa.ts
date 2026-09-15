@@ -154,7 +154,7 @@ interface MedusaShippingOptionsResponse {
   shipping_options?: MedusaShippingOption[];
 }
 
-interface MedusaPaymentSession {
+export interface MedusaPaymentSession {
   id: string;
   provider_id: string;
   status: string;
@@ -626,6 +626,34 @@ function parsePaymentCollectionResponse(
   const root = expectRecord(data, endpoint, "$");
   const collection = expectRecord(root.payment_collection, endpoint, "payment_collection");
   expectString(collection.id, endpoint, "payment_collection.id");
+  if (collection.payment_sessions !== undefined && collection.payment_sessions !== null) {
+    const sessions = expectArray(
+      collection.payment_sessions,
+      endpoint,
+      "payment_collection.payment_sessions",
+    );
+    sessions.forEach((item, index) => {
+      const session = expectRecord(
+        item,
+        endpoint,
+        `payment_collection.payment_sessions[${index}]`,
+      );
+      expectString(session.id, endpoint, `payment_collection.payment_sessions[${index}].id`);
+      expectString(
+        session.provider_id,
+        endpoint,
+        `payment_collection.payment_sessions[${index}].provider_id`,
+      );
+      expectString(
+        session.status,
+        endpoint,
+        `payment_collection.payment_sessions[${index}].status`,
+      );
+      if (session.data !== undefined && session.data !== null) {
+        expectRecord(session.data, endpoint, `payment_collection.payment_sessions[${index}].data`);
+      }
+    });
+  }
   return data as MedusaPaymentCollectionResponse;
 }
 

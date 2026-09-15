@@ -7,6 +7,16 @@ import {
 
 const TBANK_ENABLED_SCHEMA = z.enum(["true", "false"]).optional();
 
+const TBANK_PAYMENT_VARIABLES = [
+  "TBANK_PAYMENT_PROVIDER_ID",
+  "TBANK_TERMINAL_KEY",
+  "TBANK_PASSWORD",
+  "TBANK_API_BASE_URL",
+  "TBANK_SUCCESS_URL",
+  "TBANK_FAIL_URL",
+  "TBANK_NOTIFICATION_URL",
+] as const;
+
 const TBANK_ENVIRONMENT_SCHEMA = z.object({
   TBANK_PAYMENT_PROVIDER_ID: z.literal(TBANK_PAYMENT_PROVIDER_ID),
   TBANK_TERMINAL_KEY: z.string().trim().min(1),
@@ -75,6 +85,12 @@ export function parseTbankEnvironment(
   }
 
   if (enabledResult.data !== "true") {
+    const configuredVariables = TBANK_PAYMENT_VARIABLES.filter(
+      (name) => environment[name]?.trim(),
+    );
+    if (configuredVariables.length > 0) {
+      throw new TBankConfigurationError(configuredVariables);
+    }
     return { enabled: false };
   }
 

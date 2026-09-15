@@ -11,24 +11,48 @@ const VALID_ENABLED_ENVIRONMENT = {
   TBANK_NOTIFICATION_URL: "https://api.mariomikke.shop/hooks/payment/tbank",
 } as const;
 
+const TBANK_PAYMENT_VARIABLES = [
+  "TBANK_PAYMENT_PROVIDER_ID",
+  "TBANK_TERMINAL_KEY",
+  "TBANK_PASSWORD",
+  "TBANK_API_BASE_URL",
+  "TBANK_SUCCESS_URL",
+  "TBANK_FAIL_URL",
+  "TBANK_NOTIFICATION_URL",
+] as const;
+
 describe("parseTbankEnvironment", () => {
-  it("disables the provider when TBANK_ENABLED is false, even with stale values", () => {
-    const environment = {
-      ...VALID_ENABLED_ENVIRONMENT,
-      TBANK_ENABLED: "false",
-      TBANK_PASSWORD: "stale-password",
-    };
-
-    const result = parseTbankEnvironment(environment);
-
-    expect(result).toEqual({ enabled: false });
+  it("disables the provider when TBANK_ENABLED is false and payment values are absent", () => {
+    expect(parseTbankEnvironment({ TBANK_ENABLED: "false" })).toEqual({ enabled: false });
   });
 
   it("defaults to disabled when TBANK_ENABLED is absent", () => {
-    const result = parseTbankEnvironment({});
-
-    expect(result).toEqual({ enabled: false });
+    expect(parseTbankEnvironment({})).toEqual({ enabled: false });
   });
+
+  it("allows blank payment values when TBANK_ENABLED is false", () => {
+    const blankEnvironment = Object.fromEntries(
+      TBANK_PAYMENT_VARIABLES.map((name) => [name, "  "]),
+    );
+
+    expect(parseTbankEnvironment({ ...blankEnvironment, TBANK_ENABLED: "false" })).toEqual({
+      enabled: false,
+    });
+  });
+
+  it.each(TBANK_PAYMENT_VARIABLES)(
+    "rejects disabled configuration containing %s without exposing its value",
+    (variableName) => {
+      const value = VALID_ENABLED_ENVIRONMENT[variableName];
+
+      expect(() =>
+        parseTbankEnvironment({ TBANK_ENABLED: "false", [variableName]: value }),
+      ).toThrow(expect.objectContaining({ variables: [variableName] }));
+      expect(() =>
+        parseTbankEnvironment({ TBANK_ENABLED: "false", [variableName]: value }),
+      ).toThrow(new RegExp(`^Invalid T-Bank configuration: ${variableName}$`));
+    },
+  );
 
   it.each(["TRUE", "1", "enabled", " false "])(
     "rejects malformed TBANK_ENABLED=%s",
@@ -39,15 +63,7 @@ describe("parseTbankEnvironment", () => {
     },
   );
 
-  it.each([
-    "TBANK_PAYMENT_PROVIDER_ID",
-    "TBANK_TERMINAL_KEY",
-    "TBANK_PASSWORD",
-    "TBANK_API_BASE_URL",
-    "TBANK_SUCCESS_URL",
-    "TBANK_FAIL_URL",
-    "TBANK_NOTIFICATION_URL",
-  ] as const)("rejects enabled configuration missing %s", (missingName) => {
+  it.each(TBANK_PAYMENT_VARIABLES)("rejects enabled configuration missing %s", (missingName) => {
     const environment = { ...VALID_ENABLED_ENVIRONMENT };
     delete environment[missingName];
 

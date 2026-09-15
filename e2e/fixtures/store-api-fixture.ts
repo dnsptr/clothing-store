@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-export const BANK_PAYMENT_URL = "https://bank.test/payment/payses_baseline";
+export const BANK_PAYMENT_URL = "https://securepay.tinkoff.ru/payment/payses_baseline";
 export const DEFAULT_FIXTURE_URL = "http://127.0.0.1:4174";
 
 export const PAYMENT_SCENARIOS = [
@@ -10,6 +10,8 @@ export const PAYMENT_SCENARIOS = [
   "missing",
   "wrong_status",
   "wrong_provider",
+  "unapproved",
+  "credentials",
 ] as const;
 
 export const FIXTURE_RETURN_CARTS = {
@@ -25,6 +27,13 @@ export type PaymentScenario = (typeof PAYMENT_SCENARIOS)[number];
 type RequestObservation = {
   readonly method: string;
   readonly path: string;
+};
+
+type FixturePaymentSession = {
+  readonly id: string;
+  readonly provider_id: string;
+  readonly status: string;
+  readonly data: Record<string, string>;
 };
 
 export type StoreApiFixture = {
@@ -87,6 +96,10 @@ function sendJson(response: ServerResponse, status: number, value: object): void
   response.end(JSON.stringify(value));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function parseScenario(value: unknown): PaymentScenario | null {
   switch (value) {
     case "valid":
@@ -95,26 +108,40 @@ function parseScenario(value: unknown): PaymentScenario | null {
     case "missing":
     case "wrong_status":
     case "wrong_provider":
+    case "unapproved":
+    case "credentials":
       return value;
     default:
       return null;
   }
 }
 
-function sessionFor(scenario: PaymentScenario): object {
+function sessionFor(
+  scenario: PaymentScenario,
+  id: string,
+  statusOverride?: string,
+): FixturePaymentSession {
+  const status = statusOverride ?? (scenario === "wrong_status" ? "authorized" : "pending_authorization");
+  const paymentUrl = id === "payses_baseline"
+    ? BANK_PAYMENT_URL
+    : `https://securepay.tinkoff.ru/payment/${id}`;
   switch (scenario) {
     case "valid":
-      return { id: "payses_baseline", provider_id: "pp_tbank_tbank", status: "pending_authorization", data: { paymentUrl: BANK_PAYMENT_URL } };
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl } };
     case "malformed":
-      return { id: "payses_baseline", provider_id: "pp_tbank_tbank", status: "pending_authorization", data: { paymentUrl: "://malformed-payment-url" } };
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: "://malformed-payment-url" } };
     case "insecure":
-      return { id: "payses_baseline", provider_id: "pp_tbank_tbank", status: "pending_authorization", data: { paymentUrl: "http://bank.test/payment/payses_baseline" } };
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: `http://bank.test/payment/${id}` } };
     case "missing":
-      return { id: "payses_baseline", provider_id: "pp_tbank_tbank", status: "pending_authorization", data: {} };
+      return { id, provider_id: "pp_tbank_tbank", status, data: {} };
     case "wrong_status":
-      return { id: "payses_baseline", provider_id: "pp_tbank_tbank", status: "authorized", data: { paymentUrl: BANK_PAYMENT_URL } };
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl } };
     case "wrong_provider":
-      return { id: "payses_baseline", provider_id: "pp_other_other", status: "pending_authorization", data: { paymentUrl: BANK_PAYMENT_URL } };
+      return { id, provider_id: "pp_other_other", status, data: { paymentUrl } };
+    case "unapproved":
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: `https://bank.test/payment/${id}` } };
+    case "credentials":
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: `https://user:password@securepay.tinkoff.ru/payment/${id}` } };
   }
 }
 
@@ -135,6 +162,10 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
 export async function startStoreApiFixture(port: number): Promise<StoreApiFixture> {
   let scenario: PaymentScenario = "valid";
   let observations: RequestObservation[] = [];
+  let paymentSessions: FixturePaymentSession[] = [];
+  let paymentSessionInitializations = 0;
+  let dropNextPaymentSessionResponse = false;
+  let customSessionControl = false;
   const statusOverrides = new Map<string, object | "not_found">();
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://fixture.local");
@@ -149,6 +180,10 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
     }
     if (requestUrl.pathname === "/__control/reset" && method === "POST") {
       observations = [];
+      paymentSessions = [];
+      paymentSessionInitializations = 0;
+      dropNextPaymentSessionResponse = false;
+      customSessionControl = false;
       statusOverrides.clear();
       sendJson(response, 200, { reset: true });
       return;
@@ -180,8 +215,33 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       sendJson(response, 400, { error: "missing_cart_id" });
       return;
     }
+    if (requestUrl.pathname === "/__control/payment-session" && method === "POST") {
+      const body = await readJsonBody(request);
+      if (!isRecord(body)) {
+        sendJson(response, 400, { error: "invalid_payment_session_control" });
+        return;
+      }
+
+      const { dropNextResponse, status } = body;
+      if (dropNextResponse !== undefined && typeof dropNextResponse !== "boolean") {
+        sendJson(response, 400, { error: "invalid_drop_next_response" });
+        return;
+      }
+      if (status !== undefined && typeof status !== "string") {
+        sendJson(response, 400, { error: "invalid_payment_session_status" });
+        return;
+      }
+
+      customSessionControl = true;
+      if (typeof dropNextResponse === "boolean") dropNextPaymentSessionResponse = dropNextResponse;
+      if (typeof status === "string") {
+        paymentSessions = [sessionFor(scenario, "payses_terminal", status)];
+      }
+      sendJson(response, 200, { updated: true });
+      return;
+    }
     if (requestUrl.pathname === "/__control/observations") {
-      sendJson(response, 200, { observations });
+      sendJson(response, 200, { observations, paymentSessionInitializations, paymentSessions });
       return;
     }
 
@@ -246,11 +306,21 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       return;
     }
     if (requestUrl.pathname === "/store/payment-collections") {
-      sendJson(response, 200, { payment_collection: { id: "paycol_baseline" } });
+      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", payment_sessions: paymentSessions } });
       return;
     }
     if (requestUrl.pathname === "/store/payment-collections/paycol_baseline/payment-sessions") {
-      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", payment_sessions: [sessionFor(scenario)] } });
+      paymentSessionInitializations += 1;
+      const sessionId = customSessionControl
+        ? `payses_fixture_${paymentSessionInitializations}`
+        : "payses_baseline";
+      paymentSessions = [sessionFor(scenario, sessionId)];
+      if (dropNextPaymentSessionResponse) {
+        dropNextPaymentSessionResponse = false;
+        sendJson(response, 502, { error: "provider_network_error", message: "Response from provider was lost" });
+        return;
+      }
+      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", payment_sessions: paymentSessions } });
       return;
     }
     if (requestUrl.pathname.startsWith("/store/carts/") && requestUrl.pathname.endsWith("/complete")) {

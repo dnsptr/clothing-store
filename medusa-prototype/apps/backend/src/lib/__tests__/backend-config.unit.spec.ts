@@ -18,10 +18,7 @@ const VALID_ENABLED_ENVIRONMENT = {
 
 describe("backend payment configuration", () => {
   it("omits the T-Bank payment module when disabled", () => {
-    const modules = resolveTbankPaymentModules({
-      ...VALID_ENABLED_ENVIRONMENT,
-      TBANK_ENABLED: "false",
-    });
+    const modules = resolveTbankPaymentModules({ TBANK_ENABLED: "false" });
 
     expect(modules).toEqual([]);
   });
@@ -54,7 +51,7 @@ describe("backend payment configuration", () => {
 
   it("propagates exactly eight T-Bank variables through rendered Compose config", () => {
     const composeFile = resolve(__dirname, "../../../../../compose.production.yml");
-    const environmentFile = resolve(__dirname, "fixtures/compose.production.env");
+    const environmentFile = resolve(__dirname, "../../../../../.env.production.payment-fixture");
     const testEnv = Object.fromEntries(
       Object.entries(process.env).filter(([k]) => !k.startsWith("TBANK_")),
     );

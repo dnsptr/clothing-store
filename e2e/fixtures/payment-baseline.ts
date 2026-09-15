@@ -60,6 +60,8 @@ async function runFixtureProcess(): Promise<void> {
         NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",
         NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: "pk_payment_fixture",
         NEXT_PUBLIC_MEDUSA_REGION_ID: "reg_fixture_ru",
+        NEXT_PUBLIC_PAYMENT_POLL_INTERVAL_MS: "50",
+        NEXT_PUBLIC_PAYMENT_POLL_MAX_ATTEMPTS: "20",
         NEXT_TELEMETRY_DISABLED: "1",
       },
       stdio: "inherit",

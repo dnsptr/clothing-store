@@ -7,8 +7,10 @@
  */
 
 import { TBankPaymentProviderService } from "../service";
+import { TBankClient } from "../lib/client";
 import { generateToken } from "../lib/token";
 import { TBANK_NOTIFICATION_MODULE } from "../../tbank-notifications";
+import { MedusaError } from "@medusajs/framework/utils";
 
 const OPTIONS = {
   terminalKey: "TinkoffBankTest",
@@ -46,6 +48,10 @@ function mockFetchOnce(body: Record<string, unknown>, ok = true, status = 200) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe("validateOptions", () => {
@@ -462,6 +468,36 @@ describe("initiatePayment", () => {
       );
     });
 
+    it("не вставляет дубликат для существующей попытки с теми же параметрами", async () => {
+      const mockNotificationStore = {
+        listTbankNotifications: jest.fn(),
+        createTbankNotifications: jest.fn(),
+        createTbankNotificationConflicts: jest.fn(),
+        listTbankPaymentAttempts: jest.fn().mockResolvedValue([
+          {
+            id: "tbatt_existing",
+            payment_session_id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+            order_id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+            expected_amount_kopecks: 1899000,
+            currency_code: "rub",
+          },
+        ]),
+        createTbankPaymentAttempts: jest.fn(),
+      };
+      mockFetchOnce({
+        Success: true,
+        ErrorCode: "0",
+        PaymentId: "12345",
+        PaymentURL: "https://securepay.tinkoff.ru/pay",
+        Amount: 1899000,
+      });
+
+      const result = await makeService(mockNotificationStore).initiatePayment(input as never);
+
+      expect(mockNotificationStore.createTbankPaymentAttempts).not.toHaveBeenCalled();
+      expect((result.data as Record<string, unknown>).attemptId).toBe("tbatt_existing");
+    });
+
     it("сохраняет попытку в tbank_payment_attempt до вызова Init Т-Банка", async () => {
       const mockNotificationStore = {
         listTbankNotifications: jest.fn(),
@@ -499,6 +535,29 @@ describe("initiatePayment", () => {
         }),
       );
       expect(res.id).toBe("12345");
+    });
+
+    it("не вызывает Init, если попытку не удалось сохранить", async () => {
+      const persistenceError = new Error("database password leaked in driver detail");
+      const mockNotificationStore = {
+        listTbankNotifications: jest.fn(),
+        createTbankNotifications: jest.fn(),
+        createTbankNotificationConflicts: jest.fn(),
+        listTbankPaymentAttempts: jest.fn().mockResolvedValue([]),
+        createTbankPaymentAttempts: jest.fn().mockRejectedValue(persistenceError),
+      };
+      const initSpy = jest.spyOn(TBankClient.prototype, "init");
+
+      const initiation = makeService(mockNotificationStore).initiatePayment(input as never);
+
+      await expect(initiation).rejects.toEqual(
+        expect.objectContaining({
+          type: MedusaError.Types.PAYMENT_AUTHORIZATION_ERROR,
+          cause: persistenceError,
+        }),
+      );
+      await expect(initiation).rejects.not.toHaveProperty("message", expect.stringContaining("password"));
+      expect(initSpy).not.toHaveBeenCalled();
     });
   });
 });
@@ -812,4 +871,3 @@ describe("quarantined scripts (Task 5)", () => {
     errorSpy.mockRestore();
   });
 });
-

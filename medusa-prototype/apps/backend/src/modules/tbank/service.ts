@@ -47,6 +47,7 @@ import type {
 
 import { TBankApiError, TBankClient } from "./lib/client";
 import { rublesToKopecks } from "./lib/money";
+import { TBankAttemptPersistenceError } from "./errors";
 import {
   parseNotification,
   toSessionStatus,
@@ -418,11 +419,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
           currency_code: input.currency_code.toLowerCase(),
         });
       } catch (insertErr) {
-        this.logger_.warn(
-          `tbank: не удалось сохранить попытку в tbank_payment_attempt перед Init для сессии ${sessionId}: ${
-            insertErr instanceof Error ? insertErr.message : String(insertErr)
-          }`,
-        );
+        throw new TBankAttemptPersistenceError(sessionId, insertErr);
       }
     }
 

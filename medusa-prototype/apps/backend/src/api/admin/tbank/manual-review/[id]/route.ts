@@ -4,10 +4,16 @@ import {
   ManualReviewNotFoundError,
   ManualReviewStateError,
 } from "../../../../../modules/tbank/services/manual-review-operations";
+import { NotificationIdSchema } from "../validators";
 import { manualReviewDetailsDto } from "../dto";
 
 export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void> {
-  const { id } = req.params;
+  const idResult = NotificationIdSchema.safeParse(req.params.id);
+  if (!idResult.success) {
+    res.status(404).json({ message: "Invalid notification ID format" });
+    return;
+  }
+  const id = idResult.data;
   try {
     const reconciler = new PaymentReconcilerService({ container: req.scope });
     const details = await reconciler.inspectManualReview(id);

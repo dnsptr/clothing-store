@@ -13,6 +13,8 @@ import {
   initializeMedusaPaymentSession,
   listMedusaShippingOptions,
   mapCartLineToProduct,
+  medusaPaymentProviderId,
+  type MedusaPaymentSession,
   type MedusaShippingOption,
   type MedusaCartLine,
   removeMedusaCartLineItem,
@@ -21,6 +23,7 @@ import {
   updateMedusaCartLineItem,
   updateMedusaCart,
 } from "../lib/medusa";
+import { approvedTbankPaymentUrl, decideTbankSession } from "../lib/paymentSessionPolicy";
 
 export interface CartItem {
   product: Product;
@@ -135,6 +138,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [mutationCount, setMutationCount] = useState(0);
   const [cartError, setCartError] = useState<string | null>(null);
   const cartItemsRef = useRef<CartItem[]>([]);
+  const cartHydrationGeneration = useRef(0);
   const mutationQueue = useRef(Promise.resolve());
   const cartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const isCartMutating = mutationCount > 0;
@@ -250,6 +254,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let isMounted = true;
+    const hydrationGeneration = cartHydrationGeneration.current;
 
     try {
       const savedCart = window.localStorage.getItem(CART_STORAGE_KEY);
@@ -259,14 +264,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         : [];
 
       window.setTimeout(() => {
-        if (!isMounted) return;
+        if (!isMounted || cartHydrationGeneration.current !== hydrationGeneration) return;
+        cartItemsRef.current = nextCart;
         setCartItems(nextCart);
         setIsCartHydrated(true);
       }, 0);
     } catch {
       window.localStorage.removeItem(CART_STORAGE_KEY);
       window.setTimeout(() => {
-        if (!isMounted) return;
+        if (!isMounted || cartHydrationGeneration.current !== hydrationGeneration) return;
         setIsCartHydrated(true);
       }, 0);
     }
@@ -564,7 +570,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
     const cartId = await getMedusaCartId();
     const paymentCollection = await createMedusaPaymentCollection(cartId);
-    const paymentSession = await initializeMedusaPaymentSession(paymentCollection.id);
+    let paymentSession: MedusaPaymentSession;
+    if (medusaPaymentProviderId === "pp_system_default") {
+      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id);
+    } else {
+      const decision = decideTbankSession(
+        paymentCollection.payment_sessions,
+        medusaPaymentProviderId,
+      );
+      if (decision.kind === "redirect") {
+        return { type: "redirect", paymentUrl: decision.paymentUrl };
+      }
+      if (decision.kind === "reject") throw new Error(decision.message);
+      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id);
+    }
 
     // Встроенный провайдер оставлен только для локального/e2e escape hatch.
     // Боевой redirect-провайдер не должен создавать заказ до оплаты: успешный
@@ -575,22 +594,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           `Платёжный провайдер вернул неожиданное состояние: ${paymentSession.status}.`,
         );
       }
-      const paymentUrl = paymentSession.data.paymentUrl;
-      if (typeof paymentUrl !== "string") {
-        throw new Error("Платёжный провайдер не вернул ссылку на оплату.");
-      }
-
-      let parsedPaymentUrl: URL;
-      try {
-        parsedPaymentUrl = new URL(paymentUrl);
-      } catch {
-        throw new Error("Платёжный провайдер вернул некорректную ссылку на оплату.");
-      }
-      if (parsedPaymentUrl.protocol !== "https:") {
-        throw new Error("Платёжный провайдер вернул небезопасную ссылку на оплату.");
-      }
-
-      return { type: "redirect", paymentUrl: parsedPaymentUrl.toString() };
+      const paymentUrl = approvedTbankPaymentUrl(paymentSession.data.paymentUrl);
+      if (!paymentUrl) throw new Error("Платёжный провайдер вернул недействительную ссылку на оплату.");
+      return { type: "redirect", paymentUrl };
     }
 
     const response = await completeMedusaCart(cartId);
@@ -603,6 +609,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   });
 
   const clearCart = () => {
+    cartHydrationGeneration.current += 1;
     window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY);
     window.localStorage.removeItem(CART_STORAGE_KEY);
     window.localStorage.removeItem("medusa_cart_id");

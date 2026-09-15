@@ -37,6 +37,7 @@ yarn-error.log*
 !.env.template
 !**/.env.template
 !**/.env.production.template
+!/medusa-prototype/.env.production.payment-fixture
 
 # local tooling and generated patches
 .npm-cache/
@@ -52,6 +53,7 @@ yarn-error.log*
 next-env.d.ts
 
 # local deepwork orchestration state
-.slim/deepwork/
+.slim/
+.playwright-mcp/
 .omo/
 .ignore

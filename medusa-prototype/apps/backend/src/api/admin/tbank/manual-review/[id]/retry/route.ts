@@ -4,7 +4,7 @@ import {
   ManualReviewNotFoundError,
   ManualReviewStateError,
 } from "../../../../../../modules/tbank/services/manual-review-operations";
-import type { ManualReviewActionInput } from "../../validators";
+import { NotificationIdSchema, type ManualReviewActionInput } from "../../validators";
 
 type AuthenticatedAdminRequest = MedusaRequest<ManualReviewActionInput> & {
   readonly auth_context?: { readonly actor_id?: string };
@@ -14,7 +14,12 @@ export async function POST(
   req: AuthenticatedAdminRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const { id } = req.params;
+  const idResult = NotificationIdSchema.safeParse(req.params.id);
+  if (!idResult.success) {
+    res.status(404).json({ message: "Invalid notification ID format" });
+    return;
+  }
+  const id = idResult.data;
   const body = req.validatedBody;
   const operatorId = req.auth_context?.actor_id;
   if (!operatorId) {

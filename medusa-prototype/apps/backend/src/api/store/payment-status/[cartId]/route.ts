@@ -13,6 +13,7 @@ const CACHE_CONTROL = "no-store, no-cache, must-revalidate, proxy-revalidate";
 
 export async function GET(request: MedusaRequest, response: MedusaResponse): Promise<void> {
   response.setHeader("Cache-Control", CACHE_CONTROL);
+  response.setHeader("X-Content-Type-Options", "nosniff");
   const capability = CartCapabilitySchema.safeParse(request.params.cartId);
   if (!capability.success) {
     response.status(404).end();
