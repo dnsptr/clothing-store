@@ -26,6 +26,10 @@ type FixtureData = {
 
 const SECRET_PASSWORD = "DeterministicOfflineSecret_DO_NOT_LEAK";
 const TERMINAL_KEY = "TinkoffBankOffline";
+const CART_ID = "cart_01JABCDEFGHJKMNPQRSTVWXYZ";
+const PAYMENT_CONTEXT = {
+  idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+};
 
 const OPTIONS = {
   terminalKey: TERMINAL_KEY,
@@ -42,7 +46,33 @@ const logger = {
 };
 
 function createService(): TBankPaymentProviderService {
-  return new TBankPaymentProviderService({ logger } as never, OPTIONS as never);
+  const query = {
+    graph: async ({ entity }: { readonly entity: string }) => {
+      if (entity === "payment_session") {
+        return { data: [{
+          id: PAYMENT_CONTEXT.idempotency_key,
+          payment_collection_id: "paycol_offline",
+        }] };
+      }
+      if (entity === "cart_payment_collection") {
+        return { data: [{ cart_id: CART_ID, payment_collection_id: "paycol_offline" }] };
+      }
+      return { data: [{
+        id: CART_ID,
+        email: "offline@example.com",
+        shipping_address: { phone: "+79990000000" },
+        total: 18990,
+        shipping_total: 0,
+        items: [{
+          id: "item_offline",
+          product_title: "Офлайн-проверка",
+          quantity: 1,
+          total: 18990,
+        }],
+      }] };
+    },
+  };
+  return new TBankPaymentProviderService({ logger, query } as never, OPTIONS as never);
 }
 
 function parseCliArgs(): { fixturePath?: string; scenario?: string; assertFailure?: string } {
@@ -99,7 +129,7 @@ async function runScenarioValidInit(fixtures: FixtureData): Promise<void> {
   const input = {
     amount: 18990,
     currency_code: "rub",
-    context: { idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    context: PAYMENT_CONTEXT,
   };
 
   const result = await service.initiatePayment(input as never);
@@ -127,7 +157,7 @@ async function runScenarioMalformedOrigin(fixtures: FixtureData): Promise<void> 
   const input = {
     amount: 18990,
     currency_code: "rub",
-    context: { idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    context: PAYMENT_CONTEXT,
   };
 
   let rejected = false;
@@ -160,7 +190,7 @@ async function runScenarioHttpOrigin(fixtures: FixtureData): Promise<void> {
   const input = {
     amount: 18990,
     currency_code: "rub",
-    context: { idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    context: PAYMENT_CONTEXT,
   };
 
   let rejected = false;
@@ -193,7 +223,7 @@ async function runScenarioBankError(fixtures: FixtureData): Promise<void> {
   const input = {
     amount: 18990,
     currency_code: "rub",
-    context: { idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    context: PAYMENT_CONTEXT,
   };
 
   let errorCaught = false;
@@ -224,7 +254,7 @@ async function runScenarioTimeout(): Promise<void> {
   const input = {
     amount: 18990,
     currency_code: "rub",
-    context: { idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    context: PAYMENT_CONTEXT,
     data: sessionData,
   };
 

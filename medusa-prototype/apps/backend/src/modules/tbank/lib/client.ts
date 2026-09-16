@@ -12,6 +12,7 @@
  */
 
 import { generateToken } from "./token";
+import type { TBankReceipt } from "./receipt";
 
 export type TBankCredentials = {
   terminalKey: string;
@@ -170,10 +171,8 @@ export class TBankClient {
    * Создание платежа. `receipt` передаётся отдельным параметром, чтобы было
    * видно: он не приходит от клиента, а собирается на сервере (§6.1).
    *
-   * ВНИМАНИЕ. Если к терминалу подключена онлайн-касса, `Init` **без валидного
-   * `Receipt` не проходит вовсе** — банк отвергает запрос. Пока `buildReceipt`
-   * не реализован (шаг 3 в §12.2), сквозная оплата возможна только на
-   * терминале без кассы.
+   * Если к терминалу подключена онлайн-касса, `Init` без валидного `Receipt`
+   * не проходит: вызывающий провайдер обязан собрать его из серверной корзины.
    */
   async init(params: {
     orderId: string;
@@ -182,7 +181,7 @@ export class TBankClient {
     successUrl?: string;
     failUrl?: string;
     notificationUrl?: string;
-    receipt?: Record<string, unknown>;
+    receipt?: TBankReceipt;
     data?: Record<string, string>;
   }): Promise<TBankInitResult> {
     return this.call<TBankInitResult>("Init", {

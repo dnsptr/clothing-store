@@ -186,7 +186,20 @@ describe("TBankClient", () => {
         successUrl: "https://mariomikke.ru/success",
         failUrl: "https://mariomikke.ru/fail",
         notificationUrl: "https://mariomikke.ru/webhook",
-        receipt: { Items: [] },
+        receipt: {
+          Email: "buyer@example.com",
+          Taxation: "usn_income",
+          Items: [{
+            Name: "Футболка",
+            Price: 1899000,
+            Quantity: 1,
+            Amount: 1899000,
+            Tax: "vat105",
+            PaymentMethod: "full_prepayment",
+            PaymentObject: "commodity",
+            MeasurementUnit: "шт",
+          }],
+        },
         data: { test: "value" },
       });
 
@@ -199,7 +212,20 @@ describe("TBankClient", () => {
       expect(body.SuccessURL).toBe("https://mariomikke.ru/success");
       expect(body.FailURL).toBe("https://mariomikke.ru/fail");
       expect(body.NotificationURL).toBe("https://mariomikke.ru/webhook");
-      expect(body.Receipt).toEqual({ Items: [] });
+      expect(body.Receipt).toEqual({
+        Email: "buyer@example.com",
+        Taxation: "usn_income",
+        Items: [{
+          Name: "Футболка",
+          Price: 1899000,
+          Quantity: 1,
+          Amount: 1899000,
+          Tax: "vat105",
+          PaymentMethod: "full_prepayment",
+          PaymentObject: "commodity",
+          MeasurementUnit: "шт",
+        }],
+      });
       expect(body.DATA).toEqual({ test: "value" });
     });
 

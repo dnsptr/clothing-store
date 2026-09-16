@@ -26,10 +26,70 @@ const logger = {
   debug: jest.fn(),
 };
 
-function makeService(notificationStore?: unknown) {
+function authoritativeCart(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "cart_01JABCDEFGHJKMNPQRSTVWXYZ",
+    email: " Buyer@Example.com ",
+    shipping_address: { phone: " +7 (999) 000-00-00 " },
+    total: 18990,
+    shipping_total: 90,
+    items: [
+      {
+        id: "item_1",
+        product_title: "Футболка",
+        variant_title: "Белая, M",
+        quantity: 2,
+        total: 18900,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+type GraphRequest = {
+  readonly entity: string;
+  readonly fields: readonly string[];
+  readonly filters: Readonly<Record<string, unknown>>;
+};
+
+function authoritativeQuery(cart: Readonly<Record<string, unknown>> | null) {
+  return {
+    graph: jest.fn().mockImplementation(async (request: GraphRequest) => {
+      if (request.entity === "payment_session") {
+        return {
+          data: request.filters.id === "payses_01JABCDEFGHJKMNPQRSTVWXYZ"
+            ? [{
+                id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+                payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+              }]
+            : [],
+        };
+      }
+      if (request.entity === "cart_payment_collection") {
+        return {
+          data: request.filters.payment_collection_id === "paycol_01JABCDEFGHJKMNPQRSTVWXYZ"
+            ? [{
+                cart_id: "cart_01JABCDEFGHJKMNPQRSTVWXYZ",
+                payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+              }]
+            : [],
+        };
+      }
+      if (request.entity === "cart") return { data: cart ? [cart] : [] };
+      return { data: [] };
+    }),
+  };
+}
+
+function makeService(
+  notificationStore?: unknown,
+  cart: Readonly<Record<string, unknown>> | null = authoritativeCart(),
+  query = authoritativeQuery(cart),
+) {
   return new TBankPaymentProviderService(
     {
       logger,
+      query,
       ...(notificationStore ? { [TBANK_NOTIFICATION_MODULE]: notificationStore } : {}),
     } as never,
     OPTIONS as never,
@@ -70,8 +130,281 @@ describe("initiatePayment", () => {
   const input = {
     amount: 18990,
     currency_code: "rub",
-    context: { idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    context: {
+      idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    },
   };
+
+  it("builds the Init receipt from authoritative cart items and paid shipping", async () => {
+    const cart = authoritativeCart();
+    const query = authoritativeQuery(cart);
+    const fetchMock = mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      PaymentURL: "https://securepay.tinkoff.ru/xxx",
+    });
+
+    await makeService(undefined, cart, query).initiatePayment(input as never);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.Receipt).toEqual({
+      Email: "buyer@example.com",
+      Phone: "+79990000000",
+      Taxation: "usn_income",
+      Items: [
+        {
+          Name: "Футболка, Белая, M",
+          Price: 945000,
+          Quantity: 2,
+          Amount: 1890000,
+          Tax: "vat105",
+          PaymentMethod: "full_prepayment",
+          PaymentObject: "commodity",
+          MeasurementUnit: "шт",
+        },
+        {
+          Name: "Доставка",
+          Price: 9000,
+          Quantity: 1,
+          Amount: 9000,
+          Tax: "vat105",
+          PaymentMethod: "full_prepayment",
+          PaymentObject: "service",
+          MeasurementUnit: "шт",
+        },
+      ],
+    });
+    expect(query.graph.mock.calls.slice(0, 3).map(([request]) => request)).toEqual([
+      {
+        entity: "payment_session",
+        fields: ["id", "payment_collection_id"],
+        filters: { id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ" },
+      },
+      {
+        entity: "cart_payment_collection",
+        fields: ["cart_id", "payment_collection_id"],
+        filters: { payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ" },
+      },
+      expect.objectContaining({
+        entity: "cart",
+        filters: { id: "cart_01JABCDEFGHJKMNPQRSTVWXYZ" },
+      }),
+    ]);
+  });
+
+  it("ignores a forged context cart selector and follows the payment-session linkage", async () => {
+    const fetchMock = mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      PaymentURL: "https://securepay.tinkoff.ru/xxx",
+    });
+
+    await makeService().initiatePayment({
+      ...input,
+      context: { ...input.context, cart_id: "cart_foreign", cartId: "cart_foreign" },
+    } as never);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.Receipt.Items[0].Name).toBe("Футболка, Белая, M");
+    expect(body.Receipt.Email).toBe("buyer@example.com");
+  });
+
+  it.each([
+    ["missing payment session", [], []],
+    ["unrelated payment session", [
+      { id: "payses_other", payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ" },
+    ], []],
+    ["duplicate payment session", [
+      { id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ", payment_collection_id: "paycol_01" },
+      { id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ", payment_collection_id: "paycol_02" },
+    ], []],
+    ["missing cart link", [
+      {
+        id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+        payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+      },
+    ], []],
+    ["unrelated cart link", [
+      {
+        id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+        payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+      },
+    ], [{ cart_id: "cart_other", payment_collection_id: "paycol_other" }]],
+    ["duplicate cart link", [
+      {
+        id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+        payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+      },
+    ], [
+      {
+        cart_id: "cart_01JABCDEFGHJKMNPQRSTVWXYZ",
+        payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+      },
+      {
+        cart_id: "cart_other",
+        payment_collection_id: "paycol_01JABCDEFGHJKMNPQRSTVWXYZ",
+      },
+    ]],
+  ])("fails closed on %s linkage", async (_name, sessionRows, linkRows) => {
+    const query = {
+      graph: jest.fn().mockImplementation(async ({ entity }: GraphRequest) => {
+        if (entity === "payment_session") return { data: sessionRows };
+        if (entity === "cart_payment_collection") return { data: linkRows };
+        return { data: [authoritativeCart()] };
+      }),
+    };
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+
+    await expect(
+      makeService(undefined, authoritativeCart(), query).initiatePayment(input as never),
+    ).rejects.toThrow(/однозначная связь/);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
+  it("uses either normalized authoritative contact", async () => {
+    const fetchMock = mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      PaymentURL: "https://securepay.tinkoff.ru/xxx",
+    });
+    const cart = authoritativeCart({ email: " ", shipping_address: { phone: "8 999 123-45-67" } });
+
+    await makeService(undefined, cart).initiatePayment(input as never);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.Receipt.Phone).toBe("+79991234567");
+    expect(body.Receipt.Email).toBeUndefined();
+  });
+
+  it("allocates a discounted line total deterministically without hiding kopecks", async () => {
+    const fetchMock = mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      PaymentURL: "https://securepay.tinkoff.ru/xxx",
+    });
+    const cart = authoritativeCart({
+      total: "1.00",
+      shipping_total: 0,
+      items: [{ id: "item_1", product_title: "Носки", quantity: 3, total: "1.00" }],
+    });
+
+    await makeService(undefined, cart).initiatePayment({ ...input, amount: "1.00" } as never);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.Receipt.Items).toEqual([
+      expect.objectContaining({ Name: "Носки", Price: 34, Quantity: 1, Amount: 34 }),
+      expect.objectContaining({ Name: "Носки", Price: 33, Quantity: 2, Amount: 66 }),
+    ]);
+  });
+
+  it.each([
+    ["zero amount", "0.00", 1],
+    ["zero per-unit price", "0.02", 3],
+  ])("rejects a fiscal line with %s", async (_name, total, quantity) => {
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+    const cart = authoritativeCart({
+      total,
+      shipping_total: 0,
+      items: [{ id: "item_1", product_title: "Носки", quantity, total }],
+    });
+
+    await expect(
+      makeService(undefined, cart).initiatePayment({ ...input, amount: total } as never),
+    ).rejects.toThrow(/положительными/);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the authoritative cart or contact is missing", async () => {
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+
+    await expect(makeService(undefined, null).initiatePayment(input as never)).rejects.toThrow(
+      /корзин/i,
+    );
+    await expect(
+      makeService(undefined, authoritativeCart({ email: null, shipping_address: { phone: "" } }))
+        .initiatePayment(input as never),
+    ).rejects.toThrow(/контакт/i);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authoritative fiscal total that does not equal Init.Amount", async () => {
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+    const cart = authoritativeCart({ total: 18990, shipping_total: 0 });
+
+    await expect(makeService(undefined, cart).initiatePayment(input as never)).rejects.toThrow(
+      /сумм.*чек/i,
+    );
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
+  it("reuses the immutable receipt snapshot when an indeterminate Init is safely retried", async () => {
+    const cart = authoritativeCart();
+    const service = makeService(undefined, cart);
+    const sessionData: Record<string, unknown> = {};
+    const timeout = new Error("request timeout");
+    timeout.name = "AbortError";
+    global.fetch = jest.fn().mockRejectedValue(timeout);
+
+    await expect(service.initiatePayment({ ...input, data: sessionData } as never)).rejects.toThrow(
+      /indeterminate/,
+    );
+    const receiptSnapshot = sessionData.receiptSnapshot;
+    Object.assign(cart, {
+      email: "changed@example.com",
+      items: [{ id: "item_2", product_title: "Изменённый товар", quantity: 1, total: 18900 }],
+    });
+    const retryFetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ Success: false, ErrorCode: "914", Message: "not found" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          Success: true,
+          ErrorCode: "0",
+          PaymentId: "3456789",
+          PaymentURL: "https://securepay.tinkoff.ru/xxx",
+        }),
+      });
+    global.fetch = retryFetch as unknown as typeof fetch;
+
+    await service.initiatePayment({ ...input, data: sessionData } as never);
+
+    const initBody = JSON.parse(retryFetch.mock.calls[1][1].body as string);
+    expect(initBody.Receipt).toEqual(receiptSnapshot);
+  });
+
+  it("rejects an unsigned receipt snapshot supplied in payment data", async () => {
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+    const forgedReceipt = {
+      Email: "attacker@example.com",
+      Taxation: "usn_income",
+      Items: [{
+        Name: "Подменённый товар",
+        Price: 1899000,
+        Quantity: 1,
+        Amount: 1899000,
+        Tax: "vat105",
+        PaymentMethod: "full_prepayment",
+        PaymentObject: "commodity",
+        MeasurementUnit: "шт",
+      }],
+    };
+
+    await expect(makeService().initiatePayment({
+      ...input,
+      data: { receiptSnapshot: forgedReceipt },
+    } as never)).rejects.toThrow(/подпись сохранённого чека/);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
 
   it("отправляет сумму в копейках, а не в рублях", async () => {
     const fetchMock = mockFetchOnce({
@@ -221,30 +554,6 @@ describe("initiatePayment", () => {
       await expect(
         makeService().initiatePayment(inputWithModifiedAmount as never),
       ).rejects.toThrow(/сумма или валюта корзины изменилась/);
-    });
-
-    it("запрещает повторное использование, если изменилась версия корзины", async () => {
-      const inputWithModifiedVersion = {
-        ...input,
-        context: {
-          idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
-          cart_version: 2,
-        },
-        data: {
-          paymentId: "3456789",
-          paymentUrl: "https://securepay.tinkoff.ru/xxx",
-          cartSnapshot: {
-            version: 1,
-            amountKopecks: 1899000,
-            currencyCode: "rub",
-            orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
-          },
-        },
-      };
-
-      await expect(
-        makeService().initiatePayment(inputWithModifiedVersion as never),
-      ).rejects.toThrow(/версия корзины изменилась/);
     });
 
     it("при таймауте Init помечает состояние как indeterminate и выбрасывает ошибку", async () => {

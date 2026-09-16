@@ -4,11 +4,6 @@
  * Что здесь есть: создание платежа, опрос состояния, отмена/возврат и разбор
  * нотификаций. Чего здесь ещё нет и почему:
  *
- * - **Чек (`Receipt`)** — шаг 3. Требует ответов бухгалтера (§9, вопросы
- *   Q1–Q5: `vat5` vs `vat105`, тег 1055, признаки 1212/1214) и закрытия
- *   открытого вопроса §6.1 о том, откуда провайдер берёт позиции: в контракте
- *   `IPaymentProvider` нет ни line items, ни `cart_id`. До этого момента
- *   сквозная оплата возможна только на терминале без подключённой кассы.
  * - **Дедупликация нотификаций** — шаг 6, требует явного выбора между
  *   вариантами А и Б в §5.2. Здесь провайдер только разбирает и отображает
  *   нотификацию; хранение пары `(PaymentId, Status)` — забота роута.
@@ -47,6 +42,8 @@ import type {
 
 import { TBankApiError, TBankClient } from "./lib/client";
 import { rublesToKopecks } from "./lib/money";
+import type { TBankReceipt } from "./lib/receipt";
+import { TBankReceiptSource, type ReceiptQuery } from "./lib/receipt-source";
 import { TBankAttemptPersistenceError } from "./errors";
 import {
   parseNotification,
@@ -77,6 +74,7 @@ import type {
 
 export type InjectedDependencies = {
   logger: Logger;
+  query: ReceiptQuery;
   [TBANK_NOTIFICATION_MODULE]?: TbankNotificationStore;
   [key: string]: unknown;
 };
@@ -125,11 +123,10 @@ export function validatePaymentUrl(urlStr?: string): void {
 }
 
 export type CartSnapshot = {
-  cartId?: string;
-  version?: number | string;
-  amountKopecks: number;
-  currencyCode: string;
-  orderId: string;
+  readonly cartId?: string;
+  readonly amountKopecks: number;
+  readonly currencyCode: string;
+  readonly orderId: string;
 };
 
 /** Данные, которые провайдер хранит в `data` платёжной сессии. */
@@ -142,6 +139,8 @@ export type TBankSessionData = {
   cartSnapshot?: CartSnapshot;
   initiatedAt?: string;
   indeterminateReason?: string;
+  receiptSnapshot?: TBankReceipt;
+  receiptSnapshotSignature?: string;
 };
 
 export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOptions> {
@@ -150,6 +149,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   protected readonly logger_: Logger;
   protected readonly options_: TBankOptions;
   protected readonly client_: TBankClient;
+  protected readonly receiptSource_: TBankReceiptSource;
   protected readonly notificationService_?: TbankNotificationStore;
   private static readonly inFlightInitiations_ = new Map<string, Promise<InitiatePaymentOutput>>();
 
@@ -176,6 +176,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   constructor(container: InjectedDependencies, options: TBankOptions) {
     super(container, options);
     this.logger_ = container.logger;
+    this.receiptSource_ = new TBankReceiptSource(container.query, options.password);
     this.options_ = options;
     this.notificationService_ =
       (container[TBANK_NOTIFICATION_MODULE] as TbankNotificationStore | undefined) ??
@@ -255,19 +256,6 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
           `tbank: сумма или валюта корзины изменилась после инициализации платежа (ожидалось ${existingData.cartSnapshot.amountKopecks} коп. ${existingData.cartSnapshot.currencyCode}, получено ${amountKopecks} коп. ${input.currency_code.toLowerCase()})`,
-        );
-      }
-      const incomingVersion =
-        (input.context?.cart_version as number | string | undefined) ??
-        (input.context?.version as number | string | undefined);
-      if (
-        incomingVersion !== undefined &&
-        existingData.cartSnapshot.version !== undefined &&
-        String(incomingVersion) !== String(existingData.cartSnapshot.version)
-      ) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `tbank: версия корзины изменилась после инициализации платежа (ожидалось ${existingData.cartSnapshot.version}, получено ${incomingVersion})`,
         );
       }
     }
@@ -392,13 +380,25 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     }
 
     const attemptId = persistedAttemptId ?? `tbatt_${sessionId}_${Date.now()}`;
+    const receiptResolution = await this.receiptSource_.resolve({
+      sessionId,
+      existingReceipt: existingData.receiptSnapshot,
+      existingSignature: existingData.receiptSnapshotSignature,
+      paymentAmountKopecks: amountKopecks,
+    });
+    const {
+      cartId,
+      receipt,
+      receiptSignature,
+    } = receiptResolution;
+    existingData.receiptSnapshot = receipt;
+    existingData.receiptSnapshotSignature = receiptSignature;
+    if (input.data && typeof input.data === "object") {
+      input.data.receiptSnapshot = receipt;
+      input.data.receiptSnapshotSignature = receiptSignature;
+    }
     const cartSnapshot: CartSnapshot = {
-      cartId:
-        (input.context?.cart_id as string | undefined) ??
-        (input.context?.cartId as string | undefined),
-      version:
-        (input.context?.cart_version as number | string | undefined) ??
-        (input.context?.version as number | string | undefined),
+      cartId,
       amountKopecks,
       currencyCode: input.currency_code.toLowerCase(),
       orderId: sessionId,
@@ -430,6 +430,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         successUrl: this.options_.successUrl,
         failUrl: this.options_.failUrl,
         notificationUrl: this.options_.notificationUrl,
+        receipt,
       });
 
       if (!result.PaymentId) {
@@ -456,6 +457,8 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         attemptId,
         cartSnapshot,
         initiatedAt: new Date().toISOString(),
+        receiptSnapshot: receipt,
+        receiptSnapshotSignature: receiptSignature,
       };
 
       if (input.data && typeof input.data === "object") {
@@ -483,6 +486,8 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
           mutableData.orderId = sessionId;
           mutableData.attemptId = attemptId;
           mutableData.cartSnapshot = cartSnapshot;
+          mutableData.receiptSnapshot = receipt;
+          mutableData.receiptSnapshotSignature = receiptSignature;
           mutableData.indeterminateReason =
             error instanceof Error ? error.message : String(error);
           mutableData.initiatedAt = new Date().toISOString();
@@ -693,10 +698,9 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
    * Возврат.
    *
    * ВНИМАНИЕ. Возврат по 54-ФЗ требует **возвратного чека** — `Cancel` с
-   * `Receipt` (§8). Пока `buildReceipt` не реализован (шаг 3), этот метод
-   * возвращает деньги, но не пробивает чек. На терминале с подключённой кассой
-   * это нарушение, поэтому до шага 3 возвраты проводятся через личный кабинет
-   * банка, а не отсюда.
+   * `Receipt` (§8). Построение возвратного чека здесь не реализовано: текущий
+   * builder создаёт только чек 100% предоплаты для `Init`. Поэтому возвраты
+   * проводятся через личный кабинет банка, а не этим методом.
    */
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
