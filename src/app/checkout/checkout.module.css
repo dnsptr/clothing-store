@@ -456,7 +456,19 @@ textarea.formInput {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light, #eee);
+}
+
+.paymentTrustMethods {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  text-align: center;
 }
 
 .paymentTrustText {
