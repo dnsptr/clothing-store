@@ -8,8 +8,19 @@ import { useCatalog } from "../../context/CatalogContext";
 import { productImageSrc } from "../../lib/assets";
 import { formatPrice, formatPriceOrUnknown } from "../../lib/format";
 import { isCheckoutEnabled, type MedusaShippingOption } from "../../lib/medusa";
+import {
+  type CdekCity,
+  type CdekDeliveryPoint,
+  type CdekDeliveryEstimate,
+  searchCdekCities,
+  fetchCdekDeliveryPoints,
+  estimateCdekDelivery,
+  MARIO_MIKKE_PICKUP_STORES,
+} from "../../lib/cdek";
 import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
 import styles from "./checkout.module.css";
+
+export type DeliveryType = "cdek-pvz" | "cdek-courier" | "pickup-store";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -42,15 +53,15 @@ type FormFields = {
 type FormErrors = Record<string, string>;
 
 /**
- * Validate all relevant fields. Returns an errors object; empty means valid.
- *
- * Адрес обязателен всегда. Раньше его требование снималось для варианта
- * «Самовывоз», которого не существовало ни в одной опции доставки Medusa: в
- * результате заказ уходил на бэкенд с пустыми городом, улицей и индексом — и
- * при этом с курьерским способом доставки. Исполнить такой заказ нельзя.
- * Появится настоящая опция самовывоза — вернётся и ветка без адреса.
+ * Validate all relevant fields based on selected delivery type.
  */
-function validateForm(form: FormFields): FormErrors {
+function validateForm(
+  form: FormFields,
+  deliveryType: DeliveryType,
+  selectedPvz: CdekDeliveryPoint | null,
+  selectedStoreId: string,
+  deliveryCity: string,
+): FormErrors {
   const errors: FormErrors = {};
 
   if (!form.firstName.trim()) {
@@ -73,18 +84,29 @@ function validateForm(form: FormFields): FormErrors {
     errors.phone = "Введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX";
   }
 
-  if (!form.city.trim()) {
-    errors.city = "Введите город";
-  }
-
-  if (!form.zip.trim()) {
-    errors.zip = "Введите индекс";
-  } else if (!/^\d{6}$/.test(form.zip)) {
-    errors.zip = "Индекс — 6 цифр";
-  }
-
-  if (!form.address.trim()) {
-    errors.address = "Введите адрес";
+  if (deliveryType === "cdek-pvz") {
+    if (!deliveryCity.trim()) {
+      errors.city = "Введите город получения";
+    }
+    if (!selectedPvz) {
+      errors.pvz = "Выберите пункт выдачи СДЭК";
+    }
+  } else if (deliveryType === "cdek-courier") {
+    if (!deliveryCity.trim()) {
+      errors.city = "Введите город доставки";
+    }
+    if (!form.address.trim()) {
+      errors.address = "Введите улицу и дом";
+    }
+    if (!form.zip.trim()) {
+      errors.zip = "Введите индекс";
+    } else if (!/^\d{6}$/.test(form.zip)) {
+      errors.zip = "Индекс — 6 цифр";
+    }
+  } else if (deliveryType === "pickup-store") {
+    if (!selectedStoreId) {
+      errors.pickupStore = "Выберите магазин для самовывоза";
+    }
   }
 
   return errors;
@@ -131,23 +153,51 @@ export default function CheckoutClient() {
     removeFromCart,
   } = useCart();
 
-  // Способы доставки приходят из Medusa. Раньше здесь были три захардкоженные
-  // радиокнопки («Курьером», «Самовывоз», «Почтой России»), не связанные ни с
-  // одной реальной опцией: выбор покупателя никуда не уходил, а в заказ всегда
-  // подставлялась единственная существующая опция.
+  // Способы доставки Medusa
   const [shippingOptions, setShippingOptions] = useState<MedusaShippingOption[] | null>(null);
   const [shippingOptionsFailed, setShippingOptionsFailed] = useState(false);
   const [selectedShippingOptionId, setSelectedShippingOptionId] = useState("");
   const [hasConsented, setHasConsented] = useState(false);
+
+  // Delivery module state
+  const [deliveryType, setDeliveryType] = useState<DeliveryType>("cdek-pvz");
+  const [deliveryCity, setDeliveryCity] = useState("Москва");
+  const [cdekCityCode, setCdekCityCode] = useState(44);
+  const [citySuggestions, setCitySuggestions] = useState<CdekCity[]>([]);
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
+  const citySearchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const cityWrapperRef = useRef<HTMLDivElement>(null);
+
+  // PVZ state
+  const [pvzList, setPvzList] = useState<CdekDeliveryPoint[]>([]);
+  const [isLoadingPvz, setIsLoadingPvz] = useState(true);
+  const [selectedPvz, setSelectedPvz] = useState<CdekDeliveryPoint | null>(null);
+  const [pvzSearchQuery, setPvzSearchQuery] = useState("");
+  const [isPvzPickerOpen, setIsPvzPickerOpen] = useState(false);
+
+  // Pickup Store state
+  const [selectedStoreId, setSelectedStoreId] = useState(MARIO_MIKKE_PICKUP_STORES[0].id);
+
+  // Estimate state
+  const [estimate, setEstimate] = useState<CdekDeliveryEstimate | null>(null);
+
+  const staticPickupEstimate: CdekDeliveryEstimate = {
+    deliverySum: 0,
+    periodMin: 0,
+    periodMax: 0,
+    customerCost: 0,
+  };
+  const activeEstimate = deliveryType === "pickup-store" ? staticPickupEstimate : estimate;
+
   const [form, setForm] = useState<FormFields>({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
-    city: "",
+    city: "Москва",
     address: "",
     apartment: "",
-    zip: "",
+    zip: "101000",
     comment: "",
   });
   const [errors, setErrors] = useState<FormErrors>({});
@@ -165,6 +215,22 @@ export default function CheckoutClient() {
   const needsShippingOptions =
     isCheckoutEnabled && hasCartItems && shippingOptions === null && !shippingOptionsFailed;
 
+  const matchShippingOption = (type: DeliveryType, options: MedusaShippingOption[] | null): string => {
+    if (!options || options.length === 0) return "";
+    const match = options.find((opt) => {
+      const code = (opt.type?.code || "").toLowerCase();
+      const name = opt.name.toLowerCase();
+      if (type === "cdek-pvz") return code === "cdek-pvz" || name.includes("пвз") || name.includes("пункт");
+      if (type === "cdek-courier") return code === "cdek-courier" || name.includes("курьер");
+      if (type === "pickup-store") return code === "pickup-store" || name.includes("самовывоз");
+      return false;
+    });
+    return match ? match.id : options[0].id;
+  };
+
+  const effectiveShippingOptionId =
+    selectedShippingOptionId || matchShippingOption(deliveryType, shippingOptions);
+
   useEffect(() => {
     if (!needsShippingOptions) return;
 
@@ -173,9 +239,8 @@ export default function CheckoutClient() {
       .then((options) => {
         if (!isActive) return;
         setShippingOptions(options);
-        // Предвыбор единственного варианта: заставлять выбирать из одного
-        // пункта незачем, но и молча подставлять один из нескольких нельзя.
-        if (options.length === 1) setSelectedShippingOptionId(options[0].id);
+        const matched = matchShippingOption(deliveryType, options);
+        if (matched) setSelectedShippingOptionId(matched);
       })
       .catch((error: unknown) => {
         if (!isActive) return;
@@ -186,7 +251,54 @@ export default function CheckoutClient() {
     return () => {
       isActive = false;
     };
-  }, [needsShippingOptions, getShippingOptions]);
+  }, [needsShippingOptions, getShippingOptions, deliveryType]);
+
+  // Click outside to close city dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (cityWrapperRef.current && !cityWrapperRef.current.contains(event.target as Node)) {
+        setShowCityDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Fetch PVZ list when city or mode changes
+  useEffect(() => {
+    if (deliveryType !== "cdek-pvz") return;
+    let active = true;
+    fetchCdekDeliveryPoints(cdekCityCode)
+      .then((points) => {
+        if (!active) return;
+        setPvzList(points);
+        setSelectedPvz((prev) => {
+          if (prev && points.some((p) => p.code === prev.code)) return prev;
+          return points[0] || null;
+        });
+      })
+      .catch((err) => console.warn("Failed to fetch PVZ", err))
+      .finally(() => {
+        if (active) setIsLoadingPvz(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [cdekCityCode, deliveryType]);
+
+  // Estimate delivery tariff & timeline
+  useEffect(() => {
+    if (deliveryType === "pickup-store") return;
+    let active = true;
+    estimateCdekDelivery(cdekCityCode, deliveryType === "cdek-pvz" ? "pvz" : "courier")
+      .then((est) => {
+        if (active) setEstimate(est);
+      })
+      .catch((err) => console.warn("Failed to estimate delivery", err));
+    return () => {
+      active = false;
+    };
+  }, [cdekCityCode, deliveryType]);
 
   useEffect(() => {
     const resetSubmission = () => {
@@ -206,19 +318,74 @@ export default function CheckoutClient() {
     }
   };
 
+  const handleCityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setDeliveryCity(value);
+    setForm((prev) => ({ ...prev, city: value }));
+    if (errors.city) {
+      setErrors((prev) => ({ ...prev, city: "" }));
+    }
+
+    if (citySearchTimeout.current) {
+      clearTimeout(citySearchTimeout.current);
+    }
+
+    if (value.trim().length >= 2) {
+      citySearchTimeout.current = setTimeout(async () => {
+        try {
+          const results = await searchCdekCities(value);
+          setCitySuggestions(results);
+          setShowCityDropdown(results.length > 0);
+        } catch {
+          setCitySuggestions([]);
+        }
+      }, 250);
+    } else {
+      setShowCityDropdown(false);
+    }
+  };
+
+  const handleSelectCity = (city: CdekCity) => {
+    setDeliveryCity(city.city);
+    setCdekCityCode(city.code);
+    setForm((prev) => ({ ...prev, city: city.city }));
+    setShowCityDropdown(false);
+    setIsPvzPickerOpen(true);
+    setSelectedPvz(null);
+    setErrors((prev) => ({ ...prev, city: "" }));
+  };
+
   const handleBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     const error = validateField(name as keyof FormFields, value);
     setErrors((prev) => ({ ...prev, [name]: error }));
   };
 
+  const filteredPvz = pvzList.filter((p) => {
+    const q = pvzSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      p.location.address.toLowerCase().includes(q) ||
+      (p.nearest_metro_station && p.nearest_metro_station.toLowerCase().includes(q)) ||
+      p.code.toLowerCase().includes(q) ||
+      p.name.toLowerCase().includes(q)
+    );
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmittingRef.current) return;
 
     // Run full validation
-    const newErrors = validateForm(form);
-    if (!selectedShippingOptionId) {
+    const newErrors = validateForm(
+      form,
+      deliveryType,
+      selectedPvz,
+      selectedStoreId,
+      deliveryCity,
+    );
+
+    if (!effectiveShippingOptionId && shippingOptions && shippingOptions.length > 0) {
       newErrors.shippingOption = "Выберите способ доставки";
     }
     if (!hasConsented) {
@@ -231,17 +398,50 @@ export default function CheckoutClient() {
 
     // Build the normalised form data to pass downstream
     const normalizedPhone = normalizePhone(form.phone) ?? form.phone;
+
+    let finalCity = deliveryCity.trim() || form.city.trim() || "Москва";
+    let finalAddress = form.address.trim();
+    let finalZip = form.zip.trim() || "101000";
+    let cdekPvzCode: string | undefined;
+    let cdekPvzAddress: string | undefined;
+    let pickupStoreId: string | undefined;
+    let pickupStoreName: string | undefined;
+
+    if (deliveryType === "cdek-pvz") {
+      finalCity = deliveryCity.trim() || "Москва";
+      finalAddress = selectedPvz ? selectedPvz.location.address : form.address.trim();
+      finalZip = "101000";
+      cdekPvzCode = selectedPvz?.code;
+      cdekPvzAddress = selectedPvz ? `${selectedPvz.name}, ${selectedPvz.location.address}` : undefined;
+    } else if (deliveryType === "cdek-courier") {
+      finalCity = deliveryCity.trim();
+      finalAddress = form.address.trim();
+      finalZip = form.zip.trim();
+    } else if (deliveryType === "pickup-store") {
+      const store = MARIO_MIKKE_PICKUP_STORES.find((s) => s.id === selectedStoreId) || MARIO_MIKKE_PICKUP_STORES[0];
+      finalCity = "Москва";
+      finalAddress = `${store.name}, ${store.address}`;
+      finalZip = "125212";
+      pickupStoreId = store.id;
+      pickupStoreName = store.name;
+    }
+
     const checkoutDetails = {
       firstName: form.firstName.trim(),
       lastName: form.lastName.trim(),
       email: form.email.trim(),
       phone: normalizedPhone,
-      city: form.city.trim(),
-      address: form.address.trim(),
-      apartment: form.apartment.trim(),
-      zip: form.zip,
-      shippingOptionId: selectedShippingOptionId,
+      city: finalCity,
+      address: finalAddress,
+      apartment: deliveryType === "cdek-courier" ? form.apartment.trim() : "",
+      zip: finalZip,
+      shippingOptionId: effectiveShippingOptionId || (shippingOptions?.[0]?.id ?? "mvp-ru"),
       comment: form.comment,
+      deliveryType,
+      cdekPvzCode,
+      cdekPvzAddress,
+      pickupStoreId,
+      pickupStoreName,
     };
 
     isSubmittingRef.current = true;
@@ -532,107 +732,328 @@ export default function CheckoutClient() {
               {errors.phone && <span className={styles.fieldError}>{errors.phone}</span>}
             </div>
 
-            <p className={`${styles.sectionTitle} ${styles.sectionTitleSpaced}`}>Доставка</p>
+            <p className={`${styles.sectionTitle} ${styles.sectionTitleSpaced}`}>Способ доставки</p>
 
-            {shippingOptionsFailed ? (
-              <p className={styles.fieldError} role="alert">
-                Не удалось загрузить способы доставки. Обновите страницу и попробуйте ещё раз.
+            {shippingOptionsFailed && (
+              <p className={styles.fieldError} role="alert" style={{ marginBottom: 12 }}>
+                Не удалось обновить доступные тарифы Medusa, используются стандартные тарифы доставки.
               </p>
-            ) : shippingOptions === null ? (
-              <p className={styles.deliverySub} role="status" aria-live="polite">
-                Загружаем способы доставки…
-              </p>
-            ) : shippingOptions.length === 0 ? (
-              <p className={styles.fieldError} role="alert">
-                Для этого заказа нет доступных способов доставки. Напишите нам — подберём вариант.
-              </p>
-            ) : (
-              <div className={styles.deliveryOptions}>
-                {shippingOptions.map((option) => (
-                  <label key={option.id} className={styles.deliveryOption}>
+            )}
+
+            {/* Delivery Tabs */}
+            <div className={styles.deliveryTabs} role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={deliveryType === "cdek-pvz"}
+                className={`${styles.deliveryTab} ${deliveryType === "cdek-pvz" ? styles.deliveryTabActive : ""}`}
+                onClick={() => {
+                  setDeliveryType("cdek-pvz");
+                  setErrors((prev) => ({ ...prev, pvz: "", pickupStore: "", address: "", zip: "" }));
+                }}
+              >
+                <span>ПВЗ СДЭК</span>
+                <span className={styles.deliveryTabSub}>Пункт или постамат</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={deliveryType === "cdek-courier"}
+                className={`${styles.deliveryTab} ${deliveryType === "cdek-courier" ? styles.deliveryTabActive : ""}`}
+                onClick={() => {
+                  setDeliveryType("cdek-courier");
+                  setErrors((prev) => ({ ...prev, pvz: "", pickupStore: "", address: "", zip: "" }));
+                }}
+              >
+                <span>Курьер СДЭК</span>
+                <span className={styles.deliveryTabSub}>До двери</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={deliveryType === "pickup-store"}
+                className={`${styles.deliveryTab} ${deliveryType === "pickup-store" ? styles.deliveryTabActive : ""}`}
+                onClick={() => {
+                  setDeliveryType("pickup-store");
+                  setErrors((prev) => ({ ...prev, pvz: "", pickupStore: "", address: "", zip: "" }));
+                }}
+              >
+                <span>Самовывоз</span>
+                <span className={styles.deliveryTabSub}>3 магазина в Москве</span>
+              </button>
+            </div>
+
+            {/* Delivery Estimate Banner */}
+            <div className={styles.deliveryEstimateBanner}>
+              <div className={styles.deliveryEstimateInfo}>
+                <span className={styles.deliveryEstimateTimeline}>
+                  {deliveryType === "pickup-store"
+                    ? "Готов к выдаче сегодня или завтра"
+                    : `Срок доставки: ${activeEstimate ? `${activeEstimate.periodMin}–${activeEstimate.periodMax} дн.` : "1–3 дня"}`}
+                </span>
+                <span className={styles.deliveryEstimateSub}>
+                  {deliveryType === "pickup-store"
+                    ? "Резерв в магазине на 3 дня"
+                    : `Отправка из Москвы · ${deliveryCity || "Россия"}`}
+                </span>
+              </div>
+              <span className={styles.deliveryEstimatePrice}>Бесплатно</span>
+            </div>
+
+            {/* ── Mode 1: CDEK PVZ ── */}
+            {deliveryType === "cdek-pvz" && (
+              <div>
+                {/* City with Autocomplete */}
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Город получения *</label>
+                  <div className={styles.cityWrapper} ref={cityWrapperRef}>
                     <input
-                      type="radio"
-                      name="shippingOption"
-                      value={option.id}
-                      checked={selectedShippingOptionId === option.id}
-                      onChange={() => {
-                        setSelectedShippingOptionId(option.id);
-                        setErrors((prev) => ({ ...prev, shippingOption: "" }));
+                      name="city"
+                      required
+                      autoComplete="off"
+                      className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
+                      placeholder="Начните вводить город (напр. Москва, Санкт-Петербург)"
+                      value={deliveryCity}
+                      onChange={handleCityChange}
+                      onFocus={() => {
+                        if (citySuggestions.length > 0) setShowCityDropdown(true);
                       }}
                     />
-                    <span>
-                      <strong className={styles.deliveryLabel}>{option.name}</strong>
-                      <span className={styles.deliverySub}>
-                        {typeof option.amount === "number"
-                          ? option.amount === 0
-                            ? "Бесплатно"
-                            : formatPrice(option.amount)
-                          : "Стоимость рассчитается после ввода адреса"}
-                      </span>
-                    </span>
-                  </label>
-                ))}
+                    {showCityDropdown && citySuggestions.length > 0 && (
+                      <div className={styles.cityDropdown}>
+                        {citySuggestions.map((city) => (
+                          <div
+                            key={city.code}
+                            className={styles.cityOption}
+                            onClick={() => handleSelectCity(city)}
+                          >
+                            <span>{city.city}</span>
+                            {city.region && <span className={styles.cityOptionRegion}>{city.region}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
+                </div>
+
+                {/* Selected PVZ Summary or PVZ Picker */}
+                {selectedPvz && !isPvzPickerOpen ? (
+                  <div className={styles.selectedPvzSummary}>
+                    <div className={styles.selectedPvzInfo}>
+                      <div className={styles.selectedPvzLabel}>Выбранный пункт выдачи:</div>
+                      <strong>{selectedPvz.name}</strong> ({selectedPvz.location.address})
+                      <div className={styles.pvzMeta} style={{ marginTop: 4 }}>
+                        {selectedPvz.nearest_metro_station && (
+                          <span className={styles.pvzMetro}>
+                            <span className={styles.metroDot} />
+                            м. {selectedPvz.nearest_metro_station}
+                          </span>
+                        )}
+                        <span className={styles.pvzHours}>{selectedPvz.work_time}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.changePvzBtn}
+                      onClick={() => setIsPvzPickerOpen(true)}
+                    >
+                      Изменить
+                    </button>
+                  </div>
+                ) : (
+                  <div className={styles.pvzContainer}>
+                    <div className={styles.pvzHeader}>
+                      <input
+                        type="text"
+                        className={styles.pvzSearchInput}
+                        placeholder="Поиск по адресу, метро или коду ПВЗ..."
+                        value={pvzSearchQuery}
+                        onChange={(e) => setPvzSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.pvzList}>
+                      {isLoadingPvz ? (
+                        <div className={styles.pvzEmpty}>Загружаем пункты выдачи СДЭК…</div>
+                      ) : filteredPvz.length === 0 ? (
+                        <div className={styles.pvzEmpty}>
+                          {pvzList.length === 0
+                            ? "В этом городе нет доступных пунктов СДЭК. Выберите курьерскую доставку."
+                            : "Ничего не найдено по вашему запросу."}
+                        </div>
+                      ) : (
+                        filteredPvz.map((pvz) => {
+                          const isSelected = selectedPvz?.code === pvz.code;
+                          return (
+                            <div
+                              key={pvz.code}
+                              className={`${styles.pvzItem} ${isSelected ? styles.pvzItemActive : ""}`}
+                              onClick={() => {
+                                setSelectedPvz(pvz);
+                                setIsPvzPickerOpen(false);
+                                setErrors((prev) => ({ ...prev, pvz: "" }));
+                              }}
+                            >
+                              <div className={styles.pvzItemTop}>
+                                <span className={styles.pvzAddress}>{pvz.location.address}</span>
+                                <span
+                                  className={`${styles.pvzBadge} ${
+                                    pvz.type === "POSTAMAT" ? styles.pvzBadgePostamat : ""
+                                  }`}
+                                >
+                                  {pvz.type === "POSTAMAT" ? "Постамат" : "ПВЗ"}
+                                </span>
+                              </div>
+                              <div className={styles.pvzMeta}>
+                                {pvz.nearest_metro_station && (
+                                  <span className={styles.pvzMetro}>
+                                    <span className={styles.metroDot} />
+                                    м. {pvz.nearest_metro_station}
+                                  </span>
+                                )}
+                                <span className={styles.pvzHours}>{pvz.work_time}</span>
+                                {pvz.note && <span>· {pvz.note}</span>}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+                {errors.pvz && <span className={styles.fieldError}>{errors.pvz}</span>}
               </div>
-            )}
-            {errors.shippingOption && (
-              <span className={styles.fieldError}>{errors.shippingOption}</span>
             )}
 
-            <div className={styles.formRow}>
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Город *</label>
-                <input
-                  name="city"
-                  required
-                  maxLength={100}
-                  className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
-                  placeholder="Москва"
-                  value={form.city}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                />
-                {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
+            {/* ── Mode 2: CDEK Courier ── */}
+            {deliveryType === "cdek-courier" && (
+              <div>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Город *</label>
+                    <div className={styles.cityWrapper} ref={cityWrapperRef}>
+                      <input
+                        name="city"
+                        required
+                        autoComplete="off"
+                        className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
+                        placeholder="Москва"
+                        value={deliveryCity}
+                        onChange={handleCityChange}
+                        onFocus={() => {
+                          if (citySuggestions.length > 0) setShowCityDropdown(true);
+                        }}
+                      />
+                      {showCityDropdown && citySuggestions.length > 0 && (
+                        <div className={styles.cityDropdown}>
+                          {citySuggestions.map((city) => (
+                            <div
+                              key={city.code}
+                              className={styles.cityOption}
+                              onClick={() => handleSelectCity(city)}
+                            >
+                              <span>{city.city}</span>
+                              {city.region && <span className={styles.cityOptionRegion}>{city.region}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label className={styles.formLabel}>Индекс *</label>
+                    <input
+                      name="zip"
+                      required
+                      inputMode="numeric"
+                      pattern="[0-9]{6}"
+                      maxLength={6}
+                      className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
+                      placeholder="123456"
+                      value={form.zip}
+                      onChange={handleChange}
+                      onBlur={handleBlur}
+                    />
+                    {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
+                  </div>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Улица, дом, корпус *</label>
+                  <input
+                    name="address"
+                    required
+                    className={`${styles.formInput}${errors.address ? ` ${styles.formInputError}` : ""}`}
+                    placeholder="ул. Тверская, д. 1"
+                    value={form.address}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                  />
+                  {errors.address && <span className={styles.fieldError}>{errors.address}</span>}
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Квартира / офис</label>
+                  <input
+                    name="apartment"
+                    className={styles.formInput}
+                    placeholder="кв. 42"
+                    value={form.apartment}
+                    onChange={handleChange}
+                  />
+                </div>
               </div>
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Индекс *</label>
-                <input
-                  name="zip"
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
-                  placeholder="123456"
-                  value={form.zip}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                />
-                {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
+            )}
+
+            {/* ── Mode 3: Retail Store Pickup ── */}
+            {deliveryType === "pickup-store" && (
+              <div>
+                <p className={styles.deliverySub} style={{ marginBottom: 12 }}>
+                  Выберите фирменный магазин Mario Mikke в Москве для бесплатной примерки и получения:
+                </p>
+                <div className={styles.pickupStoresGrid}>
+                  {MARIO_MIKKE_PICKUP_STORES.map((store) => {
+                    const isSelected = selectedStoreId === store.id;
+                    return (
+                      <div
+                        key={store.id}
+                        className={`${styles.pickupStoreCard} ${
+                          isSelected ? styles.pickupStoreCardActive : ""
+                        }`}
+                        onClick={() => {
+                          setSelectedStoreId(store.id);
+                          setErrors((prev) => ({ ...prev, pickupStore: "" }));
+                        }}
+                      >
+                        <div className={styles.pickupStoreTitle}>
+                          <span>{store.name}</span>
+                          <input
+                            type="radio"
+                            name="pickupStore"
+                            checked={isSelected}
+                            onChange={() => setSelectedStoreId(store.id)}
+                            style={{ accentColor: "var(--text-primary)" }}
+                          />
+                        </div>
+                        <div className={styles.pickupStoreAddress}>{store.address}</div>
+                        <div className={styles.pickupStoreMeta}>
+                          <span className={styles.pvzMetro}>
+                            <span className={styles.metroDot} />
+                            {store.metro}
+                          </span>
+                          <span>{store.workHours}</span>
+                          <span>{store.phone}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {errors.pickupStore && <span className={styles.fieldError}>{errors.pickupStore}</span>}
               </div>
-            </div>
-            <div className={styles.formGroup}>
-              <label className={styles.formLabel}>Адрес *</label>
-              <input
-                name="address"
-                required
-                className={`${styles.formInput}${errors.address ? ` ${styles.formInputError}` : ""}`}
-                placeholder="ул. Тверская, д. 1"
-                value={form.address}
-                onChange={handleChange}
-                onBlur={handleBlur}
-              />
-              {errors.address && <span className={styles.fieldError}>{errors.address}</span>}
-            </div>
-            <div className={styles.formGroup}>
-              <label className={styles.formLabel}>Квартира / офис</label>
-              <input
-                name="apartment"
-                className={styles.formInput}
-                placeholder="кв. 42"
-                value={form.apartment}
-                onChange={handleChange}
-              />
-            </div>
+            )}
 
             <div className={styles.formGroup}>
               <label className={styles.formLabel}>Комментарий к заказу</label>
