@@ -54,6 +54,11 @@ export interface CheckoutDetails {
    */
   shippingOptionId: string;
   comment: string;
+  deliveryType?: "cdek-pvz" | "cdek-courier" | "pickup-store";
+  cdekPvzCode?: string;
+  cdekPvzAddress?: string;
+  pickupStoreId?: string;
+  pickupStoreName?: string;
 }
 
 type CheckoutCompletion =
@@ -518,22 +523,40 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
 
     const cartId = await getMedusaCartId();
+
+    const metadata: Record<string, unknown> = {};
+    if (details.comment.trim()) {
+      metadata.customer_note = details.comment.trim();
+    }
+    if (details.deliveryType) {
+      metadata.delivery_type = details.deliveryType;
+    }
+    if (details.cdekPvzCode) {
+      metadata.cdek_pvz_code = details.cdekPvzCode;
+    }
+    if (details.cdekPvzAddress) {
+      metadata.cdek_pvz_address = details.cdekPvzAddress;
+    }
+    if (details.pickupStoreId) {
+      metadata.pickup_store_id = details.pickupStoreId;
+    }
+    if (details.pickupStoreName) {
+      metadata.pickup_store_name = details.pickupStoreName;
+    }
+
     await updateMedusaCart(cartId, {
       email: details.email,
       shipping_address: {
         first_name: details.firstName,
         last_name: details.lastName,
         phone: details.phone,
-        address_1: details.address,
+        address_1: details.deliveryType === "cdek-pvz" && details.cdekPvzAddress ? details.cdekPvzAddress : details.address,
         address_2: details.apartment || undefined,
         city: details.city,
         country_code: "ru",
         postal_code: details.zip,
       },
-      // Комментарий раньше терялся: он лежал в объекте деталей, но в тело
-      // запроса не попадал, а excess property check его не ловил, потому что
-      // передавалась переменная. Логист узнавал о пожеланиях покупателя ниоткуда.
-      ...(details.comment.trim() ? { metadata: { customer_note: details.comment.trim() } } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     });
 
     // Способ доставки выбирает покупатель. Витрина больше не подставляет

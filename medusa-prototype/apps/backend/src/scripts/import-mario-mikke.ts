@@ -299,6 +299,57 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     }
   }
 
+  // Создание опций доставки СДЭК и самовывоза
+  const deliveryOptionsToEnsure = [
+    {
+      code: "cdek-pvz",
+      name: "СДЭК — Доставка в пункт выдачи (ПВЗ)",
+      label: "СДЭК ПВЗ",
+      description: "Доставка до удобного пункта выдачи заказов СДЭК или постамата.",
+    },
+    {
+      code: "cdek-courier",
+      name: "СДЭК — Курьерская доставка",
+      label: "СДЭК Курьер",
+      description: "Быстрая курьерская доставка СДЭК до двери.",
+    },
+    {
+      code: "pickup-store",
+      name: "Самовывоз из магазина (Москва, бесплатно)",
+      label: "Самовывоз",
+      description: "Бесплатный самовывоз из розничного магазина Mario Mikke в Москве.",
+    },
+  ];
+
+  for (const opt of deliveryOptionsToEnsure) {
+    const existing = shippingOptions.find(
+      (option) => option.type?.code === opt.code || option.name === opt.name,
+    );
+    if (!existing) {
+      await createShippingOptionsWorkflow(container).run({
+        input: [
+          {
+            name: opt.name,
+            price_type: "flat",
+            provider_id: "manual_manual",
+            service_zone_id: ruServiceZoneId,
+            shipping_profile_id: shippingProfile.id,
+            type: {
+              label: opt.label,
+              description: opt.description,
+              code: opt.code,
+            },
+            prices: [{ currency_code: "rub", amount: 0 }],
+            rules: [
+              { attribute: "enabled_in_store", value: "true", operator: "eq" },
+              { attribute: "is_return", value: "false", operator: "eq" },
+            ],
+          },
+        ],
+      });
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // DEPRECATED (remove after BOOT-002): starter demo product cleanup.
   //

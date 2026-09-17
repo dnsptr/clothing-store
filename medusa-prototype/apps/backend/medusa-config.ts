@@ -1,6 +1,7 @@
 import { loadEnv, defineConfig, Modules } from '@medusajs/framework/utils'
 
 import { resolveTbankPaymentModules } from './src/modules/tbank/config'
+import { parseCdekEnvironment } from './src/modules/cdek/config'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
@@ -8,6 +9,7 @@ const REDIS_URL = process.env.REDIS_URL
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 const IS_BUILD = process.argv.some((arg) => arg === 'build')
 const paymentModules = resolveTbankPaymentModules(process.env)
+const cdekConfig = parseCdekEnvironment(process.env)
 
 /**
  * Redis is mandatory in production. Without it Medusa silently falls back to the
@@ -241,6 +243,32 @@ const fileModule = {
   },
 }
 
+/**
+ * Модуль доставки (Fulfillment).
+ * Включает встроенный manual-провайдер и модуль СДЭК при наличии CDEK_ENABLED=true.
+ */
+const fulfillmentModule = {
+  key: Modules.FULFILLMENT,
+  resolve: '@medusajs/medusa/fulfillment',
+  options: {
+    providers: [
+      {
+        resolve: '@medusajs/medusa/fulfillment-manual',
+        id: 'manual',
+      },
+      ...(cdekConfig.enabled
+        ? [
+            {
+              resolve: './src/modules/cdek',
+              id: 'cdek',
+              options: cdekConfig.options,
+            },
+          ]
+        : []),
+    ],
+  },
+}
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -256,6 +284,7 @@ module.exports = defineConfig({
   modules: [
     ...redisModules,
     fileModule,
+    fulfillmentModule,
     contentModule,
     ...tbankNotificationModule,
     ...notificationModule,
