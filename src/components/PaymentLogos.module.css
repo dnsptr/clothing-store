@@ -1,0 +1,75 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0;
+  background: #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+}
+
+.icon {
+  display: block;
+  height: 26px;
+  width: auto;
+  border-radius: 3px;
+}
+
+.securityInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary, rgba(79, 62, 53, 0.62));
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.lockIcon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 16px;
+  color: #4a7c59;
+}
+
+.securityText {
+  letter-spacing: 0;
+}
+
+@media (max-width: 640px) {
+  .badges {
+    gap: 6px;
+  }
+
+  .badge {
+    height: 24px;
+  }
+
+  .icon {
+    height: 24px;
+  }
+
+  .securityInfo {
+    font-size: 11px;
+    line-height: 16px;
+  }
+}

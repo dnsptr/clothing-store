@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "@/hooks/useOverlayDismiss";
+import PaymentLogos from "./PaymentLogos";
 import styles from "./Footer.module.css";
 
 // Страницы «Отзывы» и «Реферальная программа» убраны вместе со ссылками:
@@ -106,6 +107,10 @@ export default function Footer() {
             </Link>
           ))}
         </nav>
+
+        <div className={styles.paymentSection}>
+          <PaymentLogos showSecurityText={true} />
+        </div>
 
         <div className={styles.bottom}>
           <Link href="/info/english" className={styles.locale}>

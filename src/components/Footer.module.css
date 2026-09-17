@@ -115,6 +115,11 @@
   opacity: 0.64;
 }
 
+.paymentSection {
+  padding: 16px 0 20px;
+  border-top: 1px solid rgba(95, 94, 92, 0.14);
+}
+
 .bottom {
   display: flex;
   align-items: center;

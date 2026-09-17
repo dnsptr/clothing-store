@@ -9,6 +9,7 @@ import { productImageSrc } from "../../lib/assets";
 import { formatPrice, formatPriceOrUnknown } from "../../lib/format";
 import { isCheckoutEnabled, type MedusaShippingOption } from "../../lib/medusa";
 import { DEFAULT_RECOMMENDATION_SIZE, findAddableVariant, selectableSizes } from "../../lib/shop";
+import PaymentLogos from "@/components/PaymentLogos";
 import styles from "./checkout.module.css";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
@@ -676,6 +677,13 @@ export default function CheckoutClient() {
               {isSubmitting ? "Оформляем..." : "Подтвердить заказ"}
             </button>
             {submitMessage && <p className={styles.formNote} role="alert">{submitMessage}</p>}
+
+            <div className={styles.paymentTrustBlock}>
+              <PaymentLogos showSecurityText={false} />
+              <p className={styles.paymentTrustText}>
+                Оплата через защищённый платёжный шлюз Т-Банка с поддержкой 3D-Secure
+              </p>
+            </div>
           </form>
         </div>
       </div>
