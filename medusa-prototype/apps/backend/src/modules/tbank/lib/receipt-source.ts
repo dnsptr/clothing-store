@@ -40,13 +40,19 @@ const CART_FIELDS = [
   "email",
   "shipping_address.phone",
   "total",
+  "subtotal",
+  "discount_total",
   "shipping_total",
   "items.id",
   "items.title",
   "items.product_title",
   "items.variant_title",
   "items.quantity",
+  "items.unit_price",
+  "items.subtotal",
+  "items.discount_total",
   "items.total",
+  "items.adjustments.amount",
 ] as const;
 
 export class TBankReceiptSource {
