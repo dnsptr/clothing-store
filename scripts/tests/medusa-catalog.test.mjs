@@ -29,8 +29,17 @@ function client(products = [fixture()]) {
       NEXT_PUBLIC_MEDUSA_BACKEND_URL: 'https://backend.test',
       NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: 'pk_test', NEXT_PUBLIC_MEDUSA_REGION_ID: 'reg_test' } },
     require: (name) => {
-      assert.equal(name, 'next/navigation');
-      return { unstable_rethrow() {} };
+      if (name === 'next/navigation') {
+        return { unstable_rethrow() {} };
+      }
+      if (name === './payment-config') {
+        return {
+          SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID: 'pp_system_default',
+          TBANK_PAYMENT_PROVIDER_ID: 'pp_tbank_tbank',
+          isCheckoutEnabledForConfiguration: () => true,
+        };
+      }
+      throw new Error(`Unexpected require: ${name}`);
     },
     fetch: async (url, options) => {
       requests.push({ url: new URL(url), options });

@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "npm run test:catalog",
     "test:catalog": "node --test scripts/tests/medusa-catalog.test.mjs",
     "backend:dev": "npm --prefix medusa-prototype run backend:dev",
     "backend:build": "npm --prefix medusa-prototype run build",
