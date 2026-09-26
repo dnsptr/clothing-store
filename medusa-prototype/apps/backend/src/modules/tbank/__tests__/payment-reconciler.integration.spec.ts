@@ -13,7 +13,7 @@ const TEST_LOGGER = {
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
-} as const;
+} as any;
 
 function postgresSql(sql: string): string {
   let parameter = 0;

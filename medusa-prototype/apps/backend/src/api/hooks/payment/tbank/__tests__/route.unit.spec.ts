@@ -85,6 +85,7 @@ beforeEach(() => {
     TBANK_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",
     TBANK_TERMINAL_KEY: TERMINAL,
     TBANK_PASSWORD: PASSWORD,
+    TBANK_RECEIPT_SNAPSHOT_SECRET: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
     TBANK_API_BASE_URL: "https://rest-api-test.tinkoff.ru/v2",
     TBANK_SUCCESS_URL: "https://mariomikke.shop/checkout/success",
     TBANK_FAIL_URL: "https://mariomikke.shop/checkout/fail",

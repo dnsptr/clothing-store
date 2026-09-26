@@ -71,6 +71,9 @@ export type QueryService = {
     readonly filters?: Readonly<Record<string, unknown>>;
   }): Promise<{ readonly data: readonly Record<string, unknown>[] }>;
 };
+export type PaidOrderEvents = {
+  emit(event: { readonly name: "tbank.order.paid"; readonly data: { readonly id: string } }): Promise<void>;
+};
 
 export type PaymentReconcilerDependencies = {
   readonly logger?: Logger;
@@ -81,6 +84,7 @@ export type PaymentReconcilerDependencies = {
   readonly expectedTerminalKey?: string;
   readonly workflowRunner?: ReconcilerWorkflowRunner;
   readonly durableLinkageChecker?: DurableLinkageChecker;
+  readonly events?: PaidOrderEvents;
   readonly query?: QueryService;
   readonly container?: MedusaContainer;
   readonly [key: string]: unknown;
@@ -114,6 +118,7 @@ export type ReconciliationServices = {
   readonly workflow?: ReconcilerWorkflowRunner;
   readonly linkageChecker?: DurableLinkageChecker;
   readonly query?: QueryService;
+  readonly events?: PaidOrderEvents;
   readonly container?: MedusaContainer;
 };
 

@@ -48,7 +48,7 @@ export async function inspectManualReview(
   const conflicts = notifications.listTbankNotificationConflicts && typeof paymentId === "string"
     ? await notifications.listTbankNotificationConflicts({ payment_id: paymentId }, { take: 100 })
     : [];
-  let paymentSession = null;
+  let paymentSession: any = null;
   if (typeof orderId === "string" && payment.retrievePaymentSession) {
     try {
       paymentSession = await payment.retrievePaymentSession(orderId);

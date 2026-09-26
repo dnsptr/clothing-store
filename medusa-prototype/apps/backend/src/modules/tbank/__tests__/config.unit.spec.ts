@@ -5,6 +5,7 @@ const VALID_ENABLED_ENVIRONMENT = {
   TBANK_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",
   TBANK_TERMINAL_KEY: "TinkoffBankTest",
   TBANK_PASSWORD: "fixture-password",
+  TBANK_RECEIPT_SNAPSHOT_SECRET: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
   TBANK_API_BASE_URL: "https://securepay.tinkoff.ru/v2",
   TBANK_SUCCESS_URL: "https://www.mariomikke.shop/checkout/success",
   TBANK_FAIL_URL: "https://www.mariomikke.shop/checkout/fail",
@@ -15,6 +16,7 @@ const TBANK_PAYMENT_VARIABLES = [
   "TBANK_PAYMENT_PROVIDER_ID",
   "TBANK_TERMINAL_KEY",
   "TBANK_PASSWORD",
+  "TBANK_RECEIPT_SNAPSHOT_SECRET",
   "TBANK_API_BASE_URL",
   "TBANK_SUCCESS_URL",
   "TBANK_FAIL_URL",
@@ -80,6 +82,22 @@ describe("parseTbankEnvironment", () => {
   });
 
   it.each([
+    ["missing", undefined],
+    ["short", "c2hvcnQ="],
+    ["low entropy", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="],
+    ["merchant password reuse", VALID_ENABLED_ENVIRONMENT.TBANK_PASSWORD],
+  ])("rejects a %s receipt snapshot secret", (_caseName, receiptSnapshotSecret) => {
+    const environment = {
+      ...VALID_ENABLED_ENVIRONMENT,
+      TBANK_RECEIPT_SNAPSHOT_SECRET: receiptSnapshotSecret,
+    };
+
+    expect(() => parseTbankEnvironment(environment)).toThrow(
+      expect.objectContaining({ variables: ["TBANK_RECEIPT_SNAPSHOT_SECRET"] }),
+    );
+  });
+
+  it.each([
     ["localhost storefront", "TBANK_SUCCESS_URL", "https://localhost/checkout/success"],
     ["HTTP storefront", "TBANK_FAIL_URL", "http://www.mariomikke.shop/checkout/fail"],
     ["unapproved storefront", "TBANK_SUCCESS_URL", "https://attacker.example/checkout/success"],
@@ -125,6 +143,7 @@ describe("parseTbankEnvironment", () => {
       options: {
         terminalKey: "TinkoffBankTest",
         password: "fixture-password",
+        receiptSnapshotSecret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
         apiBaseUrl,
         successUrl: "https://www.mariomikke.shop/checkout/success",
         failUrl: "https://www.mariomikke.shop/checkout/fail",
