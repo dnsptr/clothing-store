@@ -9,8 +9,8 @@ export class Migration20260926150000 extends Migration {
       add column "poll_lease_expires_at" timestamptz null,
       add column "poll_consecutive_errors" integer not null default 0,
       add column "poll_manual_review_at" timestamptz null;`);
-    // Webhook rows are normally inserted without payment_attempt_id. Correlate using
-    // the immutable terminal/order pair to skip already processed terminal outcomes.
+    // Webhook rows are normally inserted without payment_attempt_id. Only backfill
+    // processed confirmations or failures corroborated by the current session state.
     this.addSql(`update "tbank_payment_attempt" as attempt
       set poll_state = 'complete', updated_at = now()
       where attempt.deleted_at is null and exists (
@@ -18,7 +18,12 @@ export class Migration20260926150000 extends Migration {
         where inbox.order_id = attempt.order_id and inbox.terminal_key = attempt.terminal_key
           and ((inbox.status = 'CONFIRMED' and inbox.success = true)
             or (inbox.status in ('REJECTED', 'DEADLINE_EXPIRED', 'CANCELED', 'REVERSED')
-              and inbox.success = false))
+              and inbox.success = false and exists (
+                select 1 from "payment_session" as session
+                where session.id = attempt.payment_session_id and session.deleted_at is null
+                  and session.status in ('error', 'canceled')
+                  and session.data->>'status' = inbox.status
+              )))
           and inbox.lifecycle_state = 'processed' and inbox.deleted_at is null
       );`);
     this.addSql(`alter table "tbank_payment_attempt"

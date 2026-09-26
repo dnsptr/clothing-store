@@ -45,6 +45,10 @@ async function rebuildSchema(client: Client): Promise<void> {
   await client.query('drop table if exists "tbank_payment_attempt" cascade');
   await client.query('drop table if exists "tbank_notification" cascade');
   await client.query('drop function if exists "tbank_payment_attempt_immutable_correlation"()');
+  await client.query(
+    "CREATE TABLE IF NOT EXISTS payment_session (id text primary key, data jsonb not null default '{}'::jsonb, status text not null default 'pending', deleted_at timestamptz null)",
+  );
+  await client.query("ALTER TABLE payment_session ADD COLUMN IF NOT EXISTS status text not null default 'pending'");
   const baseline = new Migration20260726153050({} as never, {} as never);
   await baseline.up();
   await applyQueries(client, baseline);
@@ -485,9 +489,6 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
     try {
       const sessionId = "payses_poll_no_webhook";
       const paymentId = "bank_poll_one";
-      await database.query(
-        "CREATE TABLE IF NOT EXISTS payment_session (id text primary key, data jsonb not null default '{}'::jsonb, deleted_at timestamptz null)",
-      );
       await database.query(
         `INSERT INTO payment_session (id, data)
          VALUES ($1, $2::jsonb)

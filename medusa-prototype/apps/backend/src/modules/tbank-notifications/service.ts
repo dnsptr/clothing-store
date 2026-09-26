@@ -83,9 +83,7 @@ class TbankNotificationModuleService extends MedusaService({
            AND NOT EXISTS (
              SELECT 1 FROM tbank_notification AS inbox
              WHERE inbox.order_id = attempt.order_id AND inbox.terminal_key = attempt.terminal_key
-               AND ((inbox.status = 'CONFIRMED' AND inbox.success = true)
-                 OR (inbox.status IN ('REJECTED', 'DEADLINE_EXPIRED', 'CANCELED', 'REVERSED')
-                   AND inbox.success = false))
+               AND inbox.status = 'CONFIRMED' AND inbox.success = true
                AND inbox.lifecycle_state = 'processed' AND inbox.deleted_at IS NULL
            )
          ORDER BY attempt.created_at, attempt.id LIMIT ?
@@ -203,7 +201,12 @@ class TbankNotificationModuleService extends MedusaService({
              WHERE inbox.order_id = attempt.order_id AND inbox.terminal_key = attempt.terminal_key
                AND ((inbox.status = 'CONFIRMED' AND inbox.success = true)
                  OR (inbox.status IN ('REJECTED', 'DEADLINE_EXPIRED', 'CANCELED', 'REVERSED')
-                   AND inbox.success = false))
+                   AND inbox.success = false AND EXISTS (
+                     SELECT 1 FROM payment_session AS session
+                     WHERE session.id = attempt.payment_session_id AND session.deleted_at IS NULL
+                       AND session.status IN ('error', 'canceled')
+                       AND session.data->>'status' = inbox.status
+                   )))
                AND inbox.lifecycle_state = 'processed' AND inbox.deleted_at IS NULL
            ) AS already_finished
          FROM tbank_payment_attempt AS attempt

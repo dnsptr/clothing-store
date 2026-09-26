@@ -39,7 +39,9 @@ async function rebuildSchema(client: Client): Promise<void> {
   await client.query('drop function if exists "tbank_payment_attempt_immutable_correlation"()');
   // This suite runs only against TBANK_INBOX_TEST_DATABASE_URL, never an application database.
   await client.query(`create table if not exists payment_session
-    (id text primary key, data jsonb not null default '{}'::jsonb, deleted_at timestamptz null)`);
+    (id text primary key, data jsonb not null default '{}'::jsonb,
+     status text not null default 'pending', deleted_at timestamptz null)`);
+  await client.query("alter table payment_session add column if not exists status text not null default 'pending'");
   await client.query("delete from payment_session where id like 'poll-test-%'");
   const baseline = new Migration20260726153050({} as never, {} as never);
   await baseline.up();
@@ -460,6 +462,33 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     )).toEqual([]);
   });
 
+  it("still polls after a processed REJECTED webhook was reconciled to AUTHORIZED", async () => {
+    const now = new Date("2026-09-26T12:00:00.000Z");
+    await insertPollAttempt(database, "authorized-after-rejection", new Date(now.getTime() - 10 * 60_000));
+    await database.query(
+      `update payment_session
+       set data = jsonb_set(data, '{status}', to_jsonb('AUTHORIZED'::text))
+       where id = 'poll-test-authorized-after-rejection'`,
+    );
+    await database.query(
+      `insert into tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks,
+         currency_code, success, canonical_payload_hash, lifecycle_state, attempt_count)
+       values ('contradictory-rejection', 'terminal', 'bank-authorized-after-rejection',
+         'REJECTED', 'poll-test-authorized-after-rejection', 100, 'rub', false,
+         repeat('d', 64), 'processed', 0)`,
+    );
+
+    const claimed = await TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
+      {}, { limit: 1, leaseToken: "confirm-missing", now, terminalKey: "terminal" },
+      { manager: queryManager(database) } as never,
+    );
+    expect(claimed).toEqual([expect.objectContaining({
+      id: "authorized-after-rejection",
+      poll_state: "leased",
+    })]);
+  });
+
   it("does not poll or flag attempts with already processed terminal bank outcomes", async () => {
     const migration = new Migration20260926150000({} as never, {} as never);
     await migration.down();
@@ -468,7 +497,18 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     const old = new Date(now.getTime() - 25 * 60 * 60_000);
     await insertPollAttempt(database, "paid", old);
     await insertPollAttempt(database, "failed", old);
+    await database.query(
+      `update payment_session set status = 'error',
+        data = jsonb_set(data, '{status}', to_jsonb('REJECTED'::text))
+       where id = 'poll-test-failed'`,
+    );
     await insertPollAttempt(database, "unpaid", old);
+    await insertPollAttempt(database, "historical-contradiction", old);
+    await database.query(
+      `update payment_session
+       set data = jsonb_set(data, '{status}', to_jsonb('AUTHORIZED'::text))
+       where id = 'poll-test-historical-contradiction'`,
+    );
     await database.query(
       `insert into tbank_notification
         (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
@@ -482,6 +522,14 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
          success, canonical_payload_hash, lifecycle_state, attempt_count)
        values ('historical-failed', 'terminal', 'bank-failed', 'REJECTED',
          'poll-test-failed', 100, 'rub', false, repeat('b', 64), 'processed', 0)`,
+    );
+    await database.query(
+      `insert into tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       values ('historical-contradiction-webhook', 'terminal',
+         'bank-historical-contradiction', 'REJECTED', 'poll-test-historical-contradiction',
+         100, 'rub', false, repeat('e', 64), 'processed', 0)`,
     );
     const upgrade = new Migration20260926150000({} as never, {} as never);
     await upgrade.up();
@@ -504,6 +552,11 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     );
     await insertPollAttempt(database, "late-failed", old);
     await database.query(
+      `update payment_session set status = 'canceled',
+        data = jsonb_set(data, '{status}', to_jsonb('CANCELED'::text))
+       where id = 'poll-test-late-failed'`,
+    );
+    await database.query(
       `insert into tbank_notification
         (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
          success, canonical_payload_hash, lifecycle_state, attempt_count)
@@ -516,21 +569,25 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     expect(paidBefore.rows[0]).toEqual({ poll_state: "complete" });
     expect(await database.query(`select poll_state from tbank_payment_attempt where id = 'failed'`))
       .toEqual(expect.objectContaining({ rows: [{ poll_state: "complete" }] }));
+    expect(await database.query(
+      `select poll_state from tbank_payment_attempt where id = 'historical-contradiction'`,
+    )).toEqual(expect.objectContaining({ rows: [{ poll_state: "pending" }] }));
     const expired = await TbankNotificationModuleService.prototype.expireStalePaymentAttemptPolls.call(
       {}, { now, terminalKey: "terminal" }, { manager: queryManager(database) } as never,
     );
-    expect(new Map(expired.map((row) => [row.id, row.poll_state]))).toEqual(new Map([
-      ["abandoned", "manual_review"],
-      ["orphan", "manual_review"],
-      ["unpaid", "manual_review"],
-      ["late-paid", "complete"],
-      ["late-failed", "complete"],
-    ]));
-    expect(expired.filter((row) => row.poll_state === "manual_review")).toEqual([
-      expect.objectContaining({ id: "abandoned", poll_manual_review_at: now }),
-      expect.objectContaining({ id: "orphan", poll_manual_review_at: now }),
-      expect.objectContaining({ id: "unpaid", poll_manual_review_at: now }),
-    ]);
+    expect(Object.fromEntries(expired.map((row) => [row.id, row.poll_state]))).toEqual({
+      abandoned: "manual_review",
+      "historical-contradiction": "manual_review",
+      orphan: "manual_review",
+      unpaid: "manual_review",
+      "late-paid": "complete",
+      "late-failed": "complete",
+    });
+    const reviews = expired.filter((row) => row.poll_state === "manual_review");
+    expect(reviews).toHaveLength(4);
+    for (const row of reviews) {
+      expect(row).toEqual(expect.objectContaining({ poll_manual_review_at: now }));
+    }
     expect(await TbankNotificationModuleService.prototype.expireStalePaymentAttemptPolls.call(
       {}, { now, terminalKey: "terminal" }, { manager: queryManager(database) } as never,
     )).toEqual([]);
