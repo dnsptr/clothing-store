@@ -216,7 +216,7 @@ class TbankNotificationModuleService extends MedusaService({
        )
        UPDATE tbank_payment_attempt AS attempt
        SET poll_state = CASE WHEN stale.already_finished THEN 'complete' ELSE 'manual_review' END,
-           poll_manual_review_at = CASE WHEN stale.already_finished THEN NULL ELSE ? END,
+           poll_manual_review_at = CASE WHEN stale.already_finished THEN NULL ELSE CAST(? AS timestamptz) END,
            poll_next_at = NULL, poll_lease_token = NULL, poll_lease_expires_at = NULL,
            updated_at = ?
        FROM stale WHERE attempt.id = stale.id RETURNING attempt.*`,
