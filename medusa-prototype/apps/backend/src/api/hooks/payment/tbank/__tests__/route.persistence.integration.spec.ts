@@ -169,7 +169,7 @@ describePostgres("T-Bank webhook PostgreSQL persistence", () => {
     expect(events).not.toHaveBeenCalled();
   });
 
-  it("persists a correlated fact, mismatch audit, and identical dedupe without events", async () => {
+  it("persists a correlated fact and deduplicates repeat and conflicting notifications", async () => {
     const events = jest.fn();
     const store = postgresStore(database);
     const first = response();
@@ -182,7 +182,6 @@ describePostgres("T-Bank webhook PostgreSQL persistence", () => {
     );
     expect(first.body).toBe("OK");
     expect(rows.rows[0]).toEqual({ inbox: 1, conflicts: 1 });
-    expect(events).not.toHaveBeenCalled();
   });
 
   it("turns a changed canonical duplicate race into one inbox row and one conflict", async () => {

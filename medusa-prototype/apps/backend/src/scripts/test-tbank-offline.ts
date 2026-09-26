@@ -25,6 +25,7 @@ type FixtureData = {
 };
 
 const SECRET_PASSWORD = "DeterministicOfflineSecret_DO_NOT_LEAK";
+const RECEIPT_SNAPSHOT_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 const TERMINAL_KEY = "TinkoffBankOffline";
 const CART_ID = "cart_01JABCDEFGHJKMNPQRSTVWXYZ";
 const PAYMENT_CONTEXT = {
@@ -34,6 +35,7 @@ const PAYMENT_CONTEXT = {
 const OPTIONS = {
   terminalKey: TERMINAL_KEY,
   password: SECRET_PASSWORD,
+  receiptSnapshotSecret: RECEIPT_SNAPSHOT_SECRET,
   apiBaseUrl: "https://securepay.tinkoff.ru/v2",
   notificationUrl: "https://mariomikke.ru/hooks/payment/tbank",
 };
