@@ -1,0 +1,65 @@
+{
+  "valid_init": {
+    "Success": true,
+    "ErrorCode": "0",
+    "TerminalKey": "TinkoffBankTest",
+    "Status": "NEW",
+    "PaymentId": "3456789012",
+    "OrderId": "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    "Amount": 1899000,
+    "PaymentURL": "https://securepay.tinkoff.ru/v2/payment/3456789012"
+  },
+  "malformed_origin_init": {
+    "Success": true,
+    "ErrorCode": "0",
+    "TerminalKey": "TinkoffBankTest",
+    "Status": "NEW",
+    "PaymentId": "3456789013",
+    "OrderId": "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    "Amount": 1899000,
+    "PaymentURL": "https://attacker.evil.com/phishing/3456789013"
+  },
+  "http_origin_init": {
+    "Success": true,
+    "ErrorCode": "0",
+    "TerminalKey": "TinkoffBankTest",
+    "Status": "NEW",
+    "PaymentId": "3456789014",
+    "OrderId": "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    "Amount": 1899000,
+    "PaymentURL": "http://securepay.tinkoff.ru/v2/payment/3456789014"
+  },
+  "error_init": {
+    "Success": false,
+    "ErrorCode": "1051",
+    "Message": "Недостаточно средств",
+    "Details": "Card limit exceeded"
+  },
+  "valid_get_state_confirmed": {
+    "Success": true,
+    "ErrorCode": "0",
+    "TerminalKey": "TinkoffBankTest",
+    "Status": "CONFIRMED",
+    "PaymentId": "3456789012",
+    "OrderId": "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    "Amount": 1899000
+  },
+  "valid_get_state_authorized": {
+    "Success": true,
+    "ErrorCode": "0",
+    "TerminalKey": "TinkoffBankTest",
+    "Status": "AUTHORIZED",
+    "PaymentId": "3456789012",
+    "OrderId": "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    "Amount": 1899000
+  },
+  "valid_get_state_rejected": {
+    "Success": true,
+    "ErrorCode": "0",
+    "TerminalKey": "TinkoffBankTest",
+    "Status": "REJECTED",
+    "PaymentId": "3456789012",
+    "OrderId": "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+    "Amount": 1899000
+  }
+}

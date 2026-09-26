@@ -25,6 +25,15 @@ import {
   resolveVariantPackaging,
   VariantPackagingFields,
 } from "./data/mario-mikke-catalog";
+import {
+  MANUAL_FULFILLMENT_PROVIDER_ID,
+  resolveDeliveryShippingOptions,
+} from "../modules/cdek/shipping-options";
+import { parseCdekEnvironment } from "../modules/cdek/config";
+import { parsePochtaEnvironment } from "../modules/pochta/config";
+import { parseYandexDeliveryEnvironment } from "../modules/yandex-delivery/config";
+import { parseOwnCourierEnvironment } from "../modules/own-courier/config";
+import { OWN_COURIER_OPTION, OWN_COURIER_RULE } from "../modules/own-courier/provider-id";
 
 const IMPORT_SOURCE = "mario-mikke-demo";
 // Поля варианта с весом и габаритами упаковки: по ним агрегатор доставки
@@ -197,7 +206,7 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
 
   const { data: stockLocations } = await query.graph({
     entity: "stock_location",
-    fields: ["id", "name"],
+    fields: ["id", "name", "fulfillment_providers.id"],
   });
   const stockLocation = stockLocations[0];
 
@@ -205,6 +214,29 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     throw new Error(
       "Sales channel, shipping profile, or stock location is missing.",
     );
+  }
+
+  const deliveryOptionsToEnsure = resolveDeliveryShippingOptions({
+    cdekEnabled: parseCdekEnvironment(process.env).enabled,
+    yandexEnabled: parseYandexDeliveryEnvironment(process.env).enabled,
+    pochtaEnabled: parsePochtaEnvironment(process.env).enabled,
+    ownCourierEnabled: parseOwnCourierEnvironment(process.env).enabled,
+  });
+  const linkedProviderIds = new Set(
+    (stockLocation.fulfillment_providers || []).map((provider) => provider?.id),
+  );
+  const deliveryProviderIds = new Set(
+    deliveryOptionsToEnsure
+      .map((option) => option.providerId)
+      .filter((providerId) => providerId !== MANUAL_FULFILLMENT_PROVIDER_ID),
+  );
+  for (const providerId of deliveryProviderIds) {
+    if (!linkedProviderIds.has(providerId)) {
+      await link.create({
+        [Modules.STOCK_LOCATION]: { stock_location_id: stockLocation.id },
+        [Modules.FULFILLMENT]: { fulfillment_provider_id: providerId },
+      });
+    }
   }
 
   const { data: fulfillmentSets } = await query.graph({
@@ -296,6 +328,58 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
         ruShippingOption.id,
         optionUpdate,
       );
+    }
+  }
+
+  for (const opt of deliveryOptionsToEnsure) {
+    const existing = shippingOptions.find(
+      (option) => option.type?.code === opt.code || option.name === opt.name,
+    );
+    if (!existing) {
+      await createShippingOptionsWorkflow(container).run({
+        input: [
+          {
+            name: opt.name,
+            price_type: "flat",
+            provider_id: opt.providerId,
+            service_zone_id: ruServiceZoneId,
+            shipping_profile_id: shippingProfile.id,
+            type: {
+              label: opt.label,
+              description: opt.description,
+              code: opt.code,
+            },
+            data: { id: opt.code },
+            prices: [{ currency_code: "rub", amount: 0 }],
+            rules: [
+              { attribute: "enabled_in_store", value: "true", operator: "eq" },
+              { attribute: "is_return", value: "false", operator: "eq" },
+              ...(opt.code === OWN_COURIER_OPTION
+                ? [{ attribute: OWN_COURIER_RULE, value: "true", operator: "eq" as const }]
+                : []),
+            ],
+          },
+        ],
+      });
+    } else {
+      await fulfillmentModuleService.updateShippingOptions(existing.id, {
+        ...(opt.code === OWN_COURIER_OPTION ? {
+          price_type: "flat" as const,
+          rules: [
+            { attribute: "enabled_in_store", value: "true", operator: "eq" as const },
+            { attribute: "is_return", value: "false", operator: "eq" as const },
+            { attribute: OWN_COURIER_RULE, value: "true", operator: "eq" as const },
+          ],
+        } : {}),
+        provider_id: opt.providerId,
+        service_zone_id: ruServiceZoneId,
+        type: {
+          label: opt.label,
+          description: opt.description,
+          code: opt.code,
+        },
+        data: { id: opt.code },
+      });
     }
   }
 

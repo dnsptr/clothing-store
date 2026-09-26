@@ -1,12 +1,21 @@
 import { loadEnv, defineConfig, Modules } from '@medusajs/framework/utils'
 
-import { TBANK_PROVIDER_CONFIG_ID } from './src/modules/tbank/provider-id'
+import { resolveTbankPaymentModules } from './src/modules/tbank/config'
+import { parseCdekEnvironment } from './src/modules/cdek/config'
+import { parseYandexDeliveryEnvironment } from './src/modules/yandex-delivery/config'
+import { parsePochtaEnvironment } from './src/modules/pochta/config'
+import { parseOwnCourierEnvironment } from './src/modules/own-courier/config'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
 const REDIS_URL = process.env.REDIS_URL
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 const IS_BUILD = process.argv.some((arg) => arg === 'build')
+const paymentModules = resolveTbankPaymentModules(process.env)
+const cdekConfig = parseCdekEnvironment(process.env)
+const yandexConfig = parseYandexDeliveryEnvironment(process.env)
+const pochtaConfig = parsePochtaEnvironment(process.env)
+const ownCourierConfig = parseOwnCourierEnvironment(process.env)
 
 /**
  * Redis is mandatory in production. Without it Medusa silently falls back to the
@@ -79,20 +88,17 @@ const redisModules = REDIS_URL
 /**
  * Платёжный провайдер Т-Банка.
  *
- * Регистрируется только при заданных ключах терминала. Причина в том, что
- * `validateOptions` провайдера бросает на пустом `terminalKey`, и без этого
- * условия бэкенд перестал бы стартовать у всех, кто ключей не имеет: в
- * dev-окружении, в CI и на сборке. Отсутствие провайдера — рабочее состояние
- * до получения терминала, отсутствие бэкенда — нет.
+ * Регистрируется только при явном `TBANK_ENABLED=true`. Семантический парсер
+ * выше проверяет полный набор параметров до построения графа модулей, поэтому
+ * частичная или небезопасная конфигурация останавливает и startup, и миграции.
  *
- * Следствие, которое надо помнить при развёртывании: пока переменные не
- * заданы, в регионе доступен только `pp_system_default`, а он завершает
- * корзину без единого рубля списания. Витрина это состояние распознаёт и
- * закрывает чекаут (`src/lib/medusa.ts`, `isCheckoutEnabled`).
+ * Сид RU-региона не подключает встроенный `pp_system_default`: он завершает
+ * заказ без списания, что нарушает правило 100% предоплаты даже при закрытом
+ * чекауте витрины. Без Т-Банка у нового региона нет платёжного провайдера;
+ * при включении сид добавляет Т-Банк и удаляет устаревшую ссылку на системный
+ * провайдер. Medusa принимает системную сессию даже вне списка провайдеров
+ * региона, поэтому Store API дополнительно запрещает её в middleware.
  */
-const TBANK_TERMINAL_KEY = process.env.TBANK_TERMINAL_KEY
-const TBANK_PASSWORD = process.env.TBANK_PASSWORD
-
 /**
  * Журнал нотификаций Т-Банка регистрируется ВСЕГДА, в отличие от самого
  * провайдера. Схема базы не должна зависеть от переменных окружения: иначе
@@ -100,32 +106,6 @@ const TBANK_PASSWORD = process.env.TBANK_PASSWORD
  * одном стенде, на другом не существует. Пустая таблица ничего не стоит.
  */
 const tbankNotificationModule = [{ resolve: './src/modules/tbank-notifications' }]
-
-const paymentModule =
-  TBANK_TERMINAL_KEY && TBANK_PASSWORD
-    ? [
-        {
-          resolve: '@medusajs/medusa/payment',
-          options: {
-            providers: [
-              {
-                resolve: './src/modules/tbank',
-                id: TBANK_PROVIDER_CONFIG_ID,
-                options: {
-                  terminalKey: TBANK_TERMINAL_KEY,
-                  password: TBANK_PASSWORD,
-                  // Тестовый и боевой терминалы различаются только базовым URL.
-                  apiBaseUrl: process.env.TBANK_API_BASE_URL,
-                  successUrl: process.env.TBANK_SUCCESS_URL,
-                  failUrl: process.env.TBANK_FAIL_URL,
-                  notificationUrl: process.env.TBANK_NOTIFICATION_URL,
-                },
-              },
-            ],
-          },
-        },
-      ]
-    : []
 
 /**
  * Уведомления.
@@ -271,6 +251,54 @@ const fileModule = {
   },
 }
 
+/**
+ * Модуль доставки (Fulfillment).
+ * Включает встроенный manual-провайдер, СДЭК, Яндекс Доставку и Почту России
+ * при наличии соответствующих переменных окружения (*_ENABLED=true).
+ */
+const fulfillmentModule = {
+  key: Modules.FULFILLMENT,
+  resolve: '@medusajs/medusa/fulfillment',
+  options: {
+    providers: [
+      {
+        resolve: '@medusajs/medusa/fulfillment-manual',
+        id: 'manual',
+      },
+      ...(cdekConfig.enabled
+        ? [
+            {
+              resolve: './src/modules/cdek',
+              id: 'cdek',
+              options: cdekConfig.options,
+            },
+          ]
+        : []),
+      ...(yandexConfig.enabled
+        ? [
+            {
+              resolve: './src/modules/yandex-delivery',
+              id: 'yandex-delivery',
+              options: yandexConfig.options,
+            },
+          ]
+        : []),
+      ...(pochtaConfig.enabled
+        ? [
+            {
+              resolve: './src/modules/pochta',
+              id: 'pochta',
+              options: pochtaConfig.options,
+            },
+          ]
+        : []),
+      ...(ownCourierConfig.enabled
+        ? [{ resolve: './src/modules/own-courier', id: 'own-courier', options: ownCourierConfig.options }]
+        : []),
+    ],
+  },
+}
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -286,9 +314,10 @@ module.exports = defineConfig({
   modules: [
     ...redisModules,
     fileModule,
+    fulfillmentModule,
     contentModule,
     ...tbankNotificationModule,
     ...notificationModule,
-    ...paymentModule,
+    ...paymentModules,
   ],
 })

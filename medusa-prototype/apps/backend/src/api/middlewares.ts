@@ -1,6 +1,7 @@
 import {
   defineMiddlewares,
   validateAndTransformBody,
+  validateAndTransformQuery,
 } from "@medusajs/framework/http";
 
 import {
@@ -9,6 +10,12 @@ import {
   UpdateSlideSchema,
 } from "./admin/content/validators";
 import { catalogProfileGuard } from "./admin/catalog-profile-guard";
+import {
+  ManualReviewActionSchema,
+  ManualReviewListQuerySchema,
+} from "./admin/tbank/manual-review/validators";
+
+import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
 
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
@@ -28,6 +35,11 @@ import { catalogProfileGuard } from "./admin/catalog-profile-guard";
  */
 export default defineMiddlewares({
   routes: [
+    {
+      matcher: "/store/payment-collections/:id/payment-sessions",
+      method: "POST",
+      middlewares: [requirePaidPaymentProvider],
+    },
     {
       matcher: "/admin/products/:id",
       method: "POST",
@@ -57,6 +69,23 @@ export default defineMiddlewares({
       matcher: "/admin/content/reorder",
       method: "POST",
       middlewares: [validateAndTransformBody(ReorderSchema)],
+    },
+    {
+      matcher: "/admin/tbank/manual-review/:id/retry",
+      method: "POST",
+      middlewares: [validateAndTransformBody(ManualReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/manual-review/:id/resolve",
+      method: "POST",
+      middlewares: [validateAndTransformBody(ManualReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/manual-review",
+      method: "GET",
+      middlewares: [
+        validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
+      ],
     },
   ],
 });
