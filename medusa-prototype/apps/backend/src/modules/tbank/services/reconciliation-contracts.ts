@@ -28,6 +28,21 @@ export type InboxMutationRow = {
   readonly attempt_count?: number;
 };
 
+export type PaymentAttemptPollRow = {
+  readonly id: string;
+  readonly payment_session_id: string;
+  readonly provider_id: string;
+  readonly terminal_key: string;
+  readonly order_id: string;
+  readonly expected_amount_kopecks: number;
+  readonly currency_code: string;
+};
+
+export type PaymentAttemptPollMutationRow = {
+  readonly id: string;
+  readonly poll_state: "pending" | "leased" | "complete" | "manual_review";
+};
+
 export interface TbankNotificationStore {
   quarantineExpiredExhausted(input: { readonly now: Date }): Promise<readonly InboxMutationRow[]>;
   claimNotificationById(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
@@ -36,6 +51,13 @@ export interface TbankNotificationStore {
   completeInbox(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
   failInbox(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly InboxMutationRow[]>;
   quarantineConflict(input: { readonly id: string; readonly leaseToken: string; readonly reason: string; readonly now: Date }): Promise<readonly unknown[]>;
+  claimDuePaymentAttempts(input: { readonly limit: number; readonly leaseToken: string; readonly now: Date; readonly terminalKey: string }): Promise<readonly PaymentAttemptPollRow[]>;
+  renewPaymentAttemptPollLease(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
+  completePaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
+  deferPaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
+  failPaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
+  quarantinePaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
+  expireStalePaymentAttemptPolls(input: { readonly now: Date; readonly terminalKey: string }): Promise<readonly PaymentAttemptPollMutationRow[]>;
   retryManualReview(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string }): Promise<readonly unknown[]>;
   resolveManualReview(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string }): Promise<readonly unknown[]>;
   listTbankNotifications?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
@@ -100,6 +122,20 @@ export type ProcessNotificationResult =
 export type ProcessBatchResult = {
   readonly claimed: number;
   readonly results: readonly ProcessNotificationResult[];
+};
+
+export type PollPaymentAttemptResult =
+  | { readonly status: "processed"; readonly id: string; readonly action: string }
+  | { readonly status: "deferred"; readonly id: string; readonly reason: string }
+  | { readonly status: "retry_scheduled"; readonly id: string; readonly error: string }
+  | { readonly status: "manual_review"; readonly id: string; readonly reason: string }
+  | { readonly status: "ignored"; readonly id: string; readonly reason: "stale_lease_fenced" };
+
+export type PollMissingNotificationsResult = {
+  readonly claimed: number;
+  readonly expired: number;
+  readonly results: readonly PollPaymentAttemptResult[];
+  readonly skipped?: "tbank_disabled";
 };
 
 export type ManualReviewDetails = {

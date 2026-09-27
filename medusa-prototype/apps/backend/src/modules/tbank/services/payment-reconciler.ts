@@ -10,12 +10,15 @@ import {
   retryManualReview,
   type OperatorAction,
 } from "./manual-review-operations";
+import { reconcilePaymentAttempt } from "./reconcile-payment-attempt";
 import { reconcileNotification } from "./reconcile-notification";
 import {
   parseNotificationRow,
   type DurableLinkageChecker,
   type ManualReviewDetails,
   type PaymentReconcilerDependencies,
+  type PollMissingNotificationsResult,
+  type PollPaymentAttemptResult,
   type ProcessBatchResult,
   type ProcessNotificationResult,
   type PaidOrderEvents,
@@ -29,6 +32,8 @@ import { LeaseController, StaleLeaseError } from "./reconciliation-lease";
 export type {
   DurableLinkageChecker,
   ManualReviewDetails,
+  PollMissingNotificationsResult,
+  PollPaymentAttemptResult,
   PaymentReconcilerDependencies,
   ProcessBatchResult,
   ProcessNotificationResult,
@@ -155,6 +160,41 @@ export class PaymentReconcilerService {
       results.push(result);
     }
     return { claimed: rows.length, results };
+  }
+
+  async pollMissingNotifications(limit = 10): Promise<PollMissingNotificationsResult> {
+    const config = parseTbankEnvironment(process.env);
+    if (!config.enabled) return { claimed: 0, expired: 0, results: [], skipped: "tbank_disabled" };
+    const services = this.forReconciliation();
+    const leaseToken = randomUUID();
+    const now = new Date();
+    const expired = await this.services.notifications.expireStalePaymentAttemptPolls({
+      now,
+      terminalKey: config.options.terminalKey,
+    });
+    let expiredCount = 0;
+    for (const attempt of expired) {
+      if (attempt.poll_state === "manual_review") {
+        expiredCount++;
+        this.services.logger.error(`tbank.manual_review: payment attempt ${attempt.id}: polling expired after 24 hours`);
+      }
+    }
+    const rows = await this.services.notifications.claimDuePaymentAttempts({
+      limit,
+      leaseToken,
+      now,
+      terminalKey: config.options.terminalKey,
+    });
+    const results: PollPaymentAttemptResult[] = [];
+    for (const row of rows) {
+      results.push(await reconcilePaymentAttempt(
+        services,
+        row,
+        leaseToken,
+        (paymentId, operation) => this.withPaymentLock(paymentId, operation),
+      ));
+    }
+    return { claimed: rows.length, expired: expiredCount, results };
   }
 
   inspectManualReview(id: string): Promise<ManualReviewDetails> {

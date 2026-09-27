@@ -2,7 +2,7 @@ import { processPaymentWorkflow } from "@medusajs/core-flows";
 import type { PaymentActions, PaymentSessionDTO } from "@medusajs/types";
 
 import { kopecksToRubles } from "../lib/money";
-import type { NotificationRow, ReconciliationServices } from "./reconciliation-contracts";
+import type { ReconciliationServices } from "./reconciliation-contracts";
 
 export type ProjectionResult =
   | { readonly success: true }
@@ -10,7 +10,7 @@ export type ProjectionResult =
 
 export async function projectConfirmedPayment(
   services: ReconciliationServices,
-  row: NotificationRow,
+  row: { readonly payment_id: string; readonly order_id: string; readonly amount_kopecks: number },
   session: PaymentSessionDTO,
 ): Promise<ProjectionResult> {
   const deterministicKey = `tbank_proj_${row.payment_id}`;
