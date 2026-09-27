@@ -14,6 +14,7 @@ import {
   ManualReviewActionSchema,
   ManualReviewListQuerySchema,
 } from "./admin/tbank/manual-review/validators";
+import { PollReviewActionSchema } from "./admin/tbank/payment-attempts/manual-review/validators";
 
 import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
 
@@ -82,6 +83,23 @@ export default defineMiddlewares({
     },
     {
       matcher: "/admin/tbank/manual-review",
+      method: "GET",
+      middlewares: [
+        validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
+      ],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review/:id/retry",
+      method: "POST",
+      middlewares: [validateAndTransformBody(PollReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review/:id/resolve",
+      method: "POST",
+      middlewares: [validateAndTransformBody(PollReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review",
       method: "GET",
       middlewares: [
         validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
