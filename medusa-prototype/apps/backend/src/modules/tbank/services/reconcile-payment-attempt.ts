@@ -103,7 +103,7 @@ async function quarantine(
   return { status: "manual_review", id: lease.id, reason };
 }
 
-function correlateAttempt(
+export function correlateAttempt(
   attempt: PaymentAttemptPollRow,
   session: PaymentSessionDTO,
   expectedTerminalKey: string,
