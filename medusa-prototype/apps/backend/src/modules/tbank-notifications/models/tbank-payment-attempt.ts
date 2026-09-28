@@ -1,6 +1,7 @@
 import { model } from "@medusajs/framework/utils";
 
 import TbankNotification from "./tbank-notification";
+import TbankPaymentAttemptAction from "./tbank-payment-attempt-action";
 
 const TbankPaymentAttempt = model
   .define(
@@ -19,7 +20,12 @@ const TbankPaymentAttempt = model
       poll_lease_expires_at: model.dateTime().nullable(),
       poll_consecutive_errors: model.number().default(0),
       poll_manual_review_at: model.dateTime().nullable(),
+      poll_retry_until: model.dateTime().nullable(),
+      poll_alert_sent_at: model.dateTime().nullable(),
+      poll_alert_lease_token: model.text().nullable(),
+      poll_alert_lease_expires_at: model.dateTime().nullable(),
       notifications: model.hasMany(() => TbankNotification, { mappedBy: "payment_attempt" }),
+      actions: model.hasMany(() => TbankPaymentAttemptAction, { mappedBy: "payment_attempt" }),
     },
   )
   .indexes([
