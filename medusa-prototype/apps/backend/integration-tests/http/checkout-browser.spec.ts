@@ -159,6 +159,11 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
           next = await startStorefront(backendUrl, key.token, region.id);
           browser = await chromium.launch({ headless: true });
           const page = await browser.newPage();
+          await page.route("**/*", (route) => {
+            const hostname = new URL(route.request().url()).hostname;
+            if (hostname === "localhost" || hostname === "127.0.0.1") return route.continue();
+            throw new Error(`Offline browser checkout refused external request: ${hostname}`);
+          });
           await page.route(BANK_URL, (route) => route.fulfill({
             contentType: "text/html", body: "<title>Offline bank</title><main><h1>Bank payment boundary</h1></main>",
           }));
