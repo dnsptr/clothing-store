@@ -171,3 +171,86 @@ jobs:
         env:
           NODE_ENV: test
           TBANK_INBOX_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+  browser-checkout:
+    name: Browser checkout (real Medusa + PostgreSQL, offline bank)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            medusa-prototype/package-lock.json
+      - name: Install storefront dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: medusa-prototype
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser checkout against PostgreSQL
+        run: npm run test:integration:http -- --runTestsByPath integration-tests/http/checkout-browser.spec.ts
+        working-directory: medusa-prototype/apps/backend
+        env:
+          NODE_ENV: test
+          BROWSER_CHECKOUT_TEST: "true"
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_TEMP_NAME: medusa_integration_tests
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa_integration_tests
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret
+          COOKIE_SECRET: test-cookie-secret
+          STORE_CORS: http://127.0.0.1:4183
+          ADMIN_CORS: http://localhost:9000
+          AUTH_CORS: http://127.0.0.1:4183,http://localhost:9000
+          TBANK_ENABLED: "true"
+          TBANK_PAYMENT_PROVIDER_ID: pp_tbank_tbank
+          TBANK_TERMINAL_KEY: TinkoffBankTest
+          TBANK_PASSWORD: TinkoffBankTest
+          TBANK_RECEIPT_SNAPSHOT_SECRET: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+          TBANK_API_BASE_URL: https://rest-api-test.tinkoff.ru/v2
+          TBANK_SUCCESS_URL: https://mariomikke.shop/checkout/success
+          TBANK_FAIL_URL: https://mariomikke.shop/checkout/fail
+          TBANK_NOTIFICATION_URL: https://api.mariomikke.shop/hooks/payment/tbank
+          CDEK_ENABLED: "false"
+          YANDEX_DELIVERY_ENABLED: "false"
+          POCHTA_ENABLED: "false"
+          OWN_COURIER_ENABLED: "false"
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-medusa-offline-checkout
+          path: test-results/real-medusa-*.png
+          if-no-files-found: ignore
