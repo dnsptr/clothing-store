@@ -163,6 +163,19 @@ Medusa Admin:
 http://localhost:9000/app
 ```
 
+### Offline checkout browser smoke
+
+After installing the root and `medusa-prototype` dependencies, run:
+
+```bash
+npx playwright test e2e/product-without-color.spec.ts
+```
+
+The fixture starts the real Next.js storefront with a local Store API double and
+an intercepted bank page. It checks that an available product without a color
+variant can reach the cart and bank hand-off. It does **not** verify a real Medusa
+server, bank transaction, or the deployed Vercel → Timeweb checkout.
+
 ---
 
 ## Project Structure
