@@ -163,6 +163,9 @@ function validateForm(
     if (!/^\d{6}$/.test(form.zip)) {
       errors.zip = "Введите индекс из 6 цифр";
     }
+    if (!selectedPochtaOffice?.settlement && !form.city.trim()) {
+      errors.city = "Укажите город выбранного отделения";
+    }
     if (!selectedPochtaOffice || selectedPochtaOffice.isClosed) {
       errors.pochtaOffice = "Выберите почтовое отделение связи";
     }
@@ -256,6 +259,7 @@ export default function CheckoutClient() {
   const [citySuggestions, setCitySuggestions] = useState<CdekCity[]>([]);
   const [showCityDropdown, setShowCityDropdown] = useState(false);
   const citySearchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const cdekCitySearchRequestRef = useRef(0);
   const cityWrapperRef = useRef<HTMLDivElement>(null);
 
   // Yandex Delivery PVZ state
@@ -267,7 +271,7 @@ export default function CheckoutClient() {
   const yandexCitySearchRequestRef = useRef(0);
   const yandexPvzRequestRef = useRef(0);
   const yandexCityWrapperRef = useRef<HTMLDivElement>(null);
-  const selectedYandexCityRef = useRef<YandexCity | null>(null);
+  const [selectedYandexCity, setSelectedYandexCity] = useState<YandexCity | null>(null);
   const [yandexCitySearchFailed, setYandexCitySearchFailed] = useState(false);
   const [yandexPvzList, setYandexPvzList] = useState<YandexDeliveryPoint[]>([]);
   const [loadedYandexGeoId, setLoadedYandexGeoId] = useState<number | null>(null);
@@ -337,6 +341,9 @@ export default function CheckoutClient() {
     getShippingOptions()
       .then((options) => {
         if (!isActive) return;
+        setDeliveryType((current) =>
+          findShippingOption(current, options) ? current : firstAvailableDeliveryType(options) ?? current,
+        );
         setShippingOptions(options);
       })
       .catch((error: unknown) => {
@@ -350,12 +357,6 @@ export default function CheckoutClient() {
     };
   }, [needsShippingOptions, getShippingOptions]);
 
-  useEffect(() => {
-    const availableDeliveryType = firstAvailableDeliveryType(shippingOptions);
-    if (availableDeliveryType && deliveryType !== availableDeliveryType && !findShippingOption(deliveryType, shippingOptions)) {
-      setDeliveryType(availableDeliveryType);
-    }
-  }, [deliveryType, shippingOptions]);
 
   // Click outside to close city dropdown
   useEffect(() => {
@@ -374,51 +375,39 @@ export default function CheckoutClient() {
   // Only an explicitly selected city can load points. Discard responses from earlier cities.
   useEffect(() => {
     const requestId = ++yandexPvzRequestRef.current;
-    setYandexPvzList([]);
-    setLoadedYandexGeoId(null);
-    setSelectedYandexPvz(null);
-    setYandexPvzFailed(false);
-    setIsLoadingYandexPvz(false);
     if (deliveryType !== "yandex-pvz" || !findShippingOption(deliveryType, shippingOptions) || yandexGeoId === null) {
       return;
     }
-    setIsLoadingYandexPvz(true);
+    let active = true;
     fetchYandexDeliveryPoints({ geo_id: yandexGeoId })
       .then((points) => {
-        if (requestId !== yandexPvzRequestRef.current) return;
+        if (!active || requestId !== yandexPvzRequestRef.current) return;
         setYandexPvzList(points);
         setLoadedYandexGeoId(yandexGeoId);
       })
       .catch((error: unknown) => {
-        if (requestId !== yandexPvzRequestRef.current) return;
+        if (!active || requestId !== yandexPvzRequestRef.current) return;
         console.warn("Failed to fetch Yandex PVZ", error);
         setYandexPvzFailed(true);
       })
       .finally(() => {
-        if (requestId === yandexPvzRequestRef.current) setIsLoadingYandexPvz(false);
+        if (active && requestId === yandexPvzRequestRef.current) setIsLoadingYandexPvz(false);
       });
     return () => {
-      ++yandexPvzRequestRef.current;
+      active = false;
     };
   }, [yandexGeoId, deliveryType, shippingOptions]);
 
   // Fetch PVZ list when city or mode changes
   useEffect(() => {
     if (deliveryType !== "cdek-pvz" || cdekCityCode === null || !findShippingOption(deliveryType, shippingOptions)) {
-      setPvzList([]);
-      setSelectedPvz(null);
-      setIsLoadingPvz(false);
       return;
     }
     let active = true;
-    setIsLoadingPvz(true);
-    setPvzList([]);
-    setSelectedPvz(null);
     fetchCdekDeliveryPoints(cdekCityCode)
       .then((points) => {
         if (!active) return;
         setPvzList(points);
-        setSelectedPvz(points[0] ?? null);
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -436,24 +425,12 @@ export default function CheckoutClient() {
 
   // Fetch Russian Post offices when mode or zip changes
   useEffect(() => {
-    if (deliveryType !== "pochta-parcel") return;
-    if (!/^\d{6}$/.test(form.zip)) {
-      setPochtaOffices([]);
-      setSelectedPochtaOffice(null);
-      setIsLoadingPochta(false);
-      return;
-    }
+    if (deliveryType !== "pochta-parcel" || !/^\d{6}$/.test(form.zip)) return;
     let active = true;
-    setIsLoadingPochta(true);
     fetchPostOffices(form.zip)
       .then((offices) => {
         if (!active) return;
-        const availableOffices = offices.filter((office) => !office.isClosed);
-        setPochtaOffices(availableOffices);
-        setSelectedPochtaOffice((prev) => {
-          if (prev && availableOffices.some((office) => office.postalCode === prev.postalCode)) return prev;
-          return availableOffices[0] || null;
-        });
+        setPochtaOffices(offices.filter((office) => !office.isClosed));
       })
       .catch(() => {
         if (!active) return;
@@ -480,17 +457,32 @@ export default function CheckoutClient() {
   const invalidateOwnCourierAvailability = () => {
     ownCourierRequestRef.current += 1;
     setIsCheckingOwnCourier(false);
-    setShippingOptions((options) => options?.filter((option) => option.type?.code !== "own-courier-mkad") ?? null);
+    if (shippingOptions?.some((option) => option.type?.code === "own-courier-mkad")) {
+      const remainingOptions = shippingOptions.filter((option) => option.type?.code !== "own-courier-mkad");
+      setShippingOptions(remainingOptions);
+      if (deliveryType === "own-courier-mkad") {
+        setDeliveryType(firstAvailableDeliveryType(remainingOptions) ?? deliveryType);
+      }
+    }
     setOwnCourierMessage("");
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+      ...(name === "zip" && deliveryType === "pochta-parcel" ? { city: "" } : {}),
+    }));
+    if (name === "zip" && deliveryType === "pochta-parcel") {
+      setPochtaOffices([]);
+      setSelectedPochtaOffice(null);
+      setIsLoadingPochta(/^\d{6}$/.test(value));
+      setIsPochtaPickerOpen(true);
+    }
     if (name === "city" || name === "address" || name === "zip" || name === "apartment") {
       invalidateOwnCourierAvailability();
     }
-    // Clear the error as soon as the user starts correcting the field
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
@@ -498,12 +490,14 @@ export default function CheckoutClient() {
 
   const handleCityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
+    ++cdekCitySearchRequestRef.current;
     setDeliveryCity(value);
     setForm((prev) => ({ ...prev, city: value }));
     invalidateOwnCourierAvailability();
     setCdekCityCode(null);
     setCitySuggestions([]);
     setPvzList([]);
+    setIsLoadingPvz(false);
     setSelectedPvz(null);
     setIsPvzPickerOpen(false);
     if (errors.city) {
@@ -515,12 +509,15 @@ export default function CheckoutClient() {
     }
 
     if (value.trim().length >= 2) {
+      const requestId = cdekCitySearchRequestRef.current;
       citySearchTimeout.current = setTimeout(async () => {
         try {
           const results = await searchCdekCities(value);
+          if (requestId !== cdekCitySearchRequestRef.current) return;
           setCitySuggestions(results);
           setShowCityDropdown(results.length > 0);
         } catch {
+          if (requestId !== cdekCitySearchRequestRef.current) return;
           setCitySuggestions([]);
         }
       }, 250);
@@ -547,6 +544,9 @@ export default function CheckoutClient() {
         city: form.city.trim(), address: form.address.trim(), apartment: form.apartment.trim(), zip: form.zip.trim(),
       });
       if (requestId !== ownCourierRequestRef.current) return;
+      setDeliveryType((current) =>
+        findShippingOption(current, options) ? current : firstAvailableDeliveryType(options) ?? current,
+      );
       setShippingOptions(options);
       if (!findShippingOption("own-courier-mkad", options)) {
         setOwnCourierMessage("Курьерская доставка по этому адресу недоступна.");
@@ -561,11 +561,16 @@ export default function CheckoutClient() {
   };
 
   const handleSelectCity = (city: CdekCity) => {
+    ++cdekCitySearchRequestRef.current;
+    clearTimeout(citySearchTimeout.current ?? undefined);
     setDeliveryCity(city.city);
     setCdekCityCode(city.code);
     setForm((prev) => ({ ...prev, city: city.city }));
     invalidateOwnCourierAvailability();
     setShowCityDropdown(false);
+    setCitySuggestions([]);
+    setPvzList([]);
+    setIsLoadingPvz(true);
     setIsPvzPickerOpen(true);
     setSelectedPvz(null);
     setErrors((prev) => ({ ...prev, city: "" }));
@@ -575,7 +580,7 @@ export default function CheckoutClient() {
     const value = e.target.value;
     ++yandexCitySearchRequestRef.current;
     ++yandexPvzRequestRef.current;
-    selectedYandexCityRef.current = null;
+    setSelectedYandexCity(null);
     setYandexDeliveryCity(value);
     setYandexGeoId(null);
     setYandexCitySuggestions([]);
@@ -611,7 +616,7 @@ export default function CheckoutClient() {
   const handleSelectYandexCity = (city: YandexCity) => {
     ++yandexCitySearchRequestRef.current;
     ++yandexPvzRequestRef.current;
-    selectedYandexCityRef.current = city;
+    setSelectedYandexCity(city);
     clearTimeout(yandexCitySearchTimeout.current ?? undefined);
     setYandexDeliveryCity(city.city);
     setYandexGeoId(city.geo_id);
@@ -622,6 +627,8 @@ export default function CheckoutClient() {
     setYandexPvzList([]);
     setLoadedYandexGeoId(null);
     setSelectedYandexPvz(null);
+    setYandexPvzFailed(false);
+    setIsLoadingYandexPvz(true);
     setErrors((prev) => ({ ...prev, yandexCity: "", yandexPvz: "" }));
   };
 
@@ -633,8 +640,8 @@ export default function CheckoutClient() {
 
 
   const validYandexPvz = deliveryType === "yandex-pvz" &&
-    selectedYandexCityRef.current?.geo_id === yandexGeoId &&
-    selectedYandexCityRef.current?.city === yandexDeliveryCity &&
+    selectedYandexCity?.geo_id === yandexGeoId &&
+    selectedYandexCity?.city === yandexDeliveryCity &&
     yandexGeoId !== null && loadedYandexGeoId === yandexGeoId &&
     !isLoadingYandexPvz && !yandexPvzFailed &&
     selectedYandexPvz && yandexPvzList.includes(selectedYandexPvz)
@@ -689,6 +696,10 @@ export default function CheckoutClient() {
       yandexGeoId,
     );
 
+    if (deliveryType === "pochta-parcel" &&
+        (isLoadingPochta || !selectedPochtaOffice || !pochtaOffices.includes(selectedPochtaOffice))) {
+      newErrors.pochtaOffice = "Выберите почтовое отделение связи";
+    }
     if (!effectiveShippingOptionId) {
       newErrors.shippingOption = "Этот способ доставки сейчас недоступен. Выберите доступный вариант.";
     }
@@ -1106,11 +1117,26 @@ export default function CheckoutClient() {
                     aria-selected={deliveryType === mode.type}
                     className={`${styles.deliveryTab} ${deliveryType === mode.type ? styles.deliveryTabActive : ""}`}
                     onClick={() => {
+                      if (deliveryType === mode.type) return;
                       setDeliveryType(mode.type);
-                      if (mode.type !== "yandex-pvz") {
-                        ++yandexPvzRequestRef.current;
-                        setSelectedYandexPvz(null);
-                      }
+                      ++cdekCitySearchRequestRef.current;
+                      clearTimeout(citySearchTimeout.current ?? undefined);
+                      setCitySuggestions([]);
+                      setShowCityDropdown(false);
+                      setPvzList([]);
+                      setSelectedPvz(null);
+                      setIsLoadingPvz(mode.type === "cdek-pvz" && cdekCityCode !== null);
+                      setPochtaOffices([]);
+                      setSelectedPochtaOffice(null);
+                      setIsPochtaPickerOpen(true);
+                      setIsLoadingPochta(mode.type === "pochta-parcel" && /^\d{6}$/.test(form.zip));
+                      if (mode.type === "pochta-parcel") setForm((prev) => ({ ...prev, city: "" }));
+                      ++yandexPvzRequestRef.current;
+                      setYandexPvzList([]);
+                      setLoadedYandexGeoId(null);
+                      setSelectedYandexPvz(null);
+                      setYandexPvzFailed(false);
+                      setIsLoadingYandexPvz(mode.type === "yandex-pvz" && yandexGeoId !== null);
                       setErrors((prev) => ({
                         ...prev,
                         pvz: "",
@@ -1608,7 +1634,7 @@ export default function CheckoutClient() {
                     {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
                   </div>
                   <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Город / населённый пункт</label>
+                    <label className={styles.formLabel}>Город / населённый пункт *</label>
                     <input
                       name="city"
                       className={styles.formInput}
@@ -1664,8 +1690,9 @@ export default function CheckoutClient() {
                               onClick={() => {
                                 if (office.isClosed) return;
                                 setSelectedPochtaOffice(office);
+                                if (office.settlement) setForm((prev) => ({ ...prev, city: office.settlement ?? "" }));
                                 setIsPochtaPickerOpen(false);
-                                setErrors((prev) => ({ ...prev, pochtaOffice: "" }));
+                                setErrors((prev) => ({ ...prev, pochtaOffice: "", ...(office.settlement ? { city: "" } : {}) }));
                               }}
                             >
                               <div className={styles.pvzItemTop}>

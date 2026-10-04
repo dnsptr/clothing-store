@@ -408,3 +408,134 @@ test("Yandex checkout drops a chosen point on reload and distinguishes unavailab
   await expect(page.getByText("Выберите пункт выдачи Яндекс Маркет")).toBeVisible();
   expect(shippingRequests).toHaveLength(0);
 });
+
+test("CDEK checkout requires an explicit pickup point and ignores an older city search", async ({ page, request }) => {
+  await configureScenario(request, "valid");
+  const cors = { "access-control-allow-origin": "*" };
+  const shippingRequests: unknown[] = [];
+  let releaseOldCity: (() => void) | undefined;
+  await page.route("**/store/shipping-options?**", (route) => route.fulfill({
+    headers: cors,
+    json: { shipping_options: [
+      { id: "so_cdek", name: "СДЭК ПВЗ", type: { code: "cdek-pvz" }, amount: 0 },
+      { id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: 0 },
+    ] },
+  }));
+  await page.route("**/store/cdek/cities?**", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("query");
+    if (query === "мос") await new Promise<void>((resolve) => { releaseOldCity = resolve; });
+    await route.fulfill({
+      headers: cors,
+      json: { cities: query === "мос"
+        ? [{ code: 44, city: "Москва", region: "Москва" }]
+        : [{ code: 69, city: "Тверь", region: "Тверская область" }] },
+    });
+  });
+  await page.route("**/store/cdek/pvz?**", (route) => {
+    const cityCode = Number(new URL(route.request().url()).searchParams.get("city_code"));
+    const point = cityCode === 44
+      ? { code: "MSK1", name: "Московский ПВЗ", type: "PVZ", location: { address: "Москва, Арбат, 1", city_code: 44, city: "Москва" }, work_time: "09:00-21:00" }
+      : { code: "TVR1", name: "Тверской ПВЗ", type: "PVZ", location: { address: "Тверь, Советская, 1", city_code: 69, city: "Тверь" }, work_time: "09:00-21:00" };
+    return route.fulfill({ headers: cors, json: { pvz: [point] } });
+  });
+  await page.route("**/store/carts/cart_baseline/shipping-methods", async (route) => {
+    shippingRequests.push(route.request().postDataJSON());
+    await route.continue();
+  });
+  await page.route(BANK_PAYMENT_URL, (route) => route.fulfill({
+    contentType: "text/html", body: "<main><h1>Bank payment boundary</h1></main>",
+  }));
+  await openCheckout(page);
+  await expect(page.getByRole("tab", { name: /СДЭК ПВЗ/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Москва, Арбат, 1")).toBeVisible();
+  await submitCheckout(page);
+  await expect(page.getByText("Выберите пункт выдачи СДЭК")).toBeVisible();
+  expect(shippingRequests).toHaveLength(0);
+
+  const city = page.getByPlaceholder("Начните вводить город (напр. Москва, Санкт-Петербург)");
+  await city.fill("Мос");
+  await expect.poll(() => releaseOldCity !== undefined).toBe(true);
+  await city.fill("Твер");
+  await expect(page.getByText("Тверь", { exact: true })).toBeVisible();
+  const staleResponse = page.waitForResponse((response) =>
+    response.url().includes("/store/cdek/cities?query=") && response.status() === 200 &&
+    new URL(response.url()).searchParams.get("query") === "мос",
+  );
+  releaseOldCity?.();
+  await staleResponse;
+  await expect(page.locator('div[class*="cityOption"]').filter({ hasText: "Москва" })).toHaveCount(0);
+  await page.getByText("Тверь", { exact: true }).click();
+  await expect(page.getByText("Тверь, Советская, 1")).toBeVisible();
+  await page.getByText("Тверь, Советская, 1").click();
+  await page.getByRole("button", { name: "Подтвердить заказ" }).click();
+  await expect(page).toHaveURL(BANK_PAYMENT_URL);
+  expect(shippingRequests).toEqual([{ option_id: "so_cdek", data: {
+    city_code: 69, cdek_pvz_code: "TVR1", cdek_pvz_address: "Тверской ПВЗ, Тверь, Советская, 1",
+  } }]);
+});
+
+test("Russian Post checkout discards an old office when the index changes and requires its city", async ({ page, request }) => {
+  await configureScenario(request, "valid");
+  const cors = { "access-control-allow-origin": "*" };
+  const sentAddresses: unknown[] = [];
+  const shippingRequests: unknown[] = [];
+  await page.route("**/store/shipping-options?**", (route) => route.fulfill({
+    headers: cors,
+    json: { shipping_options: [
+      { id: "so_post", name: "Почта России", type: { code: "pochta-parcel" }, amount: 0 },
+      { id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: 0 },
+    ] },
+  }));
+  await page.route("**/store/pochta/postoffices?**", (route) => {
+    const index = new URL(route.request().url()).searchParams.get("postal_code");
+    const office = index === "101000"
+      ? { postal_code: "101000", address_source: "Москва, Мясницкая, 1" }
+      : { postal_code: "190000", address_source: "Санкт-Петербург, Невский, 1" };
+    return route.fulfill({ headers: cors, json: { offices: [office] } });
+  });
+  await page.route("**/store/carts/cart_baseline", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON();
+      if (body?.shipping_address) sentAddresses.push(body.shipping_address);
+    }
+    await route.continue();
+  });
+  await page.route("**/store/carts/cart_baseline/shipping-methods", async (route) => {
+    shippingRequests.push(route.request().postDataJSON());
+    await route.continue();
+  });
+  await page.route(BANK_PAYMENT_URL, (route) => route.fulfill({
+    contentType: "text/html", body: "<main><h1>Bank payment boundary</h1></main>",
+  }));
+  await openCheckout(page);
+  await expect(page.getByRole("tab", { name: /Почта РФ/ })).toHaveAttribute("aria-selected", "true");
+  const zip = page.locator('input[name="zip"]').last();
+  const city = page.locator('input[name="city"]').last();
+  await zip.fill("101000");
+  await expect(page.getByText("ОПС 101000", { exact: false })).toBeVisible();
+  await submitCheckout(page);
+  await expect(page.getByText("Выберите почтовое отделение связи")).toBeVisible();
+  expect(sentAddresses).toHaveLength(0);
+  await page.getByText("ОПС 101000", { exact: false }).click();
+  await city.fill("Москва");
+  await expect(page.getByText("Выбранное отделение Почты России:")).toBeVisible();
+
+  await zip.fill("190000");
+  await expect(page.getByText("Выбранное отделение Почты России:")).toHaveCount(0);
+  await expect(page.getByText("ОПС 190000", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Подтвердить заказ" }).click();
+  await expect(page.getByText("Выберите почтовое отделение связи")).toBeVisible();
+  expect(sentAddresses).toHaveLength(0);
+  await page.getByText("ОПС 190000", { exact: false }).click();
+  await page.getByRole("button", { name: "Подтвердить заказ" }).click();
+  await expect(page.getByText("Укажите город выбранного отделения")).toBeVisible();
+  await city.fill("Санкт-Петербург");
+  await page.getByRole("button", { name: "Подтвердить заказ" }).click();
+  await expect(page).toHaveURL(BANK_PAYMENT_URL);
+  expect(sentAddresses).toEqual([expect.objectContaining({
+    city: "Санкт-Петербург", address_1: "Санкт-Петербург, Невский, 1", postal_code: "190000",
+  })]);
+  expect(shippingRequests).toEqual([{ option_id: "so_post", data: {
+    postal_code: "190000", post_office_address: "Санкт-Петербург, Невский, 1",
+  } }]);
+});
