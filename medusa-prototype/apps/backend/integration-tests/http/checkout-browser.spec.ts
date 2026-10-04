@@ -108,10 +108,10 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
         });
         await createShippingOptionsWorkflow(container).run({
           input: [{
-            name: "Тестовая доставка", price_type: "flat", provider_id: "manual_manual",
+            name: "Тестовый самовывоз", price_type: "flat", provider_id: "manual_manual",
             service_zone_id: fulfillmentSet.service_zones[0].id,
             shipping_profile_id: profile.id,
-            type: { label: "Тестовая доставка", description: "Только изолированная БД", code: "browser-fixture" },
+            type: { label: "Самовывоз", description: "Только изолированная БД", code: "pickup-store" },
             prices: [{ currency_code: "rub", amount: 0 }],
             rules: [
               { attribute: "enabled_in_store", value: "true", operator: "eq" },
@@ -172,14 +172,11 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
           }, cartId);
           await page.goto(`${SITE_URL}/checkout`);
           await expectBrowser(page.getByRole("heading", { name: "Оформление заказа" })).toBeVisible();
-          await expectBrowser(page.locator('input[name="shippingOption"]')).toBeChecked({ timeout: 20_000 });
+          await expectBrowser(page.getByRole("tab", { name: /Самовывоз/ })).toHaveAttribute("aria-selected", "true", { timeout: 20_000 });
           await page.locator('input[name="firstName"]').fill("Тест");
           await page.locator('input[name="lastName"]').fill("Покупатель");
           await page.locator('input[name="email"]').fill("browser-checkout@example.test");
           await page.locator('input[name="phone"]').fill("+79991234567");
-          await page.locator('input[name="city"]').fill("Москва");
-          await page.locator('input[name="zip"]').fill("101000");
-          await page.locator('input[name="address"]').fill("Тестовая, 1");
           await page.locator('input[type="checkbox"]').check();
           await page.getByRole("button", { name: "Подтвердить заказ" }).click();
           await expectBrowser(page).toHaveURL(BANK_URL, { timeout: 30_000 });
