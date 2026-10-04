@@ -212,7 +212,8 @@ Read-only инвентаризация после восстановления �
 4. Production checkout оставить выключенным. Preview PR #19 закрыт Vercel
    Authentication: без авторизованного доступа действующие Preview-переменные
    не просмотрены. Перед отдельным браузерным DEMO-прогоном проверить в Vercel
-   Preview (не Production) `NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID`,
-   backend URL, publishable key и регион, а также Store/Auth CORS для домена
-   Preview. Публичное включение оплаты, реальные Telegram/SMTP и чеки АТОЛ
-   требуют отдельных проверок и решения о запуске.
+   настройки Vercel Preview **только для защищённой Git-ветки**, а не для всех
+   Preview: `NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID`, backend URL, publishable
+   key и регион. Сверить Store/Auth CORS для домена этой ветки и пересобрать
+   Preview после правки `NEXT_PUBLIC_*`. Публичное включение оплаты, реальные
+   Telegram/SMTP и чеки АТОЛ требуют отдельных проверок и решения о запуске.
