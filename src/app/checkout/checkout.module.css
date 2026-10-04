@@ -673,7 +673,13 @@ textarea.formInput {
   margin-bottom: 20px;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
+  .deliveryTabs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
   .deliveryTabs {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -894,6 +900,18 @@ textarea.formInput {
   background-color: #f3e5f5;
   color: #7b1fa2;
   border-color: #e1bee7;
+}
+
+.pvzBadgeYandex {
+  background-color: #fff9c4;
+  color: #e65100;
+  border-color: #ffe082;
+}
+
+.pvzBadgeFitting {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border-color: #c8e6c9;
 }
 
 .pvzMeta {

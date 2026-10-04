@@ -43,6 +43,9 @@ function client(products = [fixture()]) {
     },
     fetch: async (url, options) => {
       requests.push({ url: new URL(url), options });
+      if (new URL(url).pathname.endsWith('/shipping-methods')) {
+        return { ok: true, json: async () => ({ cart: { id: 'cart_1' } }) };
+      }
       return { ok: true, json: async () => ({ products: state.products, count: state.products.length }) };
     },
   });
@@ -125,6 +128,26 @@ test('collection and category filters are both sent to Medusa', async () => {
   assert.equal(requests[0].url.searchParams.get('collection_id[]'), 'pcol_1');
   assert.equal(requests[0].url.searchParams.get('category_id[]'), 'pcat_1');
   assert.equal(requests[0].url.searchParams.get('offset'), '24');
+});
+
+test('shipping method request carries provider fulfillment data without a client price', async () => {
+  const { api, requests } = client();
+  await api.addMedusaCartShippingMethod('cart_1', 'so_cdek_pvz', {
+    city_code: 44,
+    cdek_pvz_code: 'MSK65',
+    cdek_pvz_address: 'ул. Динамовская, 1А',
+  });
+
+  const body = JSON.parse(requests[0].options.body);
+  assert.deepEqual(body, {
+    option_id: 'so_cdek_pvz',
+    data: {
+      city_code: 44,
+      cdek_pvz_code: 'MSK65',
+      cdek_pvz_address: 'ул. Динамовская, 1А',
+    },
+  });
+  assert.equal('amount' in body, false);
 });
 
 test('only the Pages export declares static product parameters', async () => {

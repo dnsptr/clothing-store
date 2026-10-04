@@ -1051,10 +1051,14 @@ export async function listMedusaShippingOptions(cartId: string) {
   return response.shipping_options || [];
 }
 
-export async function addMedusaCartShippingMethod(cartId: string, optionId: string) {
+export async function addMedusaCartShippingMethod(
+  cartId: string,
+  optionId: string,
+  data: Readonly<Record<string, unknown>>,
+) {
   const response = await medusaRequest(`/store/carts/${cartId}/shipping-methods`, {
     method: "POST",
-    body: { option_id: optionId },
+    body: { option_id: optionId, data },
     parse: parseCartResponse,
   });
   return response.cart;

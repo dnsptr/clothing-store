@@ -34,94 +34,90 @@ export interface PickupStore {
   phone: string;
 }
 
-export interface CdekDeliveryEstimate {
-  deliverySum: number;
-  periodMin: number;
-  periodMax: number;
-  customerCost: number; // 0 on launch stage
-  deliveryDateMin?: string;
-  deliveryDateMax?: string;
+export class CdekDeliveryUnavailableError extends Error {
+  readonly name = "CdekDeliveryUnavailableError";
+
+  constructor() {
+    super("CDEK delivery unavailable");
+  }
 }
 
-// ── Fallback mock data for development, tests, and mock mode ───────────────
+function unavailable(): never {
+  throw new CdekDeliveryUnavailableError();
+}
 
-export const MOCK_CDEK_CITIES: CdekCity[] = [
-  { code: 44, city: "Москва", region: "Москва" },
-  { code: 137, city: "Санкт-Петербург", region: "Санкт-Петербург" },
-  { code: 270, city: "Новосибирск", region: "Новосибирская область" },
-  { code: 272, city: "Екатеринбург", region: "Свердловская область" },
-  { code: 410, city: "Казань", region: "Республика Татарстан" },
-  { code: 273, city: "Нижний Новгород", region: "Нижегородская область" },
-  { code: 276, city: "Самара", region: "Самарская область" },
-  { code: 274, city: "Ростов-на-Дону", region: "Ростовская область" },
-  { code: 275, city: "Краснодар", region: "Краснодарский край" },
-  { code: 277, city: "Воронеж", region: "Воронежская область" },
-  { code: 290, city: "Сочи", region: "Краснодарский край" },
-  { code: 284, city: "Уфа", region: "Республика Башкортостан" },
-  { code: 283, city: "Тюмень", region: "Тюменская область" },
-  { code: 298, city: "Владивосток", region: "Приморский край" },
-];
+function record(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return Object.fromEntries(Object.entries(value));
+}
 
-export const MOCK_MOSCOW_PVZ: CdekDeliveryPoint[] = [
-  {
-    code: "MSK65",
-    name: "ПВЗ Динамовская",
-    type: "PVZ",
+function requiredString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function requiredPositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseCity(value: unknown): CdekCity {
+  const city = record(value);
+  const code = city && requiredPositiveInteger(city.code);
+  const name = city && requiredString(city.city);
+  if (code === null || !name) unavailable();
+  const region = optionalString(city.region);
+  const subRegion = optionalString(city.sub_region);
+  return { code, city: name, ...(region ? { region } : {}), ...(subRegion ? { sub_region: subRegion } : {}) };
+}
+
+function parseDeliveryPoint(value: unknown): CdekDeliveryPoint {
+  const point = record(value);
+  const location = point && record(point.location);
+  const code = point && requiredString(point.code);
+  const name = point && requiredString(point.name);
+  const type = point?.type;
+  const address = location && requiredString(location.address);
+  const cityCode = location && requiredPositiveInteger(location.city_code);
+  const city = location && requiredString(location.city);
+  const workTime = point && requiredString(point.work_time);
+  if (!code || !name || (type !== "PVZ" && type !== "POSTAMAT") || !address || cityCode === null || !city || !workTime) unavailable();
+
+  const addressFull = optionalString(location.address_full);
+  const latitude = optionalFiniteNumber(location.latitude);
+  const longitude = optionalFiniteNumber(location.longitude);
+  const note = optionalString(point.note);
+  const nearestMetroStation = optionalString(point.nearest_metro_station);
+  return {
+    code,
+    name,
+    type,
     location: {
-      address: "ул. Динамовская, д. 1А",
-      city_code: 44,
-      city: "Москва",
-      latitude: 55.7314,
-      longitude: 37.6621,
+      address,
+      city_code: cityCode,
+      city,
+      ...(addressFull ? { address_full: addressFull } : {}),
+      ...(latitude === undefined ? {} : { latitude }),
+      ...(longitude === undefined ? {} : { longitude }),
     },
-    work_time: "Пн-Пт 10:00-21:00, Сб-Вс 10:00-19:00",
-    nearest_metro_station: "Пролетарская",
-    note: "Вход с торца здания",
-  },
-  {
-    code: "MSK12",
-    name: "ПВЗ Тверская",
-    type: "PVZ",
-    location: {
-      address: "ул. Тверская, д. 12, стр. 2",
-      city_code: 44,
-      city: "Москва",
-      latitude: 55.7645,
-      longitude: 37.6062,
-    },
-    work_time: "Пн-Вс 10:00-22:00",
-    nearest_metro_station: "Пушкинская",
-    note: "1 этаж, рядом с аптекой",
-  },
-  {
-    code: "MSK88",
-    name: "ПВЗ Ленинский",
-    type: "PVZ",
-    location: {
-      address: "Ленинский пр-кт, д. 72",
-      city_code: 44,
-      city: "Москва",
-      latitude: 55.6923,
-      longitude: 37.5411,
-    },
-    work_time: "Пн-Вс 10:00-20:00",
-    nearest_metro_station: "Университет",
-  },
-  {
-    code: "MSK104",
-    name: "Постамат Кутузовский",
-    type: "POSTAMAT",
-    location: {
-      address: "Кутузовский пр-кт, д. 26",
-      city_code: 44,
-      city: "Москва",
-      latitude: 55.7441,
-      longitude: 37.5458,
-    },
-    work_time: "Круглосуточно 24/7",
-    nearest_metro_station: "Кутузовская",
-  },
-];
+    work_time: workTime,
+    ...(note ? { note } : {}),
+    ...(nearestMetroStation ? { nearest_metro_station: nearestMetroStation } : {}),
+  };
+}
+
+function parseResponseList<T>(payload: unknown, property: string, parseItem: (value: unknown) => T): T[] {
+  const response = record(payload);
+  const values = response?.[property];
+  if (!Array.isArray(values)) unavailable();
+  return values.map(parseItem);
+}
 
 export const MARIO_MIKKE_PICKUP_STORES: PickupStore[] = [
   {
@@ -153,83 +149,39 @@ export const MARIO_MIKKE_PICKUP_STORES: PickupStore[] = [
 // ── Storefront API Client functions ──────────────────────────────────────────
 
 /**
- * Searches cities using CDEK API with instant mock fallback.
+ * Searches cities from the Medusa CDEK endpoint.
  */
 export async function searchCdekCities(query: string): Promise<CdekCity[]> {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return [];
-
-  if (isMedusaConfigured) {
-    try {
-      const data = await medusaRequest<{ cities?: CdekCity[] }>(
-        `/store/cdek/cities?query=${encodeURIComponent(trimmed)}`,
-        { revalidate: 3600 },
-      );
-      if (Array.isArray(data.cities) && data.cities.length > 0) {
-        return data.cities;
-      }
-    } catch {
-      // Fallback to offline search on network glitch
-    }
+  if (!isMedusaConfigured) unavailable();
+  try {
+    const data = await medusaRequest<unknown>(
+      `/store/cdek/cities?query=${encodeURIComponent(trimmed)}`,
+      { revalidate: 3600 },
+    );
+    return parseResponseList(data, "cities", parseCity);
+  } catch (error) {
+    if (error instanceof CdekDeliveryUnavailableError) throw error;
+    unavailable();
   }
-
-  return MOCK_CDEK_CITIES.filter(
-    (c) =>
-      c.city.toLowerCase().includes(trimmed) ||
-      (c.region && c.region.toLowerCase().includes(trimmed)),
-  );
 }
 
 /**
  * Gets list of delivery points (PVZ, Postamats) for a city code.
  */
 export async function fetchCdekDeliveryPoints(cityCode: number): Promise<CdekDeliveryPoint[]> {
-  if (!cityCode) return [];
-
-  if (isMedusaConfigured) {
-    try {
-      const data = await medusaRequest<{ pvz?: CdekDeliveryPoint[] }>(
-        `/store/cdek/pvz?city_code=${cityCode}`,
-        { revalidate: 3600 },
-      );
-      if (Array.isArray(data.pvz) && data.pvz.length > 0) {
-        return data.pvz;
-      }
-    } catch {
-      // Fallback to mock PVZ on network glitch
-    }
+  if (!Number.isInteger(cityCode) || cityCode <= 0 || !isMedusaConfigured) unavailable();
+  try {
+    const data = await medusaRequest<unknown>(
+      `/store/cdek/pvz?city_code=${cityCode}`,
+      { revalidate: 3600 },
+    );
+    return parseResponseList(data, "pvz", parseDeliveryPoint);
+  } catch (error) {
+    if (error instanceof CdekDeliveryUnavailableError) throw error;
+    unavailable();
   }
-
-  // If Moscow or any city in mock mode, return mock PVZ
-  if (cityCode === 44 || cityCode <= 0) {
-    return MOCK_MOSCOW_PVZ;
-  }
-
-  return [
-    {
-      code: `PVZ-${cityCode}-1`,
-      name: "Центральный пункт выдачи СДЭК",
-      type: "PVZ",
-      location: {
-        address: "ул. Ленина, д. 10",
-        city_code: cityCode,
-        city: "Город доставки",
-      },
-      work_time: "Пн-Вс 10:00-20:00",
-      note: "Центральный офис",
-    },
-    {
-      code: `PVZ-${cityCode}-2`,
-      name: "Пункт выдачи СДЭК",
-      type: "PVZ",
-      location: {
-        address: "пр-кт Мира, д. 25",
-        city_code: cityCode,
-        city: "Город доставки",
-      },
-      work_time: "Пн-Сб 10:00-19:00",
-    },
-  ];
 }
 
 /**
@@ -237,47 +189,4 @@ export async function fetchCdekDeliveryPoints(cityCode: number): Promise<CdekDel
  */
 export function getPickupStores(): PickupStore[] {
   return MARIO_MIKKE_PICKUP_STORES;
-}
-
-/**
- * Estimates delivery tariff and timeframe for a city code.
- */
-export async function estimateCdekDelivery(
-  cityCode: number,
-  mode: "pvz" | "courier",
-): Promise<CdekDeliveryEstimate> {
-  const isMoscow = cityCode === 44;
-
-  if (isMedusaConfigured) {
-    try {
-      const data = await medusaRequest<{
-        pvz?: { delivery_sum: number; period_min: number; period_max: number };
-        courier?: { delivery_sum: number; period_min: number; period_max: number };
-        customer_cost?: number;
-      }>("/store/cdek/calculate", {
-        method: "POST",
-        body: { to_city_code: cityCode },
-      });
-
-      const selected = mode === "courier" ? data.courier : data.pvz;
-      if (selected) {
-        return {
-          deliverySum: selected.delivery_sum,
-          periodMin: selected.period_min,
-          periodMax: selected.period_max,
-          customerCost: 0, // Free promo on launch
-        };
-      }
-    } catch {
-      // Fallback to estimated days
-    }
-  }
-
-  // Realistic delivery timelines
-  return {
-    deliverySum: mode === "courier" ? 350 : 200,
-    periodMin: isMoscow ? 1 : 2,
-    periodMax: isMoscow ? 2 : 4,
-    customerCost: 0,
-  };
 }
