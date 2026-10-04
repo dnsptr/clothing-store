@@ -297,7 +297,7 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       return;
     }
     if (requestUrl.pathname === "/store/shipping-options") {
-      sendJson(response, 200, { shipping_options: [{ id: "shipping_baseline", name: "Fixture delivery", amount: 0 }] });
+      sendJson(response, 200, { shipping_options: [{ id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: 0 }] });
       return;
     }
     if (requestUrl.pathname.startsWith("/store/carts/") && requestUrl.pathname.endsWith("/shipping-methods")) {
