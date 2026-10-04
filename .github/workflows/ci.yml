@@ -247,6 +247,8 @@ jobs:
           YANDEX_DELIVERY_ENABLED: "false"
           POCHTA_ENABLED: "false"
           OWN_COURIER_ENABLED: "false"
+      - name: Run browser delivery checkout against offline Store API
+        run: npx playwright test e2e/payment-baseline.spec.ts
       - name: Upload browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
