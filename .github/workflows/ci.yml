@@ -160,6 +160,15 @@ jobs:
           ADMIN_CORS: http://localhost:9000
           AUTH_CORS: http://localhost:3000,http://localhost:9000
 
+      - name: Run offline bank checkout against PostgreSQL
+        run: npm run test:checkout:offline
+        working-directory: medusa-prototype/apps/backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+
       # Run the payment recovery lease and projection tests against PostgreSQL,
       # not as silently skipped unit suites without TBANK_INBOX_TEST_DATABASE_URL.
       - name: Run TBank payment recovery integration tests
