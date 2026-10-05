@@ -1,7 +1,7 @@
 import { MedusaError } from "@medusajs/framework/utils";
 
 import { buildReceipt, receiptAmount, type ReceiptCart, type TBankReceipt } from "./receipt";
-import { ReceiptSnapshotCodec } from "./receipt-snapshot";
+import { ReceiptSnapshotCodec, type ReceiptCartLine } from "./receipt-snapshot";
 
 export type ReceiptQuery = {
   graph<TData>(input: {
@@ -59,6 +59,30 @@ const CART_FIELDS = [
   "items.adjustments.amount",
   "items.adjustments.is_tax_inclusive",
 ] as const;
+
+function sameFiscalReceipt(left: TBankReceipt, right: TBankReceipt): boolean {
+  return left.Email === right.Email &&
+    left.Phone === right.Phone &&
+    left.Taxation === right.Taxation &&
+    left.Items.length === right.Items.length &&
+    left.Items.every((item, index) => {
+      const current = right.Items[index];
+      return current !== undefined &&
+        item.Name === current.Name &&
+        item.Price === current.Price &&
+        item.Quantity === current.Quantity &&
+        item.Amount === current.Amount &&
+        item.Tax === current.Tax &&
+        item.PaymentMethod === current.PaymentMethod &&
+        item.PaymentObject === current.PaymentObject &&
+        item.MeasurementUnit === current.MeasurementUnit;
+    });
+}
+
+function sameCartLines(left: readonly ReceiptCartLine[], right: readonly ReceiptCartLine[]): boolean {
+  return left.length === right.length && left.every((line, index) =>
+    line.id === right[index]?.id && line.quantity === right[index]?.quantity);
+}
 
 export class TBankReceiptSource {
   private readonly snapshotCodec: ReceiptSnapshotCodec;
@@ -118,6 +142,17 @@ export class TBankReceiptSource {
     return cartId;
   }
 
+  signedReceiptAmount(envelope: string, sessionId: string, cartId: string): number {
+    const snapshot = this.snapshotCodec.open(envelope);
+    if (snapshot.payload.sessionId !== sessionId || snapshot.payload.cartId !== cartId) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "tbank: сохранённый чек относится к другой сессии или корзине",
+      );
+    }
+    return receiptAmount(snapshot.payload.receipt);
+  }
+
   async resolve(request: ReceiptRequest): Promise<ReceiptResolution> {
     const cartId = await this.cartIdForSession(request.sessionId);
     if (request.existingSnapshotEnvelope) {
@@ -134,6 +169,14 @@ export class TBankReceiptSource {
           "tbank: сумма сохранённого чека не совпадает с суммой платежа",
         );
       }
+      const current = await this.receiptForCart(cartId, request.paymentAmountKopecks);
+      if (!sameFiscalReceipt(snapshot.payload.receipt, current.receipt) ||
+        !sameCartLines(snapshot.payload.cartLines, current.cartLines)) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "tbank: фискальный состав корзины изменился после сохранения чека",
+        );
+      }
       return {
         cartId,
         receipt: snapshot.payload.receipt,
@@ -141,6 +184,18 @@ export class TBankReceiptSource {
       };
     }
 
+    const { receipt, cartLines } = await this.receiptForCart(cartId, request.paymentAmountKopecks);
+    return {
+      cartId,
+      receipt,
+      snapshotEnvelope: this.snapshotCodec.seal({ sessionId: request.sessionId, cartId, cartLines, receipt }),
+    };
+  }
+
+  private async receiptForCart(
+    cartId: string,
+    paymentAmountKopecks: number,
+  ): Promise<{ receipt: TBankReceipt; cartLines: ReceiptCartLine[] }> {
     const carts = await this.query.graph<ReceiptCart>({
       entity: "cart",
       fields: CART_FIELDS,
@@ -155,11 +210,10 @@ export class TBankReceiptSource {
     }
     const cart = matchingCarts[0];
     if (!cart) throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: корзина не найдена");
-    const receipt = buildReceipt(cart, request.paymentAmountKopecks);
-    return {
-      cartId,
-      receipt,
-      snapshotEnvelope: this.snapshotCodec.seal({ sessionId: request.sessionId, cartId, receipt }),
-    };
+    const receipt = buildReceipt(cart, paymentAmountKopecks);
+    const cartLines = (cart.items ?? [])
+      .map(({ id, quantity }) => ({ id, quantity }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    return { receipt, cartLines };
   }
 }
