@@ -1637,11 +1637,12 @@ export default function CheckoutClient() {
                     <label className={styles.formLabel}>Город / населённый пункт *</label>
                     <input
                       name="city"
-                      className={styles.formInput}
+                      className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
                       placeholder="Москва"
                       value={form.city}
                       onChange={handleChange}
                     />
+                    {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
                   </div>
                 </div>
 
