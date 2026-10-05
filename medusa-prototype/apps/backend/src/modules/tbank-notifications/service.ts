@@ -6,6 +6,7 @@ import { INBOX_LEASE_MS, MAX_INBOX_ATTEMPTS } from "./lifecycle";
 import TbankPaymentAttempt from "./models/tbank-payment-attempt";
 import TbankNotification from "./models/tbank-notification";
 import TbankNotificationConflict from "./models/tbank-notification-conflict";
+import TbankFiscalNotification from "./models/tbank-fiscal-notification";
 
 const POLL_LEASE_MS = 5 * 60_000;
 const MAX_POLL_ERRORS = 5;
@@ -56,6 +57,7 @@ class TbankNotificationModuleService extends MedusaService({
   TbankPaymentAttempt,
   TbankNotification,
   TbankNotificationConflict,
+  TbankFiscalNotification,
 }) {
   @InjectManager()
   async claimDuePaymentAttempts(

@@ -8,6 +8,7 @@ import {
   correlateNotification,
   toAuthenticatedNotification,
 } from "../../../../modules/tbank-notifications/lifecycle";
+import { auditFiscalNotification, requiresFiscalAudit } from "../../../../modules/tbank-notifications/fiscal";
 import type { TbankNotificationStore } from "../../../../modules/tbank-notifications/lifecycle";
 import { parseTbankEnvironment, TBankConfigurationError } from "../../../../modules/tbank/config";
 import { verifyNotificationToken } from "../../../../modules/tbank/lib/token";
@@ -63,6 +64,22 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   if (!bodyResult.success || !verifyNotificationToken(bodyResult.data, configuration.options.password)) {
     logger.warn("tbank webhook: invalid signature");
     res.status(401).send("invalid token");
+    return;
+  }
+
+  if (requiresFiscalAudit(bodyResult.data)) {
+    try {
+      await auditFiscalNotification(
+        bodyResult.data,
+        configuration.options.terminalKey,
+        req.scope.resolve(TBANK_NOTIFICATION_MODULE),
+        req.scope.resolve("payment"),
+      );
+      res.send(ACK_BODY);
+    } catch (error) {
+      logger.error(`tbank webhook: fiscal audit failed: ${error instanceof Error ? error.message : String(error)}`);
+      res.status(500).send("failed to record fiscal notification");
+    }
     return;
   }
 
