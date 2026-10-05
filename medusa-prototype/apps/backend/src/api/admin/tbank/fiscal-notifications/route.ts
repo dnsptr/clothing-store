@@ -12,7 +12,7 @@ type FiscalStore = {
   ): Promise<[readonly FiscalRow[], number]>;
 };
 
-// The standard Medusa /admin/* authentication is applied by the framework.
+// Authentication and pagination are registered for this route in src/api/middlewares.ts.
 export async function GET(
   req: MedusaRequest<unknown, ManualReviewListQuery>,
   res: MedusaResponse,
