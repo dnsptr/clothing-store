@@ -12,6 +12,8 @@ import { formatPrice } from "../../../lib/format";
 import { fetchMedusaProductByFrontendId, isMedusaConfigured } from "../../../lib/medusa";
 import styles from "./product.module.css";
 
+const NO_COLOR = { name: "", hex: "#808080" } as const;
+
 function BookmarkIcon({ active }: { active: boolean }) {
   return (
     <svg fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -189,12 +191,15 @@ function ProductView({ product }: { product: Product }) {
   const soleSize = sizes[0] ?? "";
   const requiresSizeChoice = sizes.length > 1;
 
-  const defaultColor =
-    colors.find((color) =>
-      product.variants.some(
-        (variant) => variant.available && variant.options.Цвет === color.name,
-      ),
-    ) ?? colors[0] ?? null;
+  // Cart items require a color field even when Medusa has no color variant axis.
+  // Match CartContext's neutral representation instead of blocking an available size.
+  const defaultColor = colorValues.length === 0
+    ? NO_COLOR
+    : colors.find((color) =>
+        product.variants.some(
+          (variant) => variant.available && variant.options.Цвет === color.name,
+        ),
+      ) ?? colors[0] ?? null;
   const [selectedColor, setSelectedColor] = useState(defaultColor);
   const [selectedSize, setSelectedSize] = useState(isSingleSize ? soleSize : "");
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
@@ -228,7 +233,7 @@ function ProductView({ product }: { product: Product }) {
       (variant) =>
         variant.available &&
         variant.options.Размер === size &&
-        (!selectedColor || variant.options.Цвет === selectedColor.name),
+        (colorValues.length === 0 || !selectedColor || variant.options.Цвет === selectedColor.name),
     );
 
   // FE-006 B4: the primary action is enabled only for a fully-selected, existing
@@ -337,35 +342,37 @@ function ProductView({ product }: { product: Product }) {
               <p className={styles.price}>{formatPrice(selectedVariant?.price ?? product.price)}</p>
             </div>
 
-            <section className={styles.optionSection} aria-labelledby="color-title">
-              <h2 className={styles.optionTitle} id="color-title">
-                Цвет: {selectedColor?.name}
-              </h2>
-              <div className={styles.colorList}>
-                {colors.map((color) => {
-                  const isDisabled = !isColorAvailable(color.name);
-                  const isSelected = !isDisabled && selectedColor?.name === color.name;
+            {colorValues.length > 0 && (
+              <section className={styles.optionSection} aria-labelledby="color-title">
+                <h2 className={styles.optionTitle} id="color-title">
+                  Цвет: {selectedColor?.name}
+                </h2>
+                <div className={styles.colorList}>
+                  {colors.map((color) => {
+                    const isDisabled = !isColorAvailable(color.name);
+                    const isSelected = !isDisabled && selectedColor?.name === color.name;
 
-                  return (
-                    <button
-                      type="button"
-                      key={color.name}
-                      className={`${styles.colorDot} ${isSelected ? styles.colorDotActive : ""} ${
-                        isDisabled ? styles.colorDotDisabled : ""
-                      }`}
-                      style={{ backgroundColor: color.hex }}
-                      onClick={() => {
-                        if (isDisabled) return;
-                        handleSelectColor(color);
-                      }}
-                      aria-label={`Выбрать цвет ${color.name}`}
-                      aria-pressed={isSelected}
-                      aria-disabled={isDisabled}
-                    />
-                  );
-                })}
-              </div>
-            </section>
+                    return (
+                      <button
+                        type="button"
+                        key={color.name}
+                        className={`${styles.colorDot} ${isSelected ? styles.colorDotActive : ""} ${
+                          isDisabled ? styles.colorDotDisabled : ""
+                        }`}
+                        style={{ backgroundColor: color.hex }}
+                        onClick={() => {
+                          if (isDisabled) return;
+                          handleSelectColor(color);
+                        }}
+                        aria-label={`Выбрать цвет ${color.name}`}
+                        aria-pressed={isSelected}
+                        aria-disabled={isDisabled}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             {sizes.length > 0 && (
               <section className={styles.optionSection} aria-labelledby="size-title">

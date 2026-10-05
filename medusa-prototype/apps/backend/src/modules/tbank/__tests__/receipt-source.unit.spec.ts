@@ -9,7 +9,7 @@ const receiptCart = {
   items: [{ id: "item_1", product_title: "Платье", quantity: 1, total: 100 }],
 };
 
-function receiptQuery() {
+function receiptQuery(cart: Readonly<Record<string, unknown>> = receiptCart) {
   return {
     graph: jest.fn().mockImplementation(async (request: {
       readonly entity: string;
@@ -31,7 +31,7 @@ function receiptQuery() {
           }],
         };
       }
-      return { data: [receiptCart] };
+      return { data: [cart] };
     }),
   };
 }
@@ -49,6 +49,25 @@ describe("TBankReceiptSource snapshot scope", () => {
 
     expect(retry.receipt).toEqual(first.receipt);
   });
+  it.each([
+    ["item name", { items: [{ id: "item_1", product_title: "Куртка", quantity: 1, total: 100 }] }],
+    ["quantity and price", { items: [{ id: "item_1", product_title: "Платье", quantity: 2, total: 100 }] }],
+    ["same-label different cart line", { items: [{ id: "item_2", product_title: "Платье", quantity: 1, total: 100 }] }],
+    ["recipient email", { email: "other@example.com" }],
+    ["recipient phone", { shipping_address: { phone: "+79991234567" } }],
+  ])("rejects a same-total changed %s despite a signed snapshot", async (_name, changes) => {
+    const source = new TBankReceiptSource(receiptQuery() as never, SNAPSHOT_SECRET);
+    const first = await source.resolve({ sessionId: "session_a", paymentAmountKopecks: 10_000 });
+    const retrySource = new TBankReceiptSource(
+      receiptQuery({ ...receiptCart, ...changes }) as never, SNAPSHOT_SECRET,
+    );
+    await expect(retrySource.resolve({
+      sessionId: "session_a",
+      existingSnapshotEnvelope: first.snapshotEnvelope,
+      paymentAmountKopecks: 10_000,
+    })).rejects.toThrow(/фискальный состав/);
+  });
+
 
   it("rejects a trusted snapshot replayed into another payment session", async () => {
     const source = new TBankReceiptSource(receiptQuery() as never, SNAPSHOT_SECRET);
