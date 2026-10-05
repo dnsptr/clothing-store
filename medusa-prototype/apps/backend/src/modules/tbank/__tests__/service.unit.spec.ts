@@ -63,6 +63,7 @@ function signedFiscalData() {
     receiptSnapshotEnvelope: new ReceiptSnapshotCodec(OPTIONS.receiptSnapshotSecret).seal({
       sessionId: SESSION_ID,
       cartId: CART_ID,
+      cartLines: [{ id: "item_1", quantity: 2 }],
       receipt: buildReceipt(authoritativeCart(), 1_899_000),
     }),
   };
