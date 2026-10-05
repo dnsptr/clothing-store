@@ -163,7 +163,7 @@ describe("подписчик на новый заказ", () => {
     await handler(makeArgs(container));
 
     const staff = notificationFor(notificationService.createNotifications, "telegram");
-    expect(staff?.content?.text).toContain("Магазин самовывоза: ТЦ «Говорово» — г. Москва, 47-й км МКАД, стр. 1");
+    expect(staff?.content?.text).toContain("Магазин самовывоза: ТЦ «Говорово» — г. Москва, 47-й км МКАД, вл. 31, стр. 1");
     const customer = notificationFor(notificationService.createNotifications, "email");
     expect(customer?.content?.text).not.toContain("готов к выдаче");
   });
