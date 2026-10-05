@@ -71,14 +71,14 @@ async function observations(request: APIRequestContext): Promise<ObservationResp
   return { observations: parsed };
 }
 
-async function openCheckout(page: Page): Promise<void> {
+async function openCheckout(page: Page, expectedDelivery: RegExp = /Самовывоз/): Promise<void> {
   await page.addInitScript((cartItem) => {
     window.localStorage.setItem("clothing-store-cart-medusa", JSON.stringify([cartItem]));
     window.localStorage.setItem("clothing-store-medusa-cart", "cart_baseline");
   }, CART_ITEM);
   await page.goto(`${APP_URL}/checkout`);
   await expect(page.locator('input[name="firstName"]')).toBeVisible();
-  await expect(page.getByRole("tab", { name: /Самовывоз/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: expectedDelivery })).toHaveAttribute("aria-selected", "true");
 }
 
 async function submitCheckout(page: Page): Promise<void> {
@@ -445,8 +445,7 @@ test("CDEK checkout requires an explicit pickup point and ignores an older city 
   await page.route(BANK_PAYMENT_URL, (route) => route.fulfill({
     contentType: "text/html", body: "<main><h1>Bank payment boundary</h1></main>",
   }));
-  await openCheckout(page);
-  await expect(page.getByRole("tab", { name: /СДЭК ПВЗ/ })).toHaveAttribute("aria-selected", "true");
+  await openCheckout(page, /СДЭК ПВЗ/);
   await expect(page.getByText("Москва, Арбат, 1")).toBeVisible();
   await submitCheckout(page);
   await expect(page.getByText("Выберите пункт выдачи СДЭК")).toBeVisible();
@@ -507,8 +506,7 @@ test("Russian Post checkout discards an old office when the index changes and re
   await page.route(BANK_PAYMENT_URL, (route) => route.fulfill({
     contentType: "text/html", body: "<main><h1>Bank payment boundary</h1></main>",
   }));
-  await openCheckout(page);
-  await expect(page.getByRole("tab", { name: /Почта РФ/ })).toHaveAttribute("aria-selected", "true");
+  await openCheckout(page, /Почта РФ/);
   const zip = page.locator('input[name="zip"]').last();
   const city = page.locator('input[name="city"]').last();
   await zip.fill("101000");
