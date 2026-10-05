@@ -1,4 +1,4 @@
-import { CUSTOMER_CATALOG, customerVariantSku, parseCustomerColors } from "../customer-catalog"
+import { CUSTOMER_CATALOG, customerVariantSku, indexStableCustomerVariants, parseCustomerColors } from "../customer-catalog"
 
 describe("customer catalog source", () => {
   it("contains one unique row for every customer article", () => {
@@ -17,9 +17,31 @@ describe("customer catalog source", () => {
     expect(parseCustomerColors("хаки. Черный, хаки")).toEqual(["хаки", "Черный"])
     expect(parseCustomerColors(undefined)).toEqual([])
   })
-  it("creates stable unique temporary variant SKUs", () => {
+  it("creates unique temporary variant SKUs for the current source", () => {
     const skus = CUSTOMER_CATALOG.flatMap(row => parseCustomerColors(row.colors).map((_, index) => customerVariantSku(row.article, index)))
     expect(new Set(skus).size).toBe(skus.length)
     expect(customerVariantSku("1453-1", 0)).toBe("MM-1453-1-OS-01")
+  })
+  it("does not reuse an existing SKU for a different color when the sheet is reordered or prefixed", () => {
+    const existing = [
+      { id: "variant_white", sku: customerVariantSku("1453-1", 0), title: "ONE SIZE / белый" },
+      { id: "variant_black", sku: customerVariantSku("1453-1", 1), title: "ONE SIZE / черный" },
+    ]
+    for (const colors of ["черный, белый", "бежевый, белый, черный"]) {
+      const desired = parseCustomerColors(colors).map((color, index) => ({
+        sku: customerVariantSku("1453-1", index), title: `ONE SIZE / ${color}`,
+      }))
+      expect(() => indexStableCustomerVariants("mario-mikke-1453-1", desired, existing))
+        .toThrow(/SKU MM-1453-1-OS-01.*Изменение соответствия SKU и цвета запрещено/)
+    }
+  })
+  it("preserves variant IDs for identical imports and permits new colors appended to the sheet", () => {
+    const existing = [{ id: "variant_white", sku: customerVariantSku("1453-1", 0), title: "ONE SIZE / белый" }]
+    const desired = parseCustomerColors("белый, черный").map((color, index) => ({
+      sku: customerVariantSku("1453-1", index), title: `ONE SIZE / ${color}`,
+    }))
+    const variantsBySku = indexStableCustomerVariants("mario-mikke-1453-1", desired, existing)
+    expect(variantsBySku.get(desired[0].sku)?.id).toBe("variant_white")
+    expect(variantsBySku.has(desired[1].sku)).toBe(false)
   })
 })

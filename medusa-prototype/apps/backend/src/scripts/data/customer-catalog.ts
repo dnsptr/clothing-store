@@ -56,3 +56,19 @@ export function parseCustomerColors(value?: string): string[] {
 export function customerVariantSku(article: string, colorIndex: number): string {
   return `MM-${article.toUpperCase()}-OS-${String(colorIndex + 1).padStart(2, "0")}`
 }
+
+export function indexStableCustomerVariants<T extends { sku?: string | null; title?: string | null }>(
+  handle: string,
+  desired: readonly { sku: string; title: string }[],
+  existing: readonly T[],
+): Map<string, T> {
+  const bySku = new Map<string, T>()
+  for (const variant of existing) if (variant.sku) bySku.set(variant.sku, variant)
+  for (const variant of desired) {
+    const current = bySku.get(variant.sku)
+    if (current && current.title !== variant.title) {
+      throw new Error(`${handle}: SKU ${variant.sku} принадлежит варианту "${current.title}", а в таблице "${variant.title}". Изменение соответствия SKU и цвета запрещено`)
+    }
+  }
+  return bySku
+}

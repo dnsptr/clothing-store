@@ -7,7 +7,7 @@ import {
   updateProductOptionsWorkflow,
   updateProductsWorkflow,
 } from "@medusajs/medusa/core-flows"
-import { CUSTOMER_CATALOG, CUSTOMER_CATALOG_SHARED, customerVariantSku, parseCustomerColors } from "./data/customer-catalog"
+import { CUSTOMER_CATALOG, CUSTOMER_CATALOG_SHARED, customerVariantSku, indexStableCustomerVariants, parseCustomerColors } from "./data/customer-catalog"
 
 const IMPORT_SOURCE = "mario-mikke-customer-sheet"
 const CATEGORY_DEFINITIONS = {
@@ -84,12 +84,16 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
 
   const { data: existingProducts } = await query.graph({
     entity: "product",
-    fields: ["id", "handle", "status", "metadata", "images.url", "options.id", "options.title", "options.values.value", "variants.id", "variants.sku"],
+    fields: ["id", "handle", "status", "metadata", "images.url", "options.id", "options.title", "options.values.value", "variants.id", "variants.sku", "variants.title"],
     filters: { handle: desired.map(product => product.handle) },
   })
   const existingByHandle = new Map(existingProducts.map(product => [product.handle, product]))
   const create = desired.filter(product => !existingByHandle.has(product.handle))
   const update = desired.filter(product => existingByHandle.has(product.handle))
+  const existingSkuIndices = new Map(update.map(product => {
+    const existing = existingByHandle.get(product.handle)!
+    return [product.handle, indexStableCustomerVariants(product.handle, product.variants, existing.variants ?? [])] as const
+  }))
 
   if (create.length) await createProductsWorkflow(container).run({ input: { products: create.map(product => ({
     title: `${product.row.name} ${product.row.article}`,
@@ -135,7 +139,7 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
     }
     if (!optionsReady) continue
 
-    const existingBySku = new Map((existing.variants ?? []).flatMap(variant => variant?.sku ? [[variant.sku, variant]] : []))
+    const existingBySku = existingSkuIndices.get(product.handle)!
     const variantsToCreate = product.variants.filter(variant => !existingBySku.has(variant.sku)).map(variant => ({ ...variant, product_id: existing.id }))
     const variantsToUpdate = product.variants.filter(variant => existingBySku.has(variant.sku)).map(variant => ({
       id: existingBySku.get(variant.sku)!.id,
