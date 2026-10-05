@@ -1,7 +1,7 @@
 import { MedusaError } from "@medusajs/framework/utils";
 
 import { buildReceipt, receiptAmount, type ReceiptCart, type TBankReceipt } from "./receipt";
-import { ReceiptSnapshotCodec } from "./receipt-snapshot";
+import { ReceiptSnapshotCodec, type ReceiptCartLine } from "./receipt-snapshot";
 
 export type ReceiptQuery = {
   graph<TData>(input: {
@@ -77,6 +77,11 @@ function sameFiscalReceipt(left: TBankReceipt, right: TBankReceipt): boolean {
         item.PaymentObject === current.PaymentObject &&
         item.MeasurementUnit === current.MeasurementUnit;
     });
+}
+
+function sameCartLines(left: readonly ReceiptCartLine[], right: readonly ReceiptCartLine[]): boolean {
+  return left.length === right.length && left.every((line, index) =>
+    line.id === right[index]?.id && line.quantity === right[index]?.quantity);
 }
 
 export class TBankReceiptSource {
@@ -165,7 +170,8 @@ export class TBankReceiptSource {
         );
       }
       const current = await this.receiptForCart(cartId, request.paymentAmountKopecks);
-      if (!sameFiscalReceipt(snapshot.payload.receipt, current)) {
+      if (!sameFiscalReceipt(snapshot.payload.receipt, current.receipt) ||
+        !sameCartLines(snapshot.payload.cartLines, current.cartLines)) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
           "tbank: фискальный состав корзины изменился после сохранения чека",
@@ -178,15 +184,18 @@ export class TBankReceiptSource {
       };
     }
 
-    const receipt = await this.receiptForCart(cartId, request.paymentAmountKopecks);
+    const { receipt, cartLines } = await this.receiptForCart(cartId, request.paymentAmountKopecks);
     return {
       cartId,
       receipt,
-      snapshotEnvelope: this.snapshotCodec.seal({ sessionId: request.sessionId, cartId, receipt }),
+      snapshotEnvelope: this.snapshotCodec.seal({ sessionId: request.sessionId, cartId, cartLines, receipt }),
     };
   }
 
-  private async receiptForCart(cartId: string, paymentAmountKopecks: number): Promise<TBankReceipt> {
+  private async receiptForCart(
+    cartId: string,
+    paymentAmountKopecks: number,
+  ): Promise<{ receipt: TBankReceipt; cartLines: ReceiptCartLine[] }> {
     const carts = await this.query.graph<ReceiptCart>({
       entity: "cart",
       fields: CART_FIELDS,
@@ -201,6 +210,10 @@ export class TBankReceiptSource {
     }
     const cart = matchingCarts[0];
     if (!cart) throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: корзина не найдена");
-    return buildReceipt(cart, paymentAmountKopecks);
+    const receipt = buildReceipt(cart, paymentAmountKopecks);
+    const cartLines = (cart.items ?? [])
+      .map(({ id, quantity }) => ({ id, quantity }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    return { receipt, cartLines };
   }
 }

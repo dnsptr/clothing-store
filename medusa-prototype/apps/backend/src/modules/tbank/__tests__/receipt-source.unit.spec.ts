@@ -52,6 +52,7 @@ describe("TBankReceiptSource snapshot scope", () => {
   it.each([
     ["item name", { items: [{ id: "item_1", product_title: "Куртка", quantity: 1, total: 100 }] }],
     ["quantity and price", { items: [{ id: "item_1", product_title: "Платье", quantity: 2, total: 100 }] }],
+    ["same-label different cart line", { items: [{ id: "item_2", product_title: "Платье", quantity: 1, total: 100 }] }],
     ["recipient email", { email: "other@example.com" }],
     ["recipient phone", { shipping_address: { phone: "+79991234567" } }],
   ])("rejects a same-total changed %s despite a signed snapshot", async (_name, changes) => {
