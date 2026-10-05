@@ -174,7 +174,7 @@ describe("CDEK Store API Routes", () => {
       expect(stores.length).toBe(3);
       expect(stores.map((s: any) => s.id)).toEqual(["store_vodny", "store_govorovo", "store_nebo"]);
       expect(stores.find((store: { id: string }) => store.id === "store_govorovo")?.address)
-        .toBe("г. Москва, 47-й км МКАД, стр. 1");
+        .toBe("г. Москва, 47-й км МКАД, вл. 31, стр. 1");
     });
   });
 
