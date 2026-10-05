@@ -148,6 +148,26 @@ describe("подписчик на новый заказ", () => {
     });
   });
 
+  it("delivers the selected pickup store to staff after the paid event without telling the buyer it is ready", async () => {
+    const pickupOrder = {
+      ...ORDER,
+      shipping_methods: [{
+        name: "Самовывоз из магазина",
+        data: { delivery_mode: "pickup-store", pickup_store_id: "store_govorovo" },
+      }],
+    };
+    const { notificationService, container } = makeContainer({
+      retrieveOrder: jest.fn().mockResolvedValue(pickupOrder),
+    });
+
+    await handler(makeArgs(container));
+
+    const staff = notificationFor(notificationService.createNotifications, "telegram");
+    expect(staff?.content?.text).toContain("Магазин самовывоза: ТЦ «Говорово» — г. Москва, 47-й км МКАД, стр. 1");
+    const customer = notificationFor(notificationService.createNotifications, "email");
+    expect(customer?.content?.text).not.toContain("готов к выдаче");
+  });
+
   it("кладёт в письмо и текст, и HTML", async () => {
     const { notificationService, container } = makeContainer();
 
