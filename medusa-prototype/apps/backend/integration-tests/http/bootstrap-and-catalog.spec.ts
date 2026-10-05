@@ -9,6 +9,8 @@ import { createShippingProfilesWorkflow } from "@medusajs/medusa/core-flows";
 
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import importMarioMikkeCatalog from "../../src/scripts/import-mario-mikke";
+import importCustomerCatalog from "../../src/scripts/import-customer-catalog";
+import { CUSTOMER_CATALOG, parseCustomerColors, type CustomerCatalogRow } from "../../src/scripts/data/customer-catalog";
 
 // Booting the full Medusa app (create DB -> migrate -> start) and running the
 // seed/import twice comfortably exceeds Jest's 5s default, so raise the per-file
@@ -91,6 +93,7 @@ const snapshotCatalog = async (
       "variants.sku",
       "variants.inventory_items.inventory_item_id",
     ],
+    pagination: { take: 250 },
   });
 
   const productIdByHandle: Record<string, string> = {};
@@ -265,6 +268,40 @@ medusaIntegrationTestRunner({
         );
         expect(sampleLevel?.stocked_quantity).toBe(SENTINEL_QUANTITY);
       });
+    });
+
+    describe("customer catalog upsert (21 customer drafts)", () => {
+      it("preserves Medusa identities across imports and rejects reassigned SKUs before writes", async () => {
+        const container = getContainer();
+        await seedInitialData({ container });
+        await ensureDefaultShippingProfile(container);
+
+        await importCustomerCatalog({ container });
+        const firstRun = await snapshotCatalog(container);
+        const expectedHandles = CUSTOMER_CATALOG.map((row) => `mario-mikke-${row.article.toLowerCase()}`).sort();
+        const expectedVariants = CUSTOMER_CATALOG.reduce(
+          (count, row) => count + parseCustomerColors(row.colors).length, 0
+        );
+        expect([...firstRun.handles].sort()).toEqual(expectedHandles);
+        expect(Object.keys(firstRun.variantIdBySku)).toHaveLength(expectedVariants);
+        expect(Object.keys(firstRun.inventoryItemIdBySku)).toHaveLength(expectedVariants);
+
+        await importCustomerCatalog({ container });
+        const secondRun = await snapshotCatalog(container);
+        expect(secondRun).toEqual(firstRun);
+
+        const row = CUSTOMER_CATALOG.find((item) => item.article === "1351") as CustomerCatalogRow;
+        const originalColors = row.colors;
+        const colors = parseCustomerColors(originalColors);
+        row.colors = [colors[1], colors[0], ...colors.slice(2)].join(", ");
+        try {
+          await expect(importCustomerCatalog({ container }))
+            .rejects.toThrow(/Изменение соответствия SKU и цвета запрещено/);
+          expect(await snapshotCatalog(container)).toEqual(secondRun);
+        } finally {
+          row.colors = originalColors;
+        }
+      }, 240000);
     });
 
     describe("Store API catalog smoke test", () => {
