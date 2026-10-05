@@ -7,7 +7,9 @@ import { ProductEditor } from "../../components/product-editor"
 import { normalizeSize } from "../../../lib/catalog-profile"
 
 const CatalogEditorPage = () => {
-  const [rows, setRows] = useState<{ id: string; title: string; status: string }[]>([])
+  const [rows, setRows] = useState<{ id: string; title: string; status: string; missing: string[]; noMeasurements: boolean }[]>([])
+  const [filter, setFilter] = useState("all")
+  const [loading, setLoading] = useState(false)
   const [q, setQ] = useState("")
   const [selected, setSelected] = useState("")
   const [name, setName] = useState("")
@@ -22,13 +24,14 @@ const CatalogEditorPage = () => {
   const [count, setCount] = useState(0)
   useEffect(() => {
     let active = true
+    setLoading(true); setRows([])
     const timer = window.setTimeout(() => {
-      sdk.admin.product.list({ q, limit: 20, offset, order: "-created_at" }).then((data) => {
+      sdk.client.fetch<{ products: typeof rows; count: number }>("/admin/catalog-quality", { query: { q, offset, filter } }).then((data) => {
         if (active) { setRows(data.products); setCount(data.count); setError("") }
-      }).catch(() => { if (active) setError("Не удалось загрузить товары") })
+      }).catch(() => { if (active) { setError("Не удалось загрузить товары"); setCount(0) } }).finally(() => { if (active) setLoading(false) })
     }, 250)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [q, offset, selected])
+  }, [q, offset, selected, filter])
   async function create() {
     const amount = Number(price.replace(",", "."))
     if (price && (!Number.isFinite(amount) || amount <= 0 || !/^\d+([.,]\d{1,2})?$/.test(price))) { toast.error("Цена должна быть положительной суммой в рублях"); return }
@@ -65,9 +68,13 @@ const CatalogEditorPage = () => {
         <div><Label htmlFor="new-product-size">Размер</Label><Input id="new-product-size" value={size} onChange={(e) => setSize(e.target.value)} /></div>
       </div><Button disabled={busy} onClick={() => void create()}>Создать черновик</Button>
       <Input aria-label="Поиск товаров" placeholder="Поиск товаров" value={q} onChange={(e) => { setQ(e.target.value); setOffset(0) }} />
+      <select aria-label="Заполнение карточек" className="bg-ui-bg-field border-ui-border-base rounded border p-2 text-sm" value={filter} onChange={e => { setFilter(e.target.value); setOffset(0) }}>
+        {[["all", "Все товары"], ["incomplete", "Не готовы к публикации"], ["noPhotos", "Без фотографий"], ["noPrice", "Без цены"], ["noComposition", "Без состава"], ["noMeasurements", "Без обмеров"]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select>
       {error && <p role="alert">{error}</p>}
-      <ul className="divide-y">{rows.map((product) => <li key={product.id} className="flex items-center justify-between gap-3 py-3"><button className="text-left underline" onClick={() => setSelected(product.id)}>{product.title}</button><span className="text-ui-fg-subtle text-sm">{product.status === "published" ? "Опубликован" : "Черновик"}</span></li>)}</ul>
-      <div className="flex items-center gap-3"><Button variant="secondary" disabled={!offset} onClick={() => setOffset(offset - 20)}>Назад</Button><span>{count ? `${offset + 1}–${Math.min(offset + 20, count)} из ${count}` : "Товаров нет"}</span><Button variant="secondary" disabled={offset + 20 >= count} onClick={() => setOffset(offset + 20)}>Далее</Button></div>
+      {loading && <p role="status">Загрузка...</p>}
+      <ul className="divide-y">{rows.map((product) => <li key={product.id} className="space-y-2 py-3"><div className="flex flex-wrap items-center justify-between gap-3"><button className="min-w-0 break-words text-left underline" onClick={() => setSelected(product.id)}>{product.title}</button><span className="text-ui-fg-subtle text-sm">{product.status === "published" ? "Опубликован" : "Черновик"}</span></div>{product.missing.length ? <details className="text-sm"><summary>Требует заполнения: {product.missing.length}</summary><ul className="list-disc pl-5">{product.missing.map(item => <li key={item}>{item}</li>)}</ul></details> : <p className="text-sm">Обязательные данные заполнены</p>}{product.noMeasurements && <p className="text-ui-fg-subtle text-sm">Обмеры не добавлены</p>}</li>)}</ul>
+      <div className="flex flex-wrap items-center gap-3"><Button variant="secondary" disabled={loading || !offset} onClick={() => setOffset(offset - 20)}>Назад</Button><span>{loading ? "Загрузка..." : count ? `${offset + 1}–${Math.min(offset + 20, count)} из ${count}` : "Товаров нет"}</span><Button variant="secondary" disabled={loading || offset + 20 >= count} onClick={() => setOffset(offset + 20)}>Далее</Button></div>
     </>}
   </Container>
 }

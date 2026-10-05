@@ -446,6 +446,14 @@ function ProductView({ product }: { product: Product }) {
               </div>
             )}
 
+            {!!product.measurements?.length && (
+              <section className={styles.characteristics} aria-label="Обмеры изделия">
+                <h2>Обмеры изделия</h2>
+                <dl>{product.measurements.map((item, index) => (
+                  <div key={`${item.size}-${item.label}-${index}`}><dt>{item.size} · {item.label}</dt><dd>{item.value} см</dd></div>
+                ))}</dl>
+              </section>
+            )}
             {!!product.characteristics?.length && (
               <section className={styles.characteristics} aria-label="Характеристики изделия">
                 <h2 className={styles.optionTitle}>Информация об изделии</h2>

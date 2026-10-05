@@ -23,6 +23,7 @@ export interface Product {
    */
   description?: string;
   characteristics?: { label: string; value: string }[];
+  measurements?: { size: string; label: string; value: string }[];
   registryUrl?: string;
   labelImages?: { name: string; url: string }[];
   categorySlugs?: string[];
