@@ -1,4 +1,5 @@
 import {
+  authenticate,
   defineMiddlewares,
   validateAndTransformBody,
   validateAndTransformQuery,
@@ -84,6 +85,14 @@ export default defineMiddlewares({
       matcher: "/admin/tbank/manual-review",
       method: "GET",
       middlewares: [
+        validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
+      ],
+    },
+    {
+      matcher: "/admin/tbank/fiscal-notifications",
+      method: "GET",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
         validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
       ],
     },
