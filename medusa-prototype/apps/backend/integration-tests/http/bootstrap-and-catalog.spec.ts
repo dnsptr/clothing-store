@@ -4,8 +4,9 @@ import {
   ContainerRegistrationKeys,
   ModuleRegistrationName,
   Modules,
+  ProductStatus,
 } from "@medusajs/framework/utils";
-import { createShippingProfilesWorkflow } from "@medusajs/medusa/core-flows";
+import { createShippingProfilesWorkflow, updateProductsWorkflow } from "@medusajs/medusa/core-flows";
 
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import importMarioMikkeCatalog from "../../src/scripts/import-mario-mikke";
@@ -271,7 +272,7 @@ medusaIntegrationTestRunner({
     });
 
     describe("customer catalog upsert (21 customer drafts)", () => {
-      it("preserves Medusa identities across imports and rejects reassigned SKUs before writes", async () => {
+      it("re-imports customer drafts without losing variants or merchant photos and rejects reassigned SKUs", async () => {
         const container = getContainer();
         await seedInitialData({ container });
         await ensureDefaultShippingProfile(container);
@@ -285,10 +286,32 @@ medusaIntegrationTestRunner({
         expect([...firstRun.handles].sort()).toEqual(expectedHandles);
         expect(Object.keys(firstRun.variantIdBySku)).toHaveLength(expectedVariants);
         expect(Object.keys(firstRun.inventoryItemIdBySku)).toHaveLength(expectedVariants);
+        const query = container.resolve(ContainerRegistrationKeys.QUERY);
+        const { data: drafts } = await query.graph({
+          entity: "product",
+          fields: ["id", "status"],
+          filters: { handle: expectedHandles },
+          pagination: { take: 250 },
+        });
+        expect(drafts).toHaveLength(CUSTOMER_CATALOG.length);
+        expect(drafts.every((product) => product.status === ProductStatus.DRAFT)).toBe(true);
+
+        const photoProductId = firstRun.productIdByHandle["mario-mikke-1351"];
+        const merchantPhoto = "https://example.invalid/merchant-photo-1351.webp";
+        await updateProductsWorkflow(container).run({
+          input: { products: [{ id: photoProductId, thumbnail: merchantPhoto, images: [{ url: merchantPhoto }] }] },
+        });
 
         await importCustomerCatalog({ container });
         const secondRun = await snapshotCatalog(container);
         expect(secondRun).toEqual(firstRun);
+        const { data: [withPhoto] } = await query.graph({
+          entity: "product",
+          fields: ["id", "thumbnail", "images.url"],
+          filters: { id: photoProductId },
+        });
+        expect(withPhoto?.thumbnail).toBe(merchantPhoto);
+        expect(withPhoto?.images?.map((image) => image.url)).toContain(merchantPhoto);
 
         const row = CUSTOMER_CATALOG.find((item) => item.article === "1351") as CustomerCatalogRow;
         const originalColors = row.colors;
