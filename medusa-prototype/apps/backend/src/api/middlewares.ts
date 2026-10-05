@@ -17,6 +17,7 @@ import {
 import { PollReviewActionSchema } from "./admin/tbank/payment-attempts/manual-review/validators";
 
 import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
+import { requireCapturedTbankPayment } from "./store/complete-payment-guard";
 
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
@@ -40,6 +41,11 @@ export default defineMiddlewares({
       matcher: "/store/payment-collections/:id/payment-sessions",
       method: "POST",
       middlewares: [requirePaidPaymentProvider],
+    },
+    {
+      matcher: "/store/carts/:id/complete",
+      method: "POST",
+      middlewares: [requireCapturedTbankPayment],
     },
     {
       matcher: "/admin/products/:id",

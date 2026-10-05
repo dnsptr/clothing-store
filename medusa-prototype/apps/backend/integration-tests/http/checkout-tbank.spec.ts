@@ -172,12 +172,16 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
             (item: { provider_id: string }) => item.provider_id === "pp_tbank_tbank",
           );
           expect(session.data.paymentUrl).toBe("https://rest-api-test.tinkoff.ru/offline-checkout");
-          const completed = await api.post(`/store/carts/${cartId}/complete`, {}, { headers });
-          expect(completed.data.order.id).toBeTruthy();
+          const prematureComplete = await api.post(
+            `/store/carts/${cartId}/complete`, {}, { headers, validateStatus: () => true },
+          );
+          expect(prematureComplete.status).toBe(400);
+          const { data: prematureOrders } = await query.graph({
+            entity: "order_cart", fields: ["order_id", "cart_id"], filters: { cart_id: cartId },
+          });
+          expect(prematureOrders).toHaveLength(0);
           const pendingStatus = await api.get(`/store/payment-status/${cartId}`, { headers });
           expect(pendingStatus.data).toEqual({ payment: "pending", order: "pending" });
-          expect(completed.data.type).toBe("order");
-
           bankStatus = "CONFIRMED";
           const notification: Record<string, unknown> = {
             TerminalKey: "TinkoffBankTest",
@@ -209,18 +213,24 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           const replay = await api.post("/hooks/payment/tbank", notification);
           expect(replay.data).toBe("OK");
 
-          const { data: orders } = await query.graph({
-            entity: "order_cart", fields: ["order_id", "cart_id"], filters: { cart_id: cartId },
-          });
-          const { data: payments } = await query.graph({
-            entity: "payment", fields: ["payment_session_id", "captured_at"], filters: { payment_session_id: session.id },
-          });
+          let orders: Array<{ order_id: string; cart_id: string }> = [];
+          let payments: Array<{ payment_session_id: string; captured_at: Date | null }> = [];
+          for (let attempt = 0; attempt < 50; attempt++) {
+            ({ data: orders } = await query.graph({
+              entity: "order_cart", fields: ["order_id", "cart_id"], filters: { cart_id: cartId },
+            }));
+            ({ data: payments } = await query.graph({
+              entity: "payment", fields: ["payment_session_id", "captured_at"], filters: { payment_session_id: session.id },
+            }));
+            if (orders.length === 1 && payments.length === 1 && payments[0].captured_at) break;
+            await delay(100);
+          }
           const status = await api.get(`/store/payment-status/${cartId}`, { headers });
           const attempts = await inbox.listTbankPaymentAttempts({ payment_session_id: session.id });
           expect(attempts).toHaveLength(1);
           expect(attempts[0].expected_amount_kopecks).toBe(amountKopecks);
           expect(orders).toHaveLength(1);
-          expect(orders[0].order_id).toBe(completed.data.order.id);
+          expect(orders[0].cart_id).toBe(cartId);
           expect(payments).toHaveLength(1);
           expect(payments[0].captured_at).toBeTruthy();
           expect(status.data).toEqual({ payment: "confirmed", order: "ready" });
