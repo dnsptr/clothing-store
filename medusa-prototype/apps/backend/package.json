@@ -18,6 +18,7 @@
     "dev": "medusa develop",
     "catalog:import": "medusa exec ./src/scripts/import-mario-mikke.ts",
     "catalog:import:customer": "medusa exec ./src/scripts/import-customer-catalog.ts",
+    "delivery:disable-unpriced": "medusa exec ./src/scripts/disable-unpriced-delivery.ts",
     "content:seed": "medusa exec ./src/scripts/seed-home-content.ts",
     "lint": "medusa lint",
     "test:integration:http": "TEST_TYPE=integration:http NODE_OPTIONS=--experimental-vm-modules jest --silent=false --runInBand --forceExit",

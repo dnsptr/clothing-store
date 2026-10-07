@@ -1,7 +1,7 @@
 import type { MedusaRequest, MedusaResponse, MedusaNextFunction } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { profileProblems, readProfile } from "../../lib/catalog-profile"
-import { measurementProblems } from "../../lib/catalog-quality"
+import { hasRealProductImage, measurementProblems } from "../../lib/catalog-quality"
 
 // Legacy cards can still be edited, but explicit publication requires a profile.
 export async function catalogProfileGuard(req: MedusaRequest, res: MedusaResponse, next: MedusaNextFunction) {
@@ -25,7 +25,7 @@ export async function catalogProfileGuard(req: MedusaRequest, res: MedusaRespons
   if ((body.status ?? current?.status) !== "published") { next(); return }
   const missing = profileProblems(profile)
   if (!(body.title ?? current?.title)?.trim()) missing.push("Наименование")
-  if (!(body.images ?? current?.images)?.length) missing.push("Фото товара")
+  if (!hasRealProductImage(body.images ?? current?.images)) missing.push("Фото товара")
   if (!(body.categories ?? current?.categories)?.length) missing.push("Категория")
   const variants = body.variants ?? current?.variants ?? []
   if (!variants.length) missing.push("Варианты, размеры и цены")

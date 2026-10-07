@@ -2,6 +2,7 @@ import { Client } from "pg";
 import { Migration20260726153050 } from "../../tbank-notifications/migrations/Migration20260726153050";
 import { Migration20260909120000 } from "../../tbank-notifications/migrations/Migration20260909120000";
 import { Migration20260926150000 } from "../../tbank-notifications/migrations/Migration20260926150000";
+import { Migration20260928120000 } from "../../tbank-notifications/migrations/Migration20260928120000";
 import TbankNotificationModuleService from "../../tbank-notifications/service";
 import {
   PaymentReconcilerService,
@@ -32,7 +33,7 @@ function queryManager(client: Client) {
 
 async function applyQueries(
   client: Client,
-  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000,
+  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20260928120000,
 ): Promise<void> {
   for (const query of migration.getQueries()) {
     if (typeof query !== "string") throw new TypeError("Test migration contains a non-string query");
@@ -41,6 +42,7 @@ async function applyQueries(
 }
 
 async function rebuildSchema(client: Client): Promise<void> {
+  await client.query('drop table if exists "tbank_payment_attempt_action" cascade');
   await client.query('drop table if exists "tbank_notification_conflict" cascade');
   await client.query('drop table if exists "tbank_payment_attempt" cascade');
   await client.query('drop table if exists "tbank_notification" cascade');
@@ -58,6 +60,9 @@ async function rebuildSchema(client: Client): Promise<void> {
   const polling = new Migration20260926150000({} as never, {} as never);
   await polling.up();
   await applyQueries(client, polling);
+  const operations = new Migration20260928120000({} as never, {} as never);
+  await operations.up();
+  await applyQueries(client, operations);
 }
 
 function createNotificationStore(client: Client): TbankNotificationStore {

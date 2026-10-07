@@ -44,4 +44,9 @@ describe("catalog preparation", () => {
     expect(catalogQuality(product).noPrice).toBe(true)
     expect(catalogQuality({ variants: [product.variants[0]] }).noPrice).toBe(false)
   })
+  it("reports imported placeholder images as missing until a real photo is uploaded", () => {
+    const placeholder = { url: "https://shop.example/images/product-placeholder.webp?cache=1" }
+    expect(catalogQuality({ images: [placeholder] }).noPhotos).toBe(true)
+    expect(catalogQuality({ images: [placeholder, { url: "https://shop.example/photo.webp" }] }).noPhotos).toBe(false)
+  })
 })
