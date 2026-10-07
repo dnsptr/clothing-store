@@ -12,6 +12,8 @@ import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import importMarioMikkeCatalog from "../../src/scripts/import-mario-mikke";
 import importCustomerCatalog from "../../src/scripts/import-customer-catalog";
 import disableUnpricedDelivery from "../../src/scripts/disable-unpriced-delivery";
+import { CUSTOMER_CATALOG, parseCustomerColors } from "../../src/scripts/data/customer-catalog";
+import ensurePickupDelivery from "../../src/scripts/ensure-pickup-delivery";
 
 // Booting the full Medusa app (create DB -> migrate -> start) and running the
 // seed/import twice comfortably exceeds Jest's 5s default, so raise the per-file
@@ -350,27 +352,51 @@ medusaIntegrationTestRunner({
         expect(updated.variants?.[0]?.inventory_items?.[0]?.inventory_item_id).toBe(inventoryItemId);
         const levels = await inventory.listInventoryLevels({ inventory_item_id: [inventoryItemId!] });
         expect(levels[0]?.stocked_quantity).toBe(2);
+        const sourceRow = CUSTOMER_CATALOG.find(row => row.article === "1351")!;
+        const originalColors = sourceRow.colors;
+        const colors = parseCustomerColors(originalColors);
+        const productFields = ["id", "handle", "status", "variants.id", "variants.sku", "variants.title"];
+        const beforeReorder = await query.graph({
+          entity: "product", fields: productFields, filters: { handle: ["mario-mikke-1351", product.handle] },
+        });
+        sourceRow.colors = [colors[1], colors[0], ...colors.slice(2)].join(", ");
+        try {
+          await expect(importCustomerCatalog({ container }))
+            .rejects.toThrow("Изменение соответствия SKU и цвета запрещено");
+        } finally {
+          sourceRow.colors = originalColors;
+        }
+        const afterReorder = await query.graph({
+          entity: "product", fields: productFields, filters: { handle: ["mario-mikke-1351", product.handle] },
+        });
+        expect(afterReorder.data).toEqual(beforeReorder.data);
         await updateProductVariantsWorkflow(container).run({
           input: { product_variants: [{ id: variant!.id, manage_inventory: false }] },
         });
         await expect(importCustomerCatalog({ container }))
           .rejects.toThrow("existing variant has no managed inventory item");
-      });
+      }, 240000);
     });
 
     describe("legacy shipping option migration", () => {
-      it("disables persisted zero-price carrier options without disabling pickup", async () => {
+      it("adds idempotent pickup without demo stock, then disables persisted zero-price carriers", async () => {
         const container = getContainer();
         const query = container.resolve(ContainerRegistrationKeys.QUERY);
         await seedInitialData({ container });
         await ensureDefaultShippingProfile(container);
-        await importMarioMikkeCatalog({ container, args: [] });
+        await ensurePickupDelivery({ container });
+        await ensurePickupDelivery({ container });
+        const { data: products } = await query.graph({ entity: "product", fields: ["id"] });
+        const { data: levels } = await query.graph({ entity: "inventory_level", fields: ["id"] });
+        expect(products).toHaveLength(0);
+        expect(levels).toHaveLength(0);
         const { data: options } = await query.graph({
           entity: "shipping_option",
           fields: ["id", "provider_id", "service_zone_id", "shipping_profile_id", "type.code"],
         });
-        const pickup = options.find(option => option.type?.code === "pickup-store");
-        expect(pickup).toBeDefined();
+        const pickups = options.filter(option => option.type?.code === "pickup-store");
+        expect(pickups).toHaveLength(1);
+        const pickup = pickups[0];
         await createShippingOptionsWorkflow(container).run({ input: [{
           name: "Старый бесплатный перевозчик",
           price_type: "flat",
@@ -380,6 +406,15 @@ medusaIntegrationTestRunner({
           type: { label: "СДЭК", description: "Изолированная тестовая БД", code: "cdek-pvz" },
           prices: [{ currency_code: "rub", amount: 0 }],
           rules: [{ attribute: "enabled_in_store", value: "true", operator: "eq" }],
+        }, {
+          name: "MVP доставка по России",
+          price_type: "flat",
+          provider_id: pickup.provider_id,
+          service_zone_id: pickup.service_zone_id,
+          shipping_profile_id: pickup.shipping_profile_id,
+          type: { label: "Доставка", description: "Старая бесплатная доставка", code: "mvp-ru" },
+          prices: [{ currency_code: "rub", amount: 0 }],
+          rules: [{ attribute: "enabled_in_store", value: "true", operator: "eq" }],
         }] });
         await disableUnpricedDelivery({ container });
         const { data: migrated } = await query.graph({
@@ -387,9 +422,16 @@ medusaIntegrationTestRunner({
           fields: ["id", "type.code", "rules.attribute", "rules.value"],
         });
         const carrier = migrated.find(option => option.type?.code === "cdek-pvz");
-        expect(carrier?.rules?.some(rule => rule.attribute === "enabled_in_store" && rule.value === "false")).toBe(true);
+        expect(carrier?.rules?.some(rule => rule.attribute === "enabled_in_store" && (rule.value as unknown) === "false")).toBe(true);
+        const mvp = migrated.find(option => option.type?.code === "mvp-ru");
+        expect(mvp?.rules?.some(rule => rule.attribute === "enabled_in_store" && (rule.value as unknown) === "false")).toBe(true);
         const stillPickup = migrated.find(option => option.id === pickup!.id);
-        expect(stillPickup?.rules?.some(rule => rule.attribute === "enabled_in_store" && rule.value === "true")).toBe(true);
+        expect(stillPickup?.rules?.some(rule => rule.attribute === "enabled_in_store" && (rule.value as unknown) === "true")).toBe(true);
+        await container.resolve(ModuleRegistrationName.FULFILLMENT).updateShippingOptions(pickup.id, {
+          rules: [{ attribute: "enabled_in_store", value: "false", operator: "eq" }],
+        });
+        await expect(ensurePickupDelivery({ container }))
+          .rejects.toThrow("Existing pickup option is ambiguous, disabled or incorrectly priced");
       });
     });
 
