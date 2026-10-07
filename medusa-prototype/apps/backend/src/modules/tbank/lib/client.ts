@@ -214,19 +214,4 @@ export class TBankClient {
     return this.call<TBankCheckOrderResult>("CheckOrder", { OrderId: orderId });
   }
 
-  /**
-   * Отмена или возврат. У Т-Банка это один метод: до списания он отменяет,
-   * после — возвращает. Сумма опциональна; без неё возврат полный.
-   */
-  async cancel(params: {
-    paymentId: string;
-    amountKopecks?: number;
-    receipt?: Record<string, unknown>;
-  }): Promise<TBankResponse> {
-    return this.call<TBankResponse>("Cancel", {
-      PaymentId: params.paymentId,
-      ...(params.amountKopecks !== undefined ? { Amount: params.amountKopecks } : {}),
-      ...(params.receipt ? { Receipt: params.receipt } : {}),
-    });
-  }
 }

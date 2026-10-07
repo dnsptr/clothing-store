@@ -12,6 +12,7 @@ live CDEK account use the production URL:
 CDEK_CLIENT_ID=...
 CDEK_CLIENT_SECRET=...
 CDEK_API_BASE_URL=https://api.cdek.ru/v2
+CDEK_FROM_CITY_CODE=... # confirmed city of dispatch
 ```
 
 Run the read-only check from the repository root:
@@ -21,8 +22,10 @@ npm run integrations:check:cdek
 ```
 
 The command obtains an OAuth token, reads the configured origin/destination
-cities, and calculates tariffs for a sample parcel. It does not create a CDEK
-order or courier intake.
+cities, and calculates CDEK tariffs 136 (pickup) and 137 (courier) for a
+sample parcel. The configured origin must be confirmed separately; this check
+does not validate real product dimensions, production access, create a CDEK
+order, or arrange courier intake.
 
 ## T-Bank
 
@@ -68,6 +71,36 @@ The repository contains the public CA certificates recommended by T-Bank. The
 production Docker image installs them and configures Node to use the resulting
 system CA bundle. TLS verification must never be disabled as a workaround.
 
+## Yandex Delivery
+
+Use a Yandex Delivery Platform API token and the confirmed platform station
+ID of the dispatch warehouse; do not substitute a guessed address or station.
+Use the test host only with credentials enabled for that environment.
+
+```dotenv
+YANDEX_DELIVERY_ENABLED=true
+YANDEX_DELIVERY_TOKEN=...
+YANDEX_DELIVERY_SOURCE_STATION_ID=...
+YANDEX_DELIVERY_API_BASE_URL=https://b2b-authproxy.taxi.yandex.net/api/b2b/platform
+```
+
+Run the read-only check from the repository root:
+
+```bash
+npm run integrations:check:yandex
+```
+
+The command looks up Moscow, lists Yandex Market pickup points, and calculates
+`self_pickup` pricing for an explicitly illustrative parcel (1 kg, 20×15×10 cm).
+Yandex delivery is paid by the buyer: a positive quote for the measured,
+packaged order must appear in checkout and the payment total before enabling
+its shipping option. The check does not validate real product measurements,
+create an offer, confirm a shipment, or verify production access when pointed
+at a test host. Three dispatch points are known, but this integration accepts
+one configured source station: confirm its mapping to the actual dispatch
+location before running it.
+
+
 Official references:
 
 - https://developer.tbank.ru/eacq/intro/errors/test
@@ -75,3 +108,4 @@ Official references:
 - https://developer.tbank.ru/eacq/intro/certificates/
 - https://developer.tbank.ru/eacq/api/check-order
 - https://developer.tbank.ru/eacq/intro/developer/token
+- https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/

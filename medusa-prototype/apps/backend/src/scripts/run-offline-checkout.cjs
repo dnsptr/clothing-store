@@ -28,7 +28,6 @@ const env = {
   TELEGRAM_BOT_TOKEN: "",
   CDEK_ENABLED: "false",
   YANDEX_DELIVERY_ENABLED: "false",
-  POCHTA_ENABLED: "false",
   OWN_COURIER_ENABLED: "false",
   TBANK_ENABLED: "true",
   TBANK_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",

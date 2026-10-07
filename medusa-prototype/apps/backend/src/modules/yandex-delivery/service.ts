@@ -16,11 +16,18 @@ import {
   validatePvzSelection,
   YandexFulfillmentDataError,
 } from "./fulfillment-data";
-import { YandexDeliveryClient } from "./lib/yandex-client";
+import { YandexDeliveryClient, type YandexPricingResult } from "./lib/yandex-client";
 import {
   YANDEX_DELIVERY_PROVIDER_IDENTIFIER,
   YANDEX_OPTION_PVZ,
 } from "./provider-id";
+
+function requirePaidQuote(quote: YandexPricingResult): number {
+  if (!Number.isFinite(quote.priceRub) || quote.priceRub <= 0 || quote.currency !== "RUB") {
+    throw new YandexFulfillmentDataError("paid quote in RUB");
+  }
+  return quote.priceRub;
+}
 
 export default class YandexDeliveryFulfillmentProviderService extends AbstractFulfillmentProviderService {
   static identifier = YANDEX_DELIVERY_PROVIDER_IDENTIFIER;
@@ -58,6 +65,7 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     const verified = confirmPvzSelection(data, points);
     const parcel = buildCartPackage(context.items);
     const quote = await this.client.calculatePricing({ destinationStationId: verified.platform_station_id, ...parcel });
+    const customerPrice = requirePaidQuote(quote);
     return {
       ...verified,
       weight_gross_grams: parcel.weightGrossGrams,
@@ -65,7 +73,7 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
       dy_cm: parcel.dyCm,
       dz_cm: parcel.dzCm,
       assessed_price_rub: parcel.assessedPriceRub,
-      carrier_quote_amount: quote.priceRub,
+      carrier_quote_amount: customerPrice,
       carrier_quote_currency: quote.currency,
     };
   }
@@ -79,8 +87,8 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     const selection = validatePvzSelection(data);
     const points = await this.client.getPickupPoints({ geo_id: selection.geo_id });
     const verified = confirmPvzSelection(data, points);
-    await this.client.calculatePricing(buildPricingParams(verified.platform_station_id, context["items"]));
-    return { calculated_amount: 0, is_calculated_price_tax_inclusive: true };
+    const quote = await this.client.calculatePricing(buildPricingParams(verified.platform_station_id, context["items"]));
+    return { calculated_amount: requirePaidQuote(quote), is_calculated_price_tax_inclusive: true };
   }
 
   async createFulfillment(
@@ -96,11 +104,12 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     const points = await this.client.getPickupPoints({ geo_id: selection.geo_id });
     confirmPvzSelection(data, points);
     const quote = await this.client.calculatePricing(offerParams);
+    const carrierPrice = requirePaidQuote(quote);
     const orderResult = await this.client.createPvzOrder(offerParams);
     return {
       data: {
         ...data,
-        carrier_quote_amount: quote.priceRub,
+        carrier_quote_amount: carrierPrice,
         carrier_quote_currency: quote.currency,
         yandex_request_id: orderResult.requestId,
         yandex_offer_id: orderResult.offerId,

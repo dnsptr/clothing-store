@@ -90,7 +90,7 @@ export const pricingCalculatorResponseSchema = z.object({
   priceRub: Number(val.pricing_total.slice(0, -4)),
   deliveryDays: val.delivery_days,
   currency: "RUB" as const,
-}));
+})).refine((quote) => Number.isFinite(quote.priceRub) && quote.priceRub > 0);
 
 export const offerCreateResponseSchema = z.object({
   offers: z.array(z.object({ offer_id: boundedText })).min(1),

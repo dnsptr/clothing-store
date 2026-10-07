@@ -71,14 +71,14 @@ async function observations(request: APIRequestContext): Promise<ObservationResp
   return { observations: parsed };
 }
 
-async function openCheckout(page: Page): Promise<void> {
+async function openCheckout(page: Page, expectedDelivery: RegExp = /Самовывоз/): Promise<void> {
   await page.addInitScript((cartItem) => {
     window.localStorage.setItem("clothing-store-cart-medusa", JSON.stringify([cartItem]));
     window.localStorage.setItem("clothing-store-medusa-cart", "cart_baseline");
   }, CART_ITEM);
   await page.goto(`${APP_URL}/checkout`);
   await expect(page.locator('input[name="firstName"]')).toBeVisible();
-  await expect(page.locator('input[name="shippingOption"]')).toBeChecked();
+  await expect(page.getByRole("tab", { name: expectedDelivery })).toHaveAttribute("aria-selected", "true");
 }
 
 async function submitCheckout(page: Page): Promise<void> {
@@ -86,9 +86,6 @@ async function submitCheckout(page: Page): Promise<void> {
   await page.locator('input[name="lastName"]').fill("Ivanova");
   await page.locator('input[name="email"]').fill("anna@example.test");
   await page.locator('input[name="phone"]').fill("+79990000000");
-  await page.locator('input[name="city"]').fill("Moscow");
-  await page.locator('input[name="zip"]').fill("123456");
-  await page.locator('input[name="address"]').fill("Tverskaya 1");
   await page.locator('input[type="checkbox"]').check();
   await page.getByRole("button", { name: "Подтвердить заказ" }).click();
 }
@@ -176,3 +173,70 @@ test("bank no-return leaves no verified storefront result", async ({ page, reque
   expect((await request.get(`${APP_URL}/payment/success`)).status()).toBe(404);
   expect((await request.get(`${APP_URL}/payment/fail`)).status()).toBe(404);
 });
+
+test("stale free carrier options cannot be bought while chosen store pickup still reaches payment", async ({ page, request }) => {
+  await configureScenario(request, "valid");
+  const shippingRequests: unknown[] = [];
+  await page.route("**/store/carts/cart_baseline/shipping-methods", async (route) => {
+    shippingRequests.push(route.request().postDataJSON());
+    await route.continue();
+  });
+  await page.route("**/store/shipping-options?**", (route) => route.fulfill({
+    headers: { "access-control-allow-origin": "*" },
+    json: { shipping_options: [
+      { id: "so_cdek", name: "СДЭК", type: { code: "cdek-courier" }, amount: 0 },
+      { id: "so_post", name: "Почта", type: { code: "pochta-parcel" }, amount: 0 },
+      { id: "so_yandex", name: "Яндекс", type: { code: "yandex-pvz" }, amount: 0 },
+      { id: "so_own", name: "Свой курьер", type: { code: "own-courier-mkad" }, amount: 0 },
+      { id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: 0 },
+    ] },
+  }));
+  await page.route(BANK_PAYMENT_URL, (route) => route.fulfill({
+    contentType: "text/html", body: "<h1>Bank fixture</h1>",
+  }));
+  await openCheckout(page);
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Проверить доставку курьером" })).toHaveCount(0);
+  await page.getByText("ТЦ «Говорово»").click();
+  await submitCheckout(page);
+  await expect(page).toHaveURL(BANK_PAYMENT_URL);
+  const captured = await observations(request);
+  expect(shippingRequests).toEqual([{
+    option_id: "shipping_baseline",
+    data: { pickup_store_id: "store_govorovo" },
+  }]);
+  expect(captured.observations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ method: "POST", path: "/store/carts/cart_baseline/shipping-methods" }),
+    expect.objectContaining({ method: "POST", path: "/store/payment-collections" }),
+  ]));
+});
+
+for (const pickupAmount of [undefined, 500] as const) {
+  test(`checkout blocks stale carriers without approved free pickup (amount ${pickupAmount})`, async ({ page, request }) => {
+    await configureScenario(request, "valid");
+    await page.route("**/store/shipping-options?**", (route) => route.fulfill({
+      headers: { "access-control-allow-origin": "*" },
+      json: { shipping_options: [
+        { id: "so_cdek", name: "СДЭК", type: { code: "cdek-courier" }, amount: 0 },
+        { id: "so_post", name: "Почта", type: { code: "pochta-parcel" }, amount: 0 },
+        { id: "so_own", name: "Свой курьер", type: { code: "own-courier-mkad" }, amount: 0 },
+        { id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: pickupAmount },
+      ] },
+    }));
+    await page.addInitScript((cartItem) => {
+      window.localStorage.setItem("clothing-store-cart-medusa", JSON.stringify([cartItem]));
+      window.localStorage.setItem("clothing-store-medusa-cart", "cart_baseline");
+    }, CART_ITEM);
+    await page.goto(`${APP_URL}/checkout`);
+    await expect(page.getByText("Для этой корзины сейчас нет доступных способов доставки.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Подтвердить заказ" })).toBeDisabled();
+    const captured = await observations(request);
+    expect(captured.observations.some(({ path }) =>
+      path === "/store/payment-collections" || path.endsWith("/shipping-methods"))).toBe(false);
+  });
+}
+
+
+
+
+

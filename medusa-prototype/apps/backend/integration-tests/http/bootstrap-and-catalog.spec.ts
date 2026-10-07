@@ -4,11 +4,16 @@ import {
   ContainerRegistrationKeys,
   ModuleRegistrationName,
   Modules,
+  ProductStatus,
 } from "@medusajs/framework/utils";
-import { createShippingProfilesWorkflow } from "@medusajs/medusa/core-flows";
+import { createInventoryLevelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow, updateProductVariantsWorkflow } from "@medusajs/medusa/core-flows";
 
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import importMarioMikkeCatalog from "../../src/scripts/import-mario-mikke";
+import importCustomerCatalog from "../../src/scripts/import-customer-catalog";
+import disableUnpricedDelivery from "../../src/scripts/disable-unpriced-delivery";
+import { CUSTOMER_CATALOG, parseCustomerColors } from "../../src/scripts/data/customer-catalog";
+import ensurePickupDelivery from "../../src/scripts/ensure-pickup-delivery";
 
 // Booting the full Medusa app (create DB -> migrate -> start) and running the
 // seed/import twice comfortably exceeds Jest's 5s default, so raise the per-file
@@ -112,10 +117,8 @@ const snapshotCatalog = async (
       }
       variantIdBySku[variant.sku] = variant.id;
 
-      const inventoryItems = (variant.inventory_items ?? []).filter(Boolean);
-      if (inventoryItems.length > 0) {
-        inventoryItemIdBySku[variant.sku] = inventoryItems[0].inventory_item_id;
-      }
+      const inventoryItemId = variant.inventory_items?.find(item => item?.inventory_item_id)?.inventory_item_id;
+      if (inventoryItemId) inventoryItemIdBySku[variant.sku] = inventoryItemId;
     }
   }
 
@@ -182,7 +185,9 @@ medusaIntegrationTestRunner({
             "supported_currencies.is_default",
           ],
         });
-        const currencies = (store.supported_currencies ?? []).filter(Boolean);
+        const currencies = (store.supported_currencies ?? []).filter(
+          (currency): currency is NonNullable<typeof currency> => currency !== null
+        );
         expect(currencies.map((currency) => currency.currency_code)).toEqual([
           "rub",
         ]);
@@ -267,6 +272,178 @@ medusaIntegrationTestRunner({
       });
     });
 
+    describe("customer sheet import (launch stock safety)", () => {
+      it("keeps re-imported goods unsellable without invented stock and refuses unmanaged legacy variants", async () => {
+        const container = getContainer();
+        const query = container.resolve(ContainerRegistrationKeys.QUERY);
+        const inventory = container.resolve(Modules.INVENTORY) as unknown as InventoryModuleLike;
+        await seedInitialData({ container });
+        await ensureDefaultShippingProfile(container);
+        await importCustomerCatalog({ container });
+
+        const { data: products } = await query.graph({
+          entity: "product",
+          fields: [
+            "id", "handle", "status", "variants.id", "variants.manage_inventory",
+            "variants.allow_backorder", "variants.inventory_items.inventory_item_id",
+          ],
+          filters: { handle: "mario-mikke-2016" },
+        });
+        const product = products[0];
+        expect(product.status).toBe("draft");
+        const variant = product.variants?.[0];
+        expect(variant?.manage_inventory).toBe(true);
+        expect(variant?.allow_backorder).toBe(false);
+        const inventoryItemId = variant?.inventory_items?.[0]?.inventory_item_id;
+        expect(inventoryItemId).toBeTruthy();
+        expect(await inventory.listInventoryLevels({ inventory_item_id: [inventoryItemId!] })).toEqual([]);
+
+        const { data: keys } = await query.graph({
+          entity: "api_key", fields: ["token", "type"],
+        });
+        const publishableKey = keys.find(key => key.type === "publishable");
+        const hidden = await api.get("/store/products", {
+          headers: { "x-publishable-api-key": publishableKey!.token },
+          params: { handle: product.handle },
+        });
+        expect(hidden.status).toBe(200);
+        expect(hidden.data.products).toEqual([]);
+        const { data: regions } = await query.graph({
+          entity: "region", fields: ["id", "currency_code"],
+        });
+        const { data: { cart } } = await api.post("/store/carts", {
+          region_id: regions.find(region => region.currency_code === "rub")!.id,
+        }, { headers: { "x-publishable-api-key": publishableKey!.token } });
+        await expect(api.post(`/store/carts/${cart.id}/line-items`, {
+          variant_id: variant!.id, quantity: 1,
+        }, { headers: { "x-publishable-api-key": publishableKey!.token } }))
+          .rejects.toMatchObject({ response: {
+            status: 400,
+            data: { message: expect.stringContaining("not published") },
+          } });
+
+        const { data: locations } = await query.graph({
+          entity: "stock_location", fields: ["id"],
+        });
+        await createInventoryLevelsWorkflow(container).run({
+          input: { inventory_levels: [{
+            location_id: locations[0].id,
+            inventory_item_id: inventoryItemId!,
+            stocked_quantity: 2,
+          }] },
+        });
+        await updateProductsWorkflow(container).run({
+          input: { products: [{ id: product.id, status: ProductStatus.PUBLISHED }] },
+        });
+        await updateProductVariantsWorkflow(container).run({
+          input: { product_variants: [{ id: variant!.id, allow_backorder: true }] },
+        });
+
+        await importCustomerCatalog({ container });
+        const { data: [updated] } = await query.graph({
+          entity: "product",
+          fields: ["id", "status", "variants.id", "variants.allow_backorder", "variants.manage_inventory", "variants.inventory_items.inventory_item_id"],
+          filters: { id: product.id },
+        });
+        expect(updated.status).toBe("draft");
+        expect(updated.variants?.[0]?.id).toBe(variant!.id);
+        expect(updated.variants?.[0]?.manage_inventory).toBe(true);
+        expect(updated.variants?.[0]?.allow_backorder).toBe(false);
+        expect(updated.variants?.[0]?.inventory_items?.[0]?.inventory_item_id).toBe(inventoryItemId);
+        const levels = await inventory.listInventoryLevels({ inventory_item_id: [inventoryItemId!] });
+        expect(levels[0]?.stocked_quantity).toBe(2);
+        const sourceRow = CUSTOMER_CATALOG.find(row => row.article === "1351")!;
+        const originalColors = sourceRow.colors;
+        const colors = parseCustomerColors(originalColors);
+        const productFields = ["id", "handle", "status", "variants.id", "variants.sku", "variants.title"];
+        const beforeReorder = await query.graph({
+          entity: "product", fields: productFields, filters: { handle: ["mario-mikke-1351", product.handle] },
+        });
+        sourceRow.colors = [colors[1], colors[0], ...colors.slice(2)].join(", ");
+        try {
+          await expect(importCustomerCatalog({ container }))
+            .rejects.toThrow("Изменение соответствия SKU и цвета запрещено");
+        } finally {
+          sourceRow.colors = originalColors;
+        }
+        const afterReorder = await query.graph({
+          entity: "product", fields: productFields, filters: { handle: ["mario-mikke-1351", product.handle] },
+        });
+        expect(afterReorder.data).toEqual(beforeReorder.data);
+        await updateProductVariantsWorkflow(container).run({
+          input: { product_variants: [{ id: variant!.id, manage_inventory: false }] },
+        });
+        await expect(importCustomerCatalog({ container }))
+          .rejects.toThrow("existing variant has no managed inventory item");
+      }, 240000);
+    });
+
+    describe("legacy shipping option migration", () => {
+      it("adds idempotent pickup without demo stock, then disables persisted zero-price carriers", async () => {
+        const container = getContainer();
+        const query = container.resolve(ContainerRegistrationKeys.QUERY);
+        await seedInitialData({ container });
+        await ensureDefaultShippingProfile(container);
+        await ensurePickupDelivery({ container });
+        await ensurePickupDelivery({ container });
+        const { data: products } = await query.graph({ entity: "product", fields: ["id"] });
+        const { data: levels } = await query.graph({ entity: "inventory_level", fields: ["id"] });
+        expect(products).toHaveLength(0);
+        expect(levels).toHaveLength(0);
+        const { data: options } = await query.graph({
+          entity: "shipping_option",
+          fields: ["id", "provider_id", "service_zone_id", "shipping_profile_id", "type.code"],
+        });
+        const pickups = options.filter(option => option.type?.code === "pickup-store");
+        expect(pickups).toHaveLength(1);
+        const pickup = pickups[0];
+        await createShippingOptionsWorkflow(container).run({ input: [{
+          name: "Старый бесплатный перевозчик",
+          price_type: "flat",
+          provider_id: pickup!.provider_id,
+          service_zone_id: pickup!.service_zone_id,
+          shipping_profile_id: pickup!.shipping_profile_id,
+          type: { label: "СДЭК", description: "Изолированная тестовая БД", code: "cdek-pvz" },
+          prices: [{ currency_code: "rub", amount: 0 }],
+          rules: [{ attribute: "enabled_in_store", value: "true", operator: "eq" }],
+        }, {
+          name: "MVP доставка по России",
+          price_type: "flat",
+          provider_id: pickup.provider_id,
+          service_zone_id: pickup.service_zone_id,
+          shipping_profile_id: pickup.shipping_profile_id,
+          type: { label: "Доставка", description: "Старая бесплатная доставка", code: "mvp-ru" },
+          prices: [{ currency_code: "rub", amount: 0 }],
+          rules: [{ attribute: "enabled_in_store", value: "true", operator: "eq" }],
+        }] });
+        await disableUnpricedDelivery({ container });
+        const { data: migrated } = await query.graph({
+          entity: "shipping_option",
+          fields: ["id", "type.code", "rules.attribute", "rules.value"],
+        });
+        const carrier = migrated.find(option => option.type?.code === "cdek-pvz");
+        expect(carrier?.rules?.some(rule => rule.attribute === "enabled_in_store" && (rule.value as unknown) === "false")).toBe(true);
+        const mvp = migrated.find(option => option.type?.code === "mvp-ru");
+        expect(mvp?.rules?.some(rule => rule.attribute === "enabled_in_store" && (rule.value as unknown) === "false")).toBe(true);
+        const stillPickup = migrated.find(option => option.id === pickup!.id);
+        expect(stillPickup?.rules?.some(rule => rule.attribute === "enabled_in_store" && (rule.value as unknown) === "true")).toBe(true);
+        await container.resolve(ModuleRegistrationName.FULFILLMENT).updateShippingOptions(pickup.id, {
+          rules: [{ attribute: "enabled_in_store", value: "false", operator: "eq" }],
+        });
+        await expect(ensurePickupDelivery({ container }))
+          .rejects.toThrow("Existing pickup option is ambiguous, disabled or incorrectly priced");
+      });
+    });
+
+    describe("bank manual review confidentiality", () => {
+      it.each([
+        "/admin/tbank/manual-review",
+        "/admin/tbank/payment-attempts/manual-review",
+      ])("rejects anonymous requests to %s", async (path) => {
+        await expect(api.get(path)).rejects.toMatchObject({ response: { status: 401 } });
+      });
+    });
+
     describe("Store API catalog smoke test", () => {
       it("serves the imported catalog from GET /store/products with a publishable key", async () => {
         const container = getContainer();
@@ -284,6 +461,7 @@ medusaIntegrationTestRunner({
           (key) => key.type === "publishable"
         );
         expect(publishableKey).toBeTruthy();
+        if (!publishableKey) throw new Error("Publishable API key was not seeded");
 
         const response = await api.get("/store/products", {
           headers: { "x-publishable-api-key": publishableKey.token },

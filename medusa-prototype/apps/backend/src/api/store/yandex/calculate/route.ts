@@ -62,11 +62,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       cacheTtlMs: 30_000,
       execute: () => client.calculatePricing(params),
     });
+    if (!Number.isFinite(result.priceRub) || result.priceRub <= 0 || result.currency !== "RUB") {
+      return res.status(502).json({ message: "Delivery provider unavailable" });
+    }
     return res.json({
       price: result.priceRub,
       ...(result.deliveryDays === undefined ? {} : { delivery_days: result.deliveryDays }),
       currency: result.currency,
-      customer_cost: 0,
+      customer_cost: result.priceRub,
     });
   } catch (error) {
     if (error instanceof YandexFulfillmentDataError) {

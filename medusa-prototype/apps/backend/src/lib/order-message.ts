@@ -1,3 +1,6 @@
+import { MOSCOW_PICKUP_STORES } from "../modules/cdek/fulfillment-data";
+import { OWN_COURIER_OPTION } from "../modules/own-courier/provider-id";
+
 /**
  * Текст уведомления о новом заказе.
  *
@@ -53,7 +56,7 @@ export type OrderForMessage = {
     unit_price?: MoneyValue;
   }> | null;
   shipping_address?: AddressForMessage | null;
-  shipping_methods?: Array<{ name?: string | null }> | null;
+  shipping_methods?: Array<{ name?: string | null; data?: Record<string, unknown> | null }> | null;
 };
 
 /**
@@ -133,10 +136,25 @@ export function formatAddress(address: AddressForMessage | null | undefined): st
   return parts.length > 0 ? parts.join(", ") : "адрес не указан";
 }
 
-function deliveryLine(order: OrderForMessage): string {
+function deliveryLine(order: OrderForMessage, pickupStore: string | null): string {
   const method = order.shipping_methods?.[0]?.name?.trim();
+  if (pickupStore) return method || "Самовывоз";
   const destination = formatAddress(order.shipping_address);
   return method ? `${method} — ${destination}` : destination;
+}
+
+function pickupStoreLine(order: OrderForMessage): string | null {
+  const method = order.shipping_methods?.[0];
+  if (!method || (method.data?.delivery_mode !== "pickup-store" &&
+    !method.name?.startsWith("Самовывоз"))) return null;
+
+  // The buyer's address and untrusted method.data names cannot identify a store.
+  const store = MOSCOW_PICKUP_STORES.find(
+    ({ id }) => id === method.data?.pickup_store_id,
+  );
+  return store
+    ? `Магазин самовывоза: ${store.name} — ${store.address}`
+    : "Магазин самовывоза: не определён — проверьте заказ";
 }
 
 /**
@@ -148,6 +166,7 @@ function deliveryLine(order: OrderForMessage): string {
  */
 export function buildNewOrderMessage(order: OrderForMessage): string {
   const currency = order.currency_code ?? "RUB";
+  const pickupStore = pickupStoreLine(order);
 
   const lines: string[] = [
     `Новый заказ ${orderNumber(order)}`,
@@ -156,10 +175,13 @@ export function buildNewOrderMessage(order: OrderForMessage): string {
     `Телефон: ${order.shipping_address?.phone?.trim() || "—"}`,
     `Почта: ${order.email?.trim() || "—"}`,
     "",
-    `Доставка: ${deliveryLine(order)}`,
-    "",
-    "Состав:",
+    `Доставка: ${deliveryLine(order, pickupStore)}`,
   ];
+  if (pickupStore) lines.push(pickupStore);
+  if (order.shipping_methods?.[0]?.data?.delivery_mode === OWN_COURIER_OPTION) {
+    lines.push("Свой курьер: ежедневно 12:00–22:00; до выезда позвонить покупателю и уточнить время.");
+  }
+  lines.push("", "Состав:");
 
   const items = order.items ?? [];
   if (items.length === 0) {

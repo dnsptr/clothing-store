@@ -176,7 +176,7 @@ export function buildOfferParams(
     parcel[key as keyof typeof parcel] !== saved[key as keyof typeof saved])) {
     throw new YandexFulfillmentDataError("package changed since checkout");
   }
-  const quote = z.number().finite().nonnegative().safeParse(data["carrier_quote_amount"]);
+  const quote = z.number().finite().positive().safeParse(data["carrier_quote_amount"]);
   if (!quote.success || data["carrier_quote_currency"] !== "RUB") {
     throw new YandexFulfillmentDataError("verified quote");
   }

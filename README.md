@@ -163,6 +163,23 @@ Medusa Admin:
 http://localhost:9000/app
 ```
 
+### Offline browser checkout in CI
+
+The `browser-checkout` job in `.github/workflows/ci.yml` runs
+`checkout-browser.spec.ts` with Chromium, a local Next.js storefront, real Medusa,
+PostgreSQL, and Redis. T-Bank `Init`/`GetState` and the Telegram HTTP response
+are intercepted in-process; the browser payment URL is intercepted, and other
+external requests fail. No real bank, Telegram chat, or Timeweb service is contacted.
+
+It selects the Govorovo pickup store, checks its displayed address, follows
+the bank redirect, sends a signed `CONFIRMED` webhook twice, and checks that
+PostgreSQL contains one captured payment and order with `pickup_store_id`.
+The staff Telegram request must name the selected store and address once;
+the confirmed order UI is checked and screenshots are uploaded as the
+`real-medusa-offline-checkout` CI artifact. This is not a live delivery test.
+The job is opt-in for the HTTP Jest suite via `BROWSER_CHECKOUT_TEST=true`;
+it needs PostgreSQL, Redis, and an installed Playwright Chromium browser.
+
 ---
 
 ## Project Structure

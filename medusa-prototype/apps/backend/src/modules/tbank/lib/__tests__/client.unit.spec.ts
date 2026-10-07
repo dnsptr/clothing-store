@@ -270,30 +270,5 @@ describe("TBankClient", () => {
       expect(body.OrderId).toBe("payses_003");
     });
 
-    it("cancel передаёт PaymentId и Amount", async () => {
-      const fetchMock = mockFetch({
-        json: async () => ({
-          Success: true,
-          ErrorCode: "0",
-          PaymentId: "555",
-          Status: "CANCELED",
-        }),
-      });
-
-      const client = new TBankClient(CREDENTIALS);
-      const result = await client.cancel({
-        paymentId: "555",
-        amountKopecks: 10000,
-        receipt: { Items: [] },
-      });
-
-      expect(result.Success).toBe(true);
-      const [url, options] = fetchMock.mock.calls[0];
-      expect(url).toBe("https://securepay.tinkoff.ru/v2/Cancel");
-      const body = JSON.parse(options.body as string);
-      expect(body.PaymentId).toBe("555");
-      expect(body.Amount).toBe(10000);
-      expect(body.Receipt).toEqual({ Items: [] });
-    });
   });
 });
