@@ -120,5 +120,13 @@ export default defineMiddlewares({
         validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
       ],
     },
+    {
+      matcher: "/admin/tbank/fiscal-notifications",
+      method: "GET",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
+      ],
+    },
   ],
 });
