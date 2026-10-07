@@ -2,6 +2,27 @@
 
 Credentials must stay in `apps/backend/.env.integrations.local`. The file is
 ignored by Git. Never paste credentials into issues, commits, CI logs, or chat.
+The carrier quote commands require explicit measurements of one **packed**
+order and a specified dispatch location; they no longer substitute a sample
+parcel. In the ignored local environment file set:
+
+```dotenv
+DELIVERY_DISPATCH_INDEX=108811 # or 117574 (Принц Плаза), 119571 (Авеню)
+DELIVERY_DISPATCH_ADDRESS=... # full confirmed physical address for this index
+DELIVERY_WEIGHT_GRAMS=... # actual packed parcel
+DELIVERY_LENGTH_CM=...
+DELIVERY_WIDTH_CM=...
+DELIVERY_HEIGHT_CM=...
+DELIVERY_ASSESSED_PRICE_RUB=... # order item value, e.g. 3990.50
+```
+
+Run once per actual dispatch location and measured packing case. For mixed
+orders measure the consolidated package. The command checks that the index is
+one of the three confirmed **dispatch** points, not a pickup store. It cannot
+verify that a manually supplied physical address or carrier origin ID belongs
+to that point; confirm both independently before trusting the returned price.
+No command enables a shipping method, takes payment or creates a shipment.
+
 
 ## CDEK
 
@@ -13,6 +34,7 @@ CDEK_CLIENT_ID=...
 CDEK_CLIENT_SECRET=...
 CDEK_API_BASE_URL=https://api.cdek.ru/v2
 CDEK_FROM_CITY_CODE=... # confirmed city of dispatch
+CDEK_TO_CITY_CODE=... # explicit destination city for this quote
 ```
 
 Run the read-only check from the repository root:
@@ -21,11 +43,12 @@ Run the read-only check from the repository root:
 npm run integrations:check:cdek
 ```
 
-The command obtains an OAuth token, reads the configured origin/destination
-cities, and calculates CDEK tariffs 136 (pickup) and 137 (courier) for a
-sample parcel. The configured origin must be confirmed separately; this check
-does not validate real product dimensions, production access, create a CDEK
-order, or arrange courier intake.
+The command obtains an OAuth token, reads the explicitly configured
+origin/destination cities and calculates CDEK tariffs 136 (pickup) and 137
+(courier) for the supplied measured parcel. A city code alone does not identify
+the actual warehouse; reconcile the configured origin with the selected
+physical dispatch point and 1C. The command does not create a CDEK order or
+arrange courier intake.
 
 ## T-Bank
 
@@ -90,15 +113,15 @@ Run the read-only check from the repository root:
 npm run integrations:check:yandex
 ```
 
-The command looks up Moscow, lists Yandex Market pickup points, and calculates
-`self_pickup` pricing for an explicitly illustrative parcel (1 kg, 20×15×10 cm).
-Yandex delivery is paid by the buyer: a positive quote for the measured,
-packaged order must appear in checkout and the payment total before enabling
-its shipping option. The check does not validate real product measurements,
-create an offer, confirm a shipment, or verify production access when pointed
-at a test host. Three dispatch points are known, but this integration accepts
-one configured source station: confirm its mapping to the actual dispatch
-location before running it.
+The command looks up Moscow, lists Yandex Market pickup points and calculates
+`self_pickup` pricing for the supplied measured parcel to one of them.
+Yandex delivery is paid by the buyer: a positive quote must appear in checkout,
+the payment total and the fiscal receipt before enabling its shipping option.
+The check does not create an offer, confirm a shipment, or verify production
+access when pointed at a test host. Three dispatch points are known, but this
+integration accepts one configured source station per run: reconcile that ID
+with the actual physical dispatch address before trusting a quote. Re-run with
+each confirmed station; do not guess an ID from its postal index.
 
 
 Official references:

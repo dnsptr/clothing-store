@@ -49,7 +49,7 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
         expect(providerIds.filter((id: string) => id === "pp_tbank_tbank")).toHaveLength(1);
       });
 
-      it("creates and captures one order after a signed CONFIRMED webhook is replayed", async () => {
+      it("charges a measured carrier quote in the cart, bank Init and receipt before capturing one order", async () => {
         const container = getContainer();
         const query = container.resolve(ContainerRegistrationKeys.QUERY);
         await seedInitialData({ container });
@@ -100,13 +100,13 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
 
         const { result: [shippingOption] } = await createShippingOptionsWorkflow(container).run({
           input: [{
-            name: "Тестовая доставка",
+            name: "Тестовая платная доставка",
             price_type: "flat",
             provider_id: "manual_manual",
             service_zone_id: fulfillmentSet.service_zones[0].id,
             shipping_profile_id: shippingProfile.id,
-            type: { label: "Тестовая доставка", description: "Только для изолированной БД", code: "checkout-fixture" },
-            prices: [{ currency_code: "rub", amount: 0 }],
+            type: { label: "Тестовая платная доставка", description: "Только для изолированной БД", code: "checkout-fixture" },
+            prices: [{ currency_code: "rub", amount: 350.5 }],
             rules: [
               { attribute: "enabled_in_store", value: "true", operator: "eq" },
               { attribute: "is_return", value: "false", operator: "eq" },
@@ -154,6 +154,8 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           const shipped = await api.post(`/store/carts/${cartId}/shipping-methods`, {
             option_id: shippingOption.id,
           }, { headers });
+          expect(Number(shipped.data.cart.shipping_total)).toBe(350.5);
+          expect(Number(shipped.data.cart.total)).toBe(2249.5);
           const amountKopecks = Math.round(Number(shipped.data.cart.total) * 100);
           const collection = await api.post("/store/payment-collections", { cart_id: cartId }, { headers });
           const paymentCollectionId = collection.data.payment_collection.id as string;
@@ -239,11 +241,21 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           const initCalls = bankRequest.mock.calls.filter(([url]) => String(url).endsWith("/Init"));
           expect(initCalls).toHaveLength(1);
           const request = JSON.parse(String(initCalls[0][1]?.body)) as {
-            Amount: number; Receipt: { Taxation: string; Items: Array<{ Amount: number }> };
+            Amount: number;
+            Receipt: { Taxation: string; Items: Array<{
+              Name: string; Amount: number; Price: number; Quantity: number;
+              PaymentObject: string; Tax: string;
+            }> };
           };
-          expect(request.Amount).toBe(amountKopecks);
+          expect(request.Amount).toBe(224950);
           expect(request.Receipt.Taxation).toBe("usn_income");
-          expect(request.Receipt.Items.reduce((sum, item) => sum + item.Amount, 0)).toBe(amountKopecks);
+          expect(request.Receipt.Items).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+              Name: "Доставка", Price: 35050, Quantity: 1, Amount: 35050,
+              PaymentObject: "service", Tax: "vat105",
+            }),
+          ]));
+          expect(request.Receipt.Items.reduce((sum, item) => sum + item.Amount, 0)).toBe(request.Amount);
         } finally {
           bankRequest.mockRestore();
         }
