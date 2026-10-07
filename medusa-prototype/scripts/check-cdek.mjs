@@ -1,3 +1,5 @@
+import { readOnlyParcel } from "./read-only-parcel.mjs";
+
 const required = (name) => {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -9,11 +11,19 @@ const required = (name) => {
 const baseUrl = required("CDEK_API_BASE_URL").replace(/\/$/, "");
 const clientId = required("CDEK_CLIENT_ID");
 const clientSecret = required("CDEK_CLIENT_SECRET");
-const fromCityCode = Number(process.env.CDEK_FROM_CITY_CODE || 44);
-const toCityCode = Number(process.env.CDEK_TO_CITY_CODE || 137);
+const fromCityCode = Number(required("CDEK_FROM_CITY_CODE"));
+const toCityCode = Number(required("CDEK_TO_CITY_CODE"));
+const { dispatch, parcel } = readOnlyParcel(process.env);
+const packages = [{
+  weight: parcel.weight,
+  length: parcel.length,
+  width: parcel.width,
+  height: parcel.height,
+}];
 
-if (!Number.isInteger(fromCityCode) || !Number.isInteger(toCityCode)) {
-  throw new Error("CDEK_FROM_CITY_CODE and CDEK_TO_CITY_CODE must be integers");
+if (!Number.isSafeInteger(fromCityCode) || fromCityCode <= 0 ||
+  !Number.isSafeInteger(toCityCode) || toCityCode <= 0) {
+  throw new Error("CDEK_FROM_CITY_CODE and CDEK_TO_CITY_CODE must be positive integers");
 }
 
 async function fetchJson(url, init, label) {
@@ -37,6 +47,9 @@ async function fetchJson(url, init, label) {
 
 async function main() {
   console.log(`CDEK environment: ${baseUrl}`);
+  console.log(`Specified dispatch: ${dispatch.name} (${dispatch.postalCode}), ${dispatch.address}`);
+  console.log(`Measured parcel: ${parcel.weight} g, ${parcel.length}x${parcel.width}x${parcel.height} cm`);
+  console.log("CDEK_FROM_CITY_CODE must be checked against this dispatch location; the city code alone does not identify a warehouse.");
 
   const tokenBody = new URLSearchParams({
     grant_type: "client_credentials",
@@ -78,22 +91,40 @@ async function main() {
         lang: "rus",
         from_location: { code: fromCityCode },
         to_location: { code: toCityCode },
-        packages: [{ weight: 1000, length: 30, width: 20, height: 10 }],
+        packages,
       }),
     },
     "Tariff calculation",
   );
   const available = Array.isArray(tariffs?.tariff_codes) ? tariffs.tariff_codes : [];
   if (available.length === 0) {
-    throw new Error("Tariff calculation: no tariffs returned for the sample parcel");
+    throw new Error("Tariff calculation: no tariffs returned for the measured parcel");
   }
   console.log(`Tariffs: OK (${available.length} available)`);
-  for (const tariff of available.slice(0, 5)) {
-    console.log(
-      `  ${tariff.tariff_code}: ${tariff.tariff_name} - ${tariff.delivery_sum} RUB, ` +
-        `${tariff.period_min}-${tariff.period_max} days`,
-    );
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const pad = (value) => String(value).padStart(2, "0");
+  const date = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}+0300`;
+  for (const tariffCode of [136, 137]) {
+    const quote = await fetchJson(`${baseUrl}/calculator/tariff`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        date,
+        type: 1,
+        currency: 1,
+        lang: "rus",
+        tariff_code: tariffCode,
+        from_location: { code: fromCityCode },
+        to_location: { code: toCityCode },
+        packages,
+      }),
+    }, `Tariff ${tariffCode}`);
+    if (typeof quote?.delivery_sum !== "number" || !Number.isFinite(quote.delivery_sum) || quote.delivery_sum < 0) {
+      throw new Error(`Tariff ${tariffCode}: no valid carrier quote`);
+    }
+    console.log(`Tariff ${tariffCode}: OK (${quote.delivery_sum} RUB)`);
   }
+  console.log("Read-only check complete; no carrier shipment was created.");
 }
 
 main().catch((error) => {

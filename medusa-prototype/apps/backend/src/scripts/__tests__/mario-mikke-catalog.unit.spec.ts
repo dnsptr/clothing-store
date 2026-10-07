@@ -6,7 +6,7 @@ import {
   resolveProductPackaging,
   resolveVariantPackaging,
 } from "../data/mario-mikke-catalog";
-import { packagingFieldsToUpdate } from "../import-mario-mikke";
+import importMarioMikkeCatalog, { packagingFieldsToUpdate } from "../import-mario-mikke";
 
 // Pure unit test: exercises only the static demo-catalog data, with no database,
 // Medusa app boot or network. Its first job is simply to give `test:unit` at
@@ -221,5 +221,19 @@ describe("packagingFieldsToUpdate (обновление упаковки сущ�
         desiredPackaging,
       ),
     ).toEqual(desiredPackaging);
+  });
+});
+
+describe("demo import production safety", () => {
+  it("rejects production execution before accessing Medusa or seeding fictional stock", async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      await expect(
+        importMarioMikkeCatalog({ container: null as never, args: [] }),
+      ).rejects.toThrow("Demo catalog import is disabled in production");
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
   });
 });

@@ -7,7 +7,7 @@ import {
   updateProductOptionsWorkflow,
   updateProductsWorkflow,
 } from "@medusajs/medusa/core-flows"
-import { CUSTOMER_CATALOG, CUSTOMER_CATALOG_SHARED, customerVariantSku, parseCustomerColors } from "./data/customer-catalog"
+import { CUSTOMER_CATALOG, CUSTOMER_CATALOG_SHARED, customerVariantSku, indexStableCustomerVariants, parseCustomerColors } from "./data/customer-catalog"
 
 const IMPORT_SOURCE = "mario-mikke-customer-sheet"
 const CATEGORY_DEFINITIONS = {
@@ -84,12 +84,35 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
 
   const { data: existingProducts } = await query.graph({
     entity: "product",
-    fields: ["id", "handle", "status", "metadata", "images.url", "options.id", "options.title", "options.values.value", "variants.id", "variants.sku"],
+    fields: ["id", "handle", "status", "metadata", "images.url", "options.id", "options.title", "options.values.value", "variants.id", "variants.sku", "variants.title", "variants.manage_inventory", "variants.allow_backorder", "variants.inventory_items.inventory_item_id"],
     filters: { handle: desired.map(product => product.handle) },
   })
   const existingByHandle = new Map(existingProducts.map(product => [product.handle, product]))
+  // Never claim an unrelated product by handle or silently turn an unmanaged
+  // variant into a managed one: the latter would still have no inventory item
+  // and Medusa would have no quantity to reserve at checkout.
+  for (const product of desired) {
+    const existing = existingByHandle.get(product.handle)
+    if (!existing) continue
+    if ((existing.metadata as Record<string, unknown> | null)?.import_source !== IMPORT_SOURCE) {
+      throw new Error(`Refusing to overwrite ${product.handle}: product is not owned by the customer-sheet import`)
+    }
+    const desiredSkus = new Set(product.variants.map(variant => variant.sku))
+    for (const variant of existing.variants ?? []) {
+      if (!desiredSkus.has(variant.sku ?? "")) continue
+      if (!variant.manage_inventory || !(variant.inventory_items ?? []).some(item => item?.inventory_item_id)) {
+        throw new Error(`Refusing to import ${product.handle}/${variant.sku}: existing variant has no managed inventory item`)
+      }
+    }
+  }
   const create = desired.filter(product => !existingByHandle.has(product.handle))
   const update = desired.filter(product => existingByHandle.has(product.handle))
+  // Check every occupied SKU before the first product write. A reordered sheet
+  // cannot silently rename a variant while keeping its orders and stock.
+  const existingSkuIndices = new Map(update.map(product => {
+    const existing = existingByHandle.get(product.handle)!
+    return [product.handle, indexStableCustomerVariants(product.handle, product.variants, existing.variants ?? [])] as const
+  }))
 
   if (create.length) await createProductsWorkflow(container).run({ input: { products: create.map(product => ({
     title: `${product.row.name} ${product.row.article}`,
@@ -116,6 +139,8 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
     const hasRealImage = (existing.images ?? []).some(image => image?.url && image.url !== placeholderUrl)
     await updateProductsWorkflow(container).run({ input: { products: [{
       id: existing.id,
+      // Re-import must never publish a sheet row that has not been approved.
+      status: ProductStatus.DRAFT,
       title: `${product.row.name} ${product.row.article}`,
       category_ids: [product.categoryId],
       shipping_profile_id: shippingProfileId,
@@ -135,13 +160,20 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
     }
     if (!optionsReady) continue
 
-    const existingBySku = new Map((existing.variants ?? []).flatMap(variant => variant?.sku ? [[variant.sku, variant]] : []))
+    const existingBySku = existingSkuIndices.get(product.handle)!
     const variantsToCreate = product.variants.filter(variant => !existingBySku.has(variant.sku)).map(variant => ({ ...variant, product_id: existing.id }))
-    const variantsToUpdate = product.variants.filter(variant => existingBySku.has(variant.sku)).map(variant => ({
-      id: existingBySku.get(variant.sku)!.id,
-      title: variant.title,
-      ...(product.row.price ? { prices: variant.prices } : {}),
-    }))
+    const variantsToUpdate = product.variants.filter(variant => existingBySku.has(variant.sku)).map(variant => {
+      const current = existingBySku.get(variant.sku)!
+      if (!("id" in current) || typeof current.id !== "string" || !current.id) {
+        throw new Error(`Missing existing variant ID for ${product.handle}/${variant.sku}`)
+      }
+      return {
+        id: current.id,
+        title: variant.title,
+        allow_backorder: false,
+        ...(product.row.price ? { prices: variant.prices } : {}),
+      }
+    })
     if (variantsToCreate.length || variantsToUpdate.length) await batchProductVariantsWorkflow(container).run({ input: { create: variantsToCreate, update: variantsToUpdate } })
   }
 

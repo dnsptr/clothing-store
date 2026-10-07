@@ -12,6 +12,7 @@ import {
   isMedusaConfigured,
   initializeMedusaPaymentSession,
   listMedusaShippingOptions,
+  isPurchasableShippingOption,
   mapCartLineToProduct,
   medusaPaymentProviderId,
   type MedusaPaymentSession,
@@ -23,6 +24,7 @@ import {
   updateMedusaCartLineItem,
   updateMedusaCart,
 } from "../lib/medusa";
+import { MARIO_MIKKE_PICKUP_STORES } from "../lib/cdek";
 import { approvedTbankPaymentUrl, decideTbankSession } from "../lib/paymentSessionPolicy";
 
 export interface CartItem {
@@ -54,7 +56,18 @@ export interface CheckoutDetails {
    */
   shippingOptionId: string;
   comment: string;
+  deliveryType: "cdek-pvz" | "cdek-courier" | "pickup-store" | "own-courier-mkad" | "yandex-pvz";
+  cdekPvzCode?: string;
+  cdekPvzAddress?: string;
+  cdekCityCode?: number;
+  pickupStoreId?: string;
+  pickupStoreName?: string;
+  yandexPvzId?: string;
+  yandexPvzName?: string;
+  yandexPvzAddress?: string;
+  yandexGeoId?: number;
 }
+
 
 type CheckoutCompletion =
   | { type: "redirect"; paymentUrl: string }
@@ -513,42 +526,71 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Checkout requires Medusa mode with a configured Store API.");
     }
 
+    // Do not allow a stale 0 RUB carrier method or a forged pickup store to
+    // progress toward a payment session, even if the UI had cached the option.
+    if (details.deliveryType !== "pickup-store") {
+      throw new Error("Доставка сейчас недоступна. Выберите самовывоз из магазина.");
+    }
+    const pickupStore = MARIO_MIKKE_PICKUP_STORES.find(
+      (store) => store.id === details.pickupStoreId,
+    );
+    if (!pickupStore) {
+      throw new Error("Выберите действующий магазин для самовывоза.");
+    }
+
     if (!details.shippingOptionId) {
       throw new Error("Не выбран способ доставки.");
     }
 
     const cartId = await getMedusaCartId();
+
+    const metadata: Record<string, unknown> = {
+      delivery_type: "pickup-store",
+      pickup_store_id: pickupStore.id,
+      pickup_store_name: pickupStore.name,
+    };
+    if (details.comment.trim()) {
+      metadata.customer_note = details.comment.trim();
+    }
+
     await updateMedusaCart(cartId, {
       email: details.email,
       shipping_address: {
         first_name: details.firstName,
         last_name: details.lastName,
         phone: details.phone,
-        address_1: details.address,
-        address_2: details.apartment || undefined,
-        city: details.city,
+        address_1: `${pickupStore.name}, ${pickupStore.address}`,
+        city: "Москва",
         country_code: "ru",
-        postal_code: details.zip,
+        postal_code: "",
       },
-      // Комментарий раньше терялся: он лежал в объекте деталей, но в тело
-      // запроса не попадал, а excess property check его не ловил, потому что
-      // передавалась переменная. Логист узнавал о пожеланиях покупателя ниоткуда.
-      ...(details.comment.trim() ? { metadata: { customer_note: details.comment.trim() } } : {}),
+      metadata,
     });
 
     // Способ доставки выбирает покупатель. Витрина больше не подставляет
     // единственную известную ей опцию: список приходит из Medusa, и в заказ
     // уходит ровно то, что выбрано в форме.
     const shippingOptions = await listMedusaShippingOptions(cartId);
-    const shippingOption = shippingOptions.find((option) => option.id === details.shippingOptionId);
+    const shippingOption = shippingOptions.find(
+      (option) => option.id === details.shippingOptionId &&
+        option.type?.code === details.deliveryType &&
+        isPurchasableShippingOption(option),
+    );
     if (!shippingOption) {
       throw new Error(
         "Выбранный способ доставки больше не доступен для этого адреса. Выберите другой.",
       );
     }
 
-    syncRemoteCart(await addMedusaCartShippingMethod(cartId, shippingOption.id));
+    const fulfillmentData = { pickup_store_id: pickupStore.id };
+
+    syncRemoteCart(await addMedusaCartShippingMethod(
+      cartId,
+      shippingOption.id,
+      fulfillmentData,
+    ));
   });
+
 
   /**
    * Способы доставки, доступные для текущей корзины.

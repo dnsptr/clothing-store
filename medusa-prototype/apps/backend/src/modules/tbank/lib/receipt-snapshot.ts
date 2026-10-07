@@ -29,9 +29,15 @@ const RECEIPT_SCHEMA = z.object({
   z.object({ Email: z.string().optional(), Phone: z.string() }),
 ]));
 
+export type ReceiptCartLine = {
+  readonly id: string;
+  readonly quantity: number;
+};
+
 type ReceiptSnapshotPayload = {
   readonly sessionId: string;
   readonly cartId: string;
+  readonly cartLines: readonly ReceiptCartLine[];
   readonly receipt: TBankReceipt;
 };
 
@@ -44,6 +50,10 @@ const SNAPSHOT_SCHEMA = z.object({
   payload: z.object({
     sessionId: z.string(),
     cartId: z.string(),
+    cartLines: z.array(z.object({
+      id: z.string().min(1),
+      quantity: z.number().int().positive(),
+    })),
     receipt: RECEIPT_SCHEMA,
   }),
   signature: z.string().regex(/^[a-f0-9]{64}$/),
@@ -71,6 +81,7 @@ export class ReceiptSnapshotCodec {
     const canonical = JSON.stringify({
       sessionId: payload.sessionId,
       cartId: payload.cartId,
+      cartLines: payload.cartLines.map((line) => ({ id: line.id, quantity: line.quantity })),
       receipt: {
         Email: payload.receipt.Email ?? null,
         Phone: payload.receipt.Phone ?? null,
@@ -96,7 +107,7 @@ export class ReceiptSnapshotCodec {
     const cipher = createCipheriv("aes-256-gcm", this.encryptionKey, initializationVector);
     const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
     return [
-      "v1",
+      "v2",
       initializationVector.toString("base64url"),
       cipher.getAuthTag().toString("base64url"),
       ciphertext.toString("base64url"),
@@ -105,7 +116,7 @@ export class ReceiptSnapshotCodec {
 
   open(envelope: string): ReceiptSnapshot {
     const [version, encodedIv, encodedTag, encodedCiphertext, extra] = envelope.split(".");
-    if (version !== "v1" || !encodedIv || !encodedTag || !encodedCiphertext || extra) {
+    if (version !== "v2" || !encodedIv || !encodedTag || !encodedCiphertext || extra) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: сохранённый чек недействителен");
     }
     try {
