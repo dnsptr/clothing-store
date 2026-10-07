@@ -672,75 +672,46 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   }
 
   /**
-   * Отмена до списания. У Т-Банка отмена и возврат — один метод `Cancel`,
-   * различает их сам банк по текущему состоянию платежа.
+   * Delete an uncreated or already terminal payment session without touching the bank.
+   *
+   * T-Bank uses the same Cancel operation for both voids and refunds. A GetState
+   * preflight cannot make Cancel safe: the payment may be captured between the
+   * read and the mutation. Until the bank offers an atomic pre-capture-only void,
+   * an active payment must be handled manually rather than risk a refund without
+   * physical receipt and a return fiscal receipt.
    */
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
     if (!data.paymentId) {
-      // Платёж не создавался — отменять нечего, и это не ошибка.
       return { data: input.data };
     }
 
-    try {
-      await this.client_.cancel({ paymentId: data.paymentId });
-    } catch (error) {
-      if (!(error instanceof TBankApiError)) {
-        throw error;
-      }
-
-      // `Cancel` не идемпотентен по контракту. После ошибки удалять сессию
-      // можно только если GetState доказывает, что старый URL уже не оплатить.
-      try {
-        const state = await this.client_.getState(data.paymentId);
-        if (
-          state.Status === "CANCELED" ||
-          state.Status === "REVERSED" ||
-          state.Status === "REJECTED" ||
-          state.Status === "DEADLINE_EXPIRED"
-        ) {
-          this.logger_.warn(
-            `tbank: Cancel вернул ${error.errorCode}, но GetState подтвердил ${state.Status}`,
-          );
-          return { data: input.data };
-        }
-      } catch (stateError) {
-        this.logger_.warn(
-          `tbank: после ошибки Cancel не удалось проверить GetState: ${
-            stateError instanceof Error ? stateError.message : String(stateError)
-          }`,
-        );
-      }
-
-      throw error;
+    const state = await this.client_.getState(data.paymentId);
+    if (
+      state.Status === "CANCELED" ||
+      state.Status === "REVERSED" ||
+      state.Status === "REJECTED" ||
+      state.Status === "DEADLINE_EXPIRED"
+    ) {
+      return { data: input.data };
     }
 
-    return { data: input.data };
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      `tbank: платёж ${data.paymentId} имеет статус ${state.Status}; автоматическая отмена заблокирована — требуется ручная проверка`,
+    );
   }
 
   /**
-   * Возврат.
-   *
-   * ВНИМАНИЕ. Возврат по 54-ФЗ требует **возвратного чека** — `Cancel` с
-   * `Receipt` (§8). Построение возвратного чека здесь не реализовано: текущий
-   * builder создаёт только чек 100% предоплаты для `Init`. Поэтому возвраты
-   * проводятся через личный кабинет банка, а не этим методом.
+   * Refunds require proof of physical receipt, an authorized operator and a
+   * return fiscal receipt. None is available in the payment provider input;
+   * sending Cancel here would refund a captured payment without those checks.
    */
-  async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
-    const data = (input.data ?? {}) as TBankSessionData;
-    if (!data.paymentId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        "tbank: возврат невозможен — в сессии нет PaymentId",
-      );
-    }
-
-    await this.client_.cancel({
-      paymentId: data.paymentId,
-      amountKopecks: rublesToKopecks(input.amount),
-    });
-
-    return { data: input.data };
+  async refundPayment(_input: RefundPaymentInput): Promise<RefundPaymentOutput> {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "tbank: автоматический возврат заблокирован — требуется подтверждение приёмки товара и возвратный чек",
+    );
   }
 
   async retrievePayment(input: RetrievePaymentInput): Promise<RetrievePaymentOutput> {
@@ -755,15 +726,15 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   }
 
   /**
-   * Сумма платежа в Т-Банке после `Init` не меняется. Обновление означает, что
-   * корзина изменилась, — тогда создаётся новая сессия, а старая удаляется.
-   * Поэтому здесь только перенос данных.
+   * Сумма платежа в Т-Банке после `Init` не меняется. Обновление переносит
+   * данные; удаление прежней сессии допускается только при подтверждённом
+   * терминальном статусе платежа.
    */
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     return { data: input.data };
   }
 
-  /** Удаление сессии = отмена платежа, если он был создан. */
+  /** Сессию с активным PaymentId нельзя удалить без безопасной отмены в банке. */
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
     await this.cancelPayment(input);
     return { data: input.data };
