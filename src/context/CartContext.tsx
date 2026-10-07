@@ -543,51 +543,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!details.shippingOptionId) {
       throw new Error("Не выбран способ доставки.");
     }
-    if (details.deliveryType === "yandex-pvz" &&
-        (!details.yandexPvzId?.trim() || !details.yandexPvzName?.trim() ||
-         !details.yandexPvzAddress?.trim() || !details.city.trim() ||
-         !Number.isSafeInteger(details.yandexGeoId) || (details.yandexGeoId ?? 0) <= 0)) {
-      throw new Error("Выберите город и пункт выдачи Яндекс Маркет.");
-    }
 
     const cartId = await getMedusaCartId();
 
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = {
+      delivery_type: "pickup-store",
+      pickup_store_id: pickupStore.id,
+      pickup_store_name: pickupStore.name,
+    };
     if (details.comment.trim()) {
       metadata.customer_note = details.comment.trim();
     }
-    if (details.deliveryType) {
-      metadata.delivery_type = details.deliveryType;
-    }
-    if (details.cdekPvzCode) {
-      metadata.cdek_pvz_code = details.cdekPvzCode;
-    }
-    if (details.cdekPvzAddress) {
-      metadata.cdek_pvz_address = details.cdekPvzAddress;
-    }
-    metadata.pickup_store_id = pickupStore.id;
-    metadata.pickup_store_name = pickupStore.name;
-    if (details.pochtaOfficeIndex) {
-      metadata.pochta_office_index = details.pochtaOfficeIndex;
-    }
-    if (details.pochtaOfficeAddress) {
-      metadata.pochta_office_address = details.pochtaOfficeAddress;
-    }
-    if (details.yandexPvzId) {
-      metadata.yandex_pvz_id = details.yandexPvzId;
-    }
-    if (details.yandexPvzAddress) {
-      metadata.yandex_pvz_address = details.yandexPvzAddress;
-    }
-    if (details.yandexPvzName) {
-      metadata.yandex_pvz_name = details.yandexPvzName;
-    }
-
-    const resolvedAddress1 = details.deliveryType === "cdek-pvz" && details.cdekPvzAddress
-      ? details.cdekPvzAddress
-      : details.deliveryType === "yandex-pvz" && details.yandexPvzAddress
-      ? details.yandexPvzAddress
-      : details.address;
 
     await updateMedusaCart(cartId, {
       email: details.email,
@@ -595,13 +561,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         first_name: details.firstName,
         last_name: details.lastName,
         phone: details.phone,
-        address_1: resolvedAddress1,
-        address_2: details.apartment || undefined,
-        city: details.city,
+        address_1: `${pickupStore.name}, ${pickupStore.address}`,
+        city: "Москва",
         country_code: "ru",
-        postal_code: details.zip,
+        postal_code: "",
       },
-      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+      metadata,
     });
 
     // Способ доставки выбирает покупатель. Витрина больше не подставляет
@@ -619,31 +584,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       );
     }
 
-    const deliveryAddress = [details.address, details.apartment].filter(Boolean).join(", ");
-    const fulfillmentData: Record<string, unknown> = {};
-    if (details.deliveryType === "cdek-pvz") {
-      fulfillmentData.city_code = details.cdekCityCode;
-      fulfillmentData.cdek_pvz_code = details.cdekPvzCode;
-      fulfillmentData.cdek_pvz_address = details.cdekPvzAddress;
-    } else if (details.deliveryType === "cdek-courier") {
-      fulfillmentData.city_code = details.cdekCityCode;
-      fulfillmentData.delivery_address = deliveryAddress;
-    } else if (details.deliveryType === "pickup-store") {
-      fulfillmentData.pickup_store_id = details.pickupStoreId;
-    } else if (details.deliveryType === "pochta-parcel") {
-      fulfillmentData.postal_code = details.pochtaOfficeIndex;
-      fulfillmentData.post_office_address = details.pochtaOfficeAddress;
-    } else if (details.deliveryType === "pochta-courier") {
-      fulfillmentData.postal_code = details.zip;
-      fulfillmentData.delivery_address = deliveryAddress;
-    } else if (details.deliveryType === "yandex-pvz") {
-      fulfillmentData.platform_station_id = details.yandexPvzId;
-      fulfillmentData.pvz_name = details.yandexPvzName;
-      fulfillmentData.pvz_address = details.yandexPvzAddress;
-      fulfillmentData.city = details.city;
-      fulfillmentData.geo_id = details.yandexGeoId;
-      fulfillmentData.delivery_mode = "yandex-pvz";
-    }
+    const fulfillmentData = { pickup_store_id: pickupStore.id };
 
     syncRemoteCart(await addMedusaCartShippingMethod(
       cartId,
