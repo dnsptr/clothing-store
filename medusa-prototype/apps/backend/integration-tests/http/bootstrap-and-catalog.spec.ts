@@ -270,7 +270,7 @@ medusaIntegrationTestRunner({
     });
 
     describe("customer sheet import (launch stock safety)", () => {
-      it("keeps re-imported products in draft with managed non-backorder variants and no invented stock", async () => {
+      it("keeps re-imported goods unsellable without invented stock and refuses unmanaged legacy variants", async () => {
         const container = getContainer();
         const query = container.resolve(ContainerRegistrationKeys.QUERY);
         const inventory = container.resolve(Modules.INVENTORY) as unknown as InventoryModuleLike;
@@ -305,6 +305,19 @@ medusaIntegrationTestRunner({
         });
         expect(hidden.status).toBe(200);
         expect(hidden.data.products).toEqual([]);
+        const { data: regions } = await query.graph({
+          entity: "region", fields: ["id", "currency_code"],
+        });
+        const { data: { cart } } = await api.post("/store/carts", {
+          region_id: regions.find(region => region.currency_code === "rub")!.id,
+        }, { headers: { "x-publishable-api-key": publishableKey!.token } });
+        await expect(api.post(`/store/carts/${cart.id}/line-items`, {
+          variant_id: variant!.id, quantity: 1,
+        }, { headers: { "x-publishable-api-key": publishableKey!.token } }))
+          .rejects.toMatchObject({ response: {
+            status: 400,
+            data: { message: expect.stringContaining("not published") },
+          } });
 
         const { data: locations } = await query.graph({
           entity: "stock_location", fields: ["id"],
@@ -336,6 +349,11 @@ medusaIntegrationTestRunner({
         expect(updated.variants?.[0]?.inventory_items?.[0]?.inventory_item_id).toBe(inventoryItemId);
         const levels = await inventory.listInventoryLevels({ inventory_item_id: [inventoryItemId!] });
         expect(levels[0]?.stocked_quantity).toBe(2);
+        await updateProductVariantsWorkflow(container).run({
+          input: { product_variants: [{ id: variant!.id, manage_inventory: false }] },
+        });
+        await expect(importCustomerCatalog({ container }))
+          .rejects.toThrow("existing variant has no managed inventory item");
       });
     });
 
