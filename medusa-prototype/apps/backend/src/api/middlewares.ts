@@ -1,4 +1,5 @@
 import {
+  authenticate,
   defineMiddlewares,
   validateAndTransformBody,
   validateAndTransformQuery,
@@ -46,6 +47,14 @@ export default defineMiddlewares({
       matcher: "/store/carts/:id/complete",
       method: "POST",
       middlewares: [requireCapturedTbankPayment],
+    },
+    {
+      matcher: "/admin/tbank/manual-review*",
+      middlewares: [authenticate("user", ["session", "bearer"])],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review*",
+      middlewares: [authenticate("user", ["session", "bearer"])],
     },
     {
       matcher: "/admin/products/:id",

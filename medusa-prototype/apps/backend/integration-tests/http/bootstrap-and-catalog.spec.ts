@@ -393,6 +393,15 @@ medusaIntegrationTestRunner({
       });
     });
 
+    describe("bank manual review confidentiality", () => {
+      it.each([
+        "/admin/tbank/manual-review",
+        "/admin/tbank/payment-attempts/manual-review",
+      ])("rejects anonymous requests to %s", async (path) => {
+        await expect(api.get(path)).rejects.toMatchObject({ response: { status: 401 } });
+      });
+    });
+
     describe("Store API catalog smoke test", () => {
       it("serves the imported catalog from GET /store/products with a publishable key", async () => {
         const container = getContainer();
