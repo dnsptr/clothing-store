@@ -16,10 +16,6 @@ import {
   MARIO_MIKKE_PICKUP_STORES,
 } from "../../lib/cdek";
 import {
-  type PochtaPostOffice,
-  fetchPostOffices,
-} from "../../lib/pochta";
-import {
   type YandexCity,
   type YandexDeliveryPoint,
   searchYandexCities,
@@ -33,16 +29,12 @@ export type DeliveryType =
   | "cdek-pvz"
   | "cdek-courier"
   | "pickup-store"
-  | "pochta-parcel"
-  | "pochta-courier"
   | "own-courier-mkad";
 
 const DELIVERY_MODES = [
   { type: "yandex-pvz", label: "Яндекс Маркет", subtitle: "ПВЗ и постаматы" },
   { type: "cdek-pvz", label: "СДЭК ПВЗ", subtitle: "Пункт или постамат" },
   { type: "cdek-courier", label: "СДЭК Курьер", subtitle: "До двери" },
-  { type: "pochta-parcel", label: "Почта РФ", subtitle: "В отделение" },
-  { type: "pochta-courier", label: "Почта Курьер", subtitle: "Курьер EMS" },
   { type: "own-courier-mkad", label: "Курьер по Москве", subtitle: "Внутри МКАД" },
   { type: "pickup-store", label: "Самовывоз", subtitle: "3 бутика в Москве" },
 ] as const satisfies readonly { readonly type: DeliveryType; readonly label: string; readonly subtitle: string }[];
@@ -100,7 +92,6 @@ function validateForm(
   selectedPvz: CdekDeliveryPoint | null,
   selectedStoreId: string,
   deliveryCity: string,
-  selectedPochtaOffice: PochtaPostOffice | null,
   cdekCityCode: number | null,
   selectedYandexPvz: YandexDeliveryPoint | null,
   yandexDeliveryCity: string,
@@ -151,28 +142,6 @@ function validateForm(
     }
     if (cdekCityCode === null) {
       errors.city = "Выберите город из списка";
-    }
-    if (!form.address.trim()) {
-      errors.address = "Введите улицу и дом";
-    }
-    if (!form.zip.trim()) {
-      errors.zip = "Введите индекс";
-    } else if (!/^\d{6}$/.test(form.zip)) {
-      errors.zip = "Индекс: 6 цифр";
-    }
-  } else if (deliveryType === "pochta-parcel") {
-    if (!/^\d{6}$/.test(form.zip)) {
-      errors.zip = "Введите индекс из 6 цифр";
-    }
-    if (!selectedPochtaOffice?.settlement && !form.city.trim()) {
-      errors.city = "Укажите город выбранного отделения";
-    }
-    if (!selectedPochtaOffice || selectedPochtaOffice.isClosed) {
-      errors.pochtaOffice = "Выберите почтовое отделение связи";
-    }
-  } else if (deliveryType === "pochta-courier") {
-    if (!form.city.trim()) {
-      errors.city = "Введите город доставки";
     }
     if (!form.address.trim()) {
       errors.address = "Введите улицу и дом";
@@ -285,12 +254,6 @@ export default function CheckoutClient() {
   const [pvzSearchQuery, setPvzSearchQuery] = useState("");
   const [isPvzPickerOpen, setIsPvzPickerOpen] = useState(false);
 
-  // Russian Post state
-  const [pochtaOffices, setPochtaOffices] = useState<PochtaPostOffice[]>([]);
-  const [isLoadingPochta, setIsLoadingPochta] = useState(false);
-  const [selectedPochtaOffice, setSelectedPochtaOffice] = useState<PochtaPostOffice | null>(null);
-  const [pochtaSearchQuery, setPochtaSearchQuery] = useState("");
-  const [isPochtaPickerOpen, setIsPochtaPickerOpen] = useState(false);
 
   // Pickup Store state
   const [selectedStoreId, setSelectedStoreId] = useState(MARIO_MIKKE_PICKUP_STORES[0].id);
@@ -420,27 +383,6 @@ export default function CheckoutClient() {
     };
   }, [cdekCityCode, deliveryType, shippingOptions]);
 
-  // Fetch Russian Post offices when mode or zip changes
-  useEffect(() => {
-    if (deliveryType !== "pochta-parcel" || !/^\d{6}$/.test(form.zip)) return;
-    let active = true;
-    fetchPostOffices(form.zip)
-      .then((offices) => {
-        if (!active) return;
-        setPochtaOffices(offices.filter((office) => !office.isClosed));
-      })
-      .catch(() => {
-        if (!active) return;
-        setPochtaOffices([]);
-        setSelectedPochtaOffice(null);
-      })
-      .finally(() => {
-        if (active) setIsLoadingPochta(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [form.zip, deliveryType]);
 
   useEffect(() => {
     const resetSubmission = () => {
@@ -454,17 +396,7 @@ export default function CheckoutClient() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: value,
-      ...(name === "zip" && deliveryType === "pochta-parcel" ? { city: "" } : {}),
-    }));
-    if (name === "zip" && deliveryType === "pochta-parcel") {
-      setPochtaOffices([]);
-      setSelectedPochtaOffice(null);
-      setIsLoadingPochta(/^\d{6}$/.test(value));
-      setIsPochtaPickerOpen(true);
-    }
+    setForm((prev) => ({ ...prev, [name]: value }));
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
@@ -614,16 +546,6 @@ export default function CheckoutClient() {
     );
   });
 
-  const filteredPochtaOffices = pochtaOffices.filter((o) => {
-    if (o.isClosed) return false;
-    const q = pochtaSearchQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      o.postalCode.includes(q) ||
-      o.addressSource.toLowerCase().includes(q) ||
-      (o.settlement && o.settlement.toLowerCase().includes(q))
-    );
-  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -636,17 +558,12 @@ export default function CheckoutClient() {
       selectedPvz,
       selectedStoreId,
       deliveryCity,
-      selectedPochtaOffice,
       cdekCityCode,
       validYandexPvz,
       yandexDeliveryCity,
       yandexGeoId,
     );
 
-    if (deliveryType === "pochta-parcel" &&
-        (isLoadingPochta || !selectedPochtaOffice || !pochtaOffices.includes(selectedPochtaOffice))) {
-      newErrors.pochtaOffice = "Выберите почтовое отделение связи";
-    }
     if (!effectiveShippingOptionId) {
       newErrors.shippingOption = "Этот способ доставки сейчас недоступен. Выберите доступный вариант.";
     }
@@ -668,8 +585,6 @@ export default function CheckoutClient() {
     let cdekPvzAddress: string | undefined;
     let pickupStoreId: string | undefined;
     let pickupStoreName: string | undefined;
-    let pochtaOfficeIndex: string | undefined;
-    let pochtaOfficeAddress: string | undefined;
     let yandexPvzId: string | undefined;
     let yandexPvzName: string | undefined;
     let yandexPvzAddress: string | undefined;
@@ -689,16 +604,6 @@ export default function CheckoutClient() {
       cdekPvzAddress = selectedPvz ? `${selectedPvz.name}, ${selectedPvz.location.address}` : undefined;
     } else if (deliveryType === "cdek-courier") {
       finalCity = deliveryCity.trim();
-      finalAddress = form.address.trim();
-      finalZip = form.zip.trim();
-    } else if (deliveryType === "pochta-parcel") {
-      finalCity = selectedPochtaOffice?.settlement || form.city.trim();
-      finalAddress = selectedPochtaOffice ? selectedPochtaOffice.addressSource : form.address.trim();
-      finalZip = selectedPochtaOffice ? selectedPochtaOffice.postalCode : form.zip.trim();
-      pochtaOfficeIndex = selectedPochtaOffice?.postalCode;
-      pochtaOfficeAddress = selectedPochtaOffice?.addressSource;
-    } else if (deliveryType === "pochta-courier") {
-      finalCity = form.city.trim();
       finalAddress = form.address.trim();
       finalZip = form.zip.trim();
     } else if (deliveryType === "own-courier-mkad") {
@@ -725,7 +630,7 @@ export default function CheckoutClient() {
       phone: normalizedPhone,
       city: finalCity,
       address: finalAddress,
-      apartment: (deliveryType === "cdek-courier" || deliveryType === "pochta-courier" || deliveryType === "own-courier-mkad") ? form.apartment.trim() : "",
+      apartment: (deliveryType === "cdek-courier" || deliveryType === "own-courier-mkad") ? form.apartment.trim() : "",
       zip: finalZip,
       shippingOptionId: effectiveShippingOptionId,
       comment: form.comment,
@@ -739,8 +644,6 @@ export default function CheckoutClient() {
       ),
       pickupStoreId,
       pickupStoreName,
-      pochtaOfficeIndex,
-      pochtaOfficeAddress,
       yandexPvzId,
       yandexPvzName,
       yandexPvzAddress,
@@ -1073,11 +976,6 @@ export default function CheckoutClient() {
                       setPvzList([]);
                       setSelectedPvz(null);
                       setIsLoadingPvz(mode.type === "cdek-pvz" && cdekCityCode !== null);
-                      setPochtaOffices([]);
-                      setSelectedPochtaOffice(null);
-                      setIsPochtaPickerOpen(true);
-                      setIsLoadingPochta(mode.type === "pochta-parcel" && /^\d{6}$/.test(form.zip));
-                      if (mode.type === "pochta-parcel") setForm((prev) => ({ ...prev, city: "" }));
                       ++yandexPvzRequestRef.current;
                       setYandexPvzList([]);
                       setLoadedYandexGeoId(null);
@@ -1089,7 +987,6 @@ export default function CheckoutClient() {
                         pvz: "",
                         yandexPvz: "",
                         yandexCity: "",
-                        pochtaOffice: "",
                         address: "",
                         zip: "",
                       }));
@@ -1482,6 +1379,9 @@ export default function CheckoutClient() {
 
             {deliveryType === "own-courier-mkad" && (
               <div>
+                <p className={styles.deliverySub} style={{ marginBottom: 12 }}>
+                  Ежедневно 12:00–22:00, предварительно позвоним.
+                </p>
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
                     <label className={styles.formLabel}>Город *</label>
@@ -1541,172 +1441,6 @@ export default function CheckoutClient() {
               </div>
             )}
 
-            {/* ── Mode: Russian Post Parcel in Post Office ── */}
-            {deliveryType === "pochta-parcel" && (
-              <div>
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Почтовый индекс *</label>
-                    <input
-                      name="zip"
-                      required
-                      inputMode="numeric"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
-                      placeholder="101000"
-                      value={form.zip}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                    />
-                    {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
-                  </div>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Город / населённый пункт *</label>
-                    <input
-                      name="city"
-                      className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
-                      placeholder="Москва"
-                      value={form.city}
-                      onChange={handleChange}
-                    />
-                    {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
-                  </div>
-                </div>
-
-                {selectedPochtaOffice && !isPochtaPickerOpen ? (
-                  <div className={styles.selectedPvzSummary}>
-                    <div className={styles.selectedPvzInfo}>
-                      <div className={styles.selectedPvzLabel}>Выбранное отделение Почты России:</div>
-                      <strong>Отделение {selectedPochtaOffice.postalCode}</strong>
-                      <div>{selectedPochtaOffice.addressSource}</div>
-                      <div className={styles.pvzMeta} style={{ marginTop: 4 }}>
-                        <span className={styles.pvzHours}>{selectedPochtaOffice.workHours}</span>
-                        {selectedPochtaOffice.isClosed && <span style={{ color: "var(--danger)" }}>Временно закрыто</span>}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className={styles.changePvzBtn}
-                      onClick={() => setIsPochtaPickerOpen(true)}
-                    >
-                      Изменить
-                    </button>
-                  </div>
-                ) : (
-                  <div className={styles.pvzContainer}>
-                    <div className={styles.pvzHeader}>
-                      <input
-                        type="text"
-                        className={styles.pvzSearchInput}
-                        placeholder="Поиск по индексу или адресу отделения..."
-                        value={pochtaSearchQuery}
-                        onChange={(e) => setPochtaSearchQuery(e.target.value)}
-                      />
-                    </div>
-                    <div className={styles.pvzList}>
-                      {isLoadingPochta ? (
-                        <div className={styles.pvzEmpty}>Загружаем отделения связи Почты России…</div>
-                      ) : filteredPochtaOffices.length === 0 ? (
-                        <div className={styles.pvzEmpty}>Отделения не найдены по указанному индексу.</div>
-                      ) : (
-                        filteredPochtaOffices.map((office) => {
-                          const isSelected = selectedPochtaOffice?.postalCode === office.postalCode;
-                          return (
-                            <div
-                              key={office.postalCode}
-                              className={`${styles.pvzItem} ${isSelected ? styles.pvzItemActive : ""}`}
-                              onClick={() => {
-                                if (office.isClosed) return;
-                                setSelectedPochtaOffice(office);
-                                if (office.settlement) setForm((prev) => ({ ...prev, city: office.settlement ?? "" }));
-                                setIsPochtaPickerOpen(false);
-                                setErrors((prev) => ({ ...prev, pochtaOffice: "", ...(office.settlement ? { city: "" } : {}) }));
-                              }}
-                            >
-                              <div className={styles.pvzItemTop}>
-                                <span className={styles.pvzAddress}>ОПС {office.postalCode} · {office.addressSource}</span>
-                                <span className={styles.pvzBadge}>Почта РФ</span>
-                              </div>
-                              <div className={styles.pvzMeta}>
-                                <span className={styles.pvzHours}>{office.workHours}</span>
-                                {office.settlement && <span>· {office.settlement}</span>}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-                {errors.pochtaOffice && <span className={styles.fieldError}>{errors.pochtaOffice}</span>}
-              </div>
-            )}
-
-            {/* ── Mode: Russian Post Courier EMS ── */}
-            {deliveryType === "pochta-courier" && (
-              <div>
-                <p className={styles.deliverySub} style={{ marginBottom: 12 }}>
-                  Доставка «Курьер онлайн» / EMS Почты России до двери по всей стране:
-                </p>
-                <div className={styles.formRow}>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Город *</label>
-                    <input
-                      name="city"
-                      required
-                      className={`${styles.formInput}${errors.city ? ` ${styles.formInputError}` : ""}`}
-                      placeholder="Москва"
-                      value={form.city}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                    />
-                    {errors.city && <span className={styles.fieldError}>{errors.city}</span>}
-                  </div>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Индекс *</label>
-                    <input
-                      name="zip"
-                      required
-                      inputMode="numeric"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      className={`${styles.formInput}${errors.zip ? ` ${styles.formInputError}` : ""}`}
-                      placeholder="123456"
-                      value={form.zip}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                    />
-                    {errors.zip && <span className={styles.fieldError}>{errors.zip}</span>}
-                  </div>
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Улица, дом, корпус *</label>
-                  <input
-                    name="address"
-                    required
-                    className={`${styles.formInput}${errors.address ? ` ${styles.formInputError}` : ""}`}
-                    placeholder="ул. Ленина, д. 10"
-                    value={form.address}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                  />
-                  {errors.address && <span className={styles.fieldError}>{errors.address}</span>}
-                </div>
-
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Квартира / офис</label>
-                  <input
-                    name="apartment"
-                    className={styles.formInput}
-                    placeholder="кв. 15"
-                    value={form.apartment}
-                    onChange={handleChange}
-                  />
-                </div>
-              </div>
-            )}
 
             {/* ── Mode: Retail Store Pickup ── */}
             {deliveryType === "pickup-store" && (

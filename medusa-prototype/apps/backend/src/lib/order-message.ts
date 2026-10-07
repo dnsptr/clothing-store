@@ -1,4 +1,5 @@
 import { MOSCOW_PICKUP_STORES } from "../modules/cdek/fulfillment-data";
+import { OWN_COURIER_OPTION } from "../modules/own-courier/provider-id";
 
 /**
  * Текст уведомления о новом заказе.
@@ -177,6 +178,9 @@ export function buildNewOrderMessage(order: OrderForMessage): string {
     `Доставка: ${deliveryLine(order, pickupStore)}`,
   ];
   if (pickupStore) lines.push(pickupStore);
+  if (order.shipping_methods?.[0]?.data?.delivery_mode === OWN_COURIER_OPTION) {
+    lines.push("Свой курьер: ежедневно 12:00–22:00; до выезда позвонить покупателю и уточнить время.");
+  }
   lines.push("", "Состав:");
 
   const items = order.items ?? [];

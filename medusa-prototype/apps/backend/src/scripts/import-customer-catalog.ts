@@ -162,12 +162,18 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
 
     const existingBySku = existingSkuIndices.get(product.handle)!
     const variantsToCreate = product.variants.filter(variant => !existingBySku.has(variant.sku)).map(variant => ({ ...variant, product_id: existing.id }))
-    const variantsToUpdate = product.variants.filter(variant => existingBySku.has(variant.sku)).map(variant => ({
-      id: existingBySku.get(variant.sku)!.id,
-      title: variant.title,
-      allow_backorder: false,
-      ...(product.row.price ? { prices: variant.prices } : {}),
-    }))
+    const variantsToUpdate = product.variants.filter(variant => existingBySku.has(variant.sku)).map(variant => {
+      const current = existingBySku.get(variant.sku)!
+      if (!("id" in current) || typeof current.id !== "string" || !current.id) {
+        throw new Error(`Missing existing variant ID for ${product.handle}/${variant.sku}`)
+      }
+      return {
+        id: current.id,
+        title: variant.title,
+        allow_backorder: false,
+        ...(product.row.price ? { prices: variant.prices } : {}),
+      }
+    })
     if (variantsToCreate.length || variantsToUpdate.length) await batchProductVariantsWorkflow(container).run({ input: { create: variantsToCreate, update: variantsToUpdate } })
   }
 

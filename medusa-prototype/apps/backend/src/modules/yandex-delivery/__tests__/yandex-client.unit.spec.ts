@@ -117,6 +117,17 @@ describe("YandexDeliveryClient", () => {
     });
   });
 
+  it("rejects a zero upstream tariff rather than passing a free quote to checkout", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ pricing_total: "0.00 RUB" }),
+    });
+    await expect(client.calculatePricing({
+      destinationStationId: "station_dest_123",
+      weightGrossGrams: 1500, dxCm: 30, dyCm: 20, dzCm: 15, assessedPriceRub: 5000,
+    })).rejects.toThrow(YandexDeliveryApiError);
+  });
+
   it("creates and confirms a PVZ order in Yandex Platform API", async () => {
     global.fetch = jest.fn()
       .mockResolvedValueOnce({

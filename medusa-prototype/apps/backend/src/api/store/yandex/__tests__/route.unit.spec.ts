@@ -151,7 +151,7 @@ describe("Yandex Delivery public routes", () => {
     expect(calculate).not.toHaveBeenCalled();
   });
 
-  it("prices measured cart items for a confirmed point while charging the shopper nothing", async () => {
+  it("returns the paid customer charge for a measured cart and confirmed pickup point", async () => {
     mockConfirmedPoint();
     const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockResolvedValue({
       priceRub: 310,
@@ -165,7 +165,7 @@ describe("Yandex Delivery public routes", () => {
       price: 310,
       delivery_days: 3,
       currency: "RUB",
-      customer_cost: 0,
+      customer_cost: 310,
     });
     expect(calculate).toHaveBeenCalledWith({
       destinationStationId: "station_dest_123",
@@ -175,6 +175,17 @@ describe("Yandex Delivery public routes", () => {
       dzCm: 15,
       assessedPriceRub: 3500,
     });
+  });
+
+  it("does not advertise a free delivery when the carrier returns a zero quote", async () => {
+    mockConfirmedPoint();
+    jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockResolvedValue({
+      priceRub: 0, currency: "RUB",
+    });
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION }), response);
+    expect(response.statusCode).toBe(502);
+    expect(response.body).toEqual({ message: "Delivery provider unavailable" });
   });
 
   it("rate limits repeated requests before upstream work", async () => {

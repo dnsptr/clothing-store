@@ -145,6 +145,15 @@ describe("buildNewOrderMessage", () => {
     expect(message).not.toContain("ул. Тверская, 1");
   });
 
+  it("reminds staff to call before dispatching the own courier during the confirmed window", () => {
+    const message = buildNewOrderMessage({
+      ...ORDER,
+      shipping_methods: [{ name: "Курьер по Москве", data: { delivery_mode: "own-courier-mkad" } }],
+    });
+    expect(message).toContain("Свой курьер: ежедневно 12:00–22:00; до выезда позвонить покупателю");
+    expect(message).toContain("Телефон: +7 900 000-00-00");
+  });
+
   it("does not mistake a courier method carrying a stale pickup ID for store pickup", () => {
     const message = buildNewOrderMessage({
       ...ORDER,

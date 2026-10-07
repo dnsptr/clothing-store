@@ -3,7 +3,6 @@ import { loadEnv, defineConfig, Modules } from '@medusajs/framework/utils'
 import { resolveTbankPaymentModules } from './src/modules/tbank/config'
 import { parseCdekEnvironment } from './src/modules/cdek/config'
 import { parseYandexDeliveryEnvironment } from './src/modules/yandex-delivery/config'
-import { parsePochtaEnvironment } from './src/modules/pochta/config'
 import { parseOwnCourierEnvironment } from './src/modules/own-courier/config'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
@@ -14,7 +13,6 @@ const IS_BUILD = process.argv.some((arg) => arg === 'build')
 const paymentModules = resolveTbankPaymentModules(process.env)
 const cdekConfig = parseCdekEnvironment(process.env)
 const yandexConfig = parseYandexDeliveryEnvironment(process.env)
-const pochtaConfig = parsePochtaEnvironment(process.env)
 const ownCourierConfig = parseOwnCourierEnvironment(process.env)
 
 /**
@@ -253,7 +251,7 @@ const fileModule = {
 
 /**
  * Модуль доставки (Fulfillment).
- * Включает встроенный manual-провайдер, СДЭК, Яндекс Доставку и Почту России
+ * Включает встроенный manual-провайдер, СДЭК и Яндекс Доставку
  * при наличии соответствующих переменных окружения (*_ENABLED=true).
  */
 const fulfillmentModule = {
@@ -280,15 +278,6 @@ const fulfillmentModule = {
               resolve: './src/modules/yandex-delivery',
               id: 'yandex-delivery',
               options: yandexConfig.options,
-            },
-          ]
-        : []),
-      ...(pochtaConfig.enabled
-        ? [
-            {
-              resolve: './src/modules/pochta',
-              id: 'pochta',
-              options: pochtaConfig.options,
             },
           ]
         : []),

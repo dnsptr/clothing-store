@@ -18,8 +18,7 @@
     "backend:lint": "npm --prefix medusa-prototype run lint",
     "integrations:check:cdek": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-cdek.mjs",
     "integrations:check:tbank": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-tbank.mjs",
-    "integrations:check:yandex": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-yandex.mjs",
-    "integrations:check:pochta": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-pochta.mjs"
+    "integrations:check:yandex": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-yandex.mjs"
   },
   "dependencies": {
     "next": "16.2.12",

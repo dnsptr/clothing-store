@@ -256,7 +256,6 @@ jobs:
           TELEGRAM_CHAT_ID: "-1001234567890"
           CDEK_ENABLED: "false"
           YANDEX_DELIVERY_ENABLED: "false"
-          POCHTA_ENABLED: "false"
           OWN_COURIER_ENABLED: "false"
       - name: Upload browser screenshots
         if: always()

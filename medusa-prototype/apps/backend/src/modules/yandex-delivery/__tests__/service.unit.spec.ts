@@ -100,14 +100,50 @@ describe("YandexDeliveryFulfillmentProviderService", () => {
     expect(calculate).not.toHaveBeenCalled();
   });
 
-  it("returns zero customer price only after a measured cart gets a real quote", async () => {
+  it("charges the customer the measured Yandex quote in rubles", async () => {
     const client = service.getYandexClient();
     jest.spyOn(client, "getPickupPoints").mockResolvedValue([STATION]);
-    jest.spyOn(client, "calculatePricing").mockResolvedValue({
-      priceRub: 350, deliveryDays: 2, currency: "RUB",
+    const calculate = jest.spyOn(client, "calculatePricing").mockResolvedValue({
+      priceRub: 350.5, deliveryDays: 2, currency: "RUB",
     });
     expect(await service.calculatePrice({ id: YANDEX_OPTION_PVZ }, SELECTION, CONTEXT as unknown as Record<string, unknown>))
-      .toEqual({ calculated_amount: 0, is_calculated_price_tax_inclusive: true });
+      .toEqual({ calculated_amount: 350.5, is_calculated_price_tax_inclusive: true });
+    expect(calculate).toHaveBeenCalledWith({
+      destinationStationId: STATION.id, weightGrossGrams: 1000,
+      dxCm: 30, dyCm: 20, dzCm: 10, assessedPriceRub: 24000,
+    });
+  });
+
+  it("refuses a zero or malformed paid quote before showing a shipping price", async () => {
+    const client = service.getYandexClient();
+    jest.spyOn(client, "getPickupPoints").mockResolvedValue([STATION]);
+    const calculate = jest.spyOn(client, "calculatePricing");
+    for (const priceRub of [0, Number.NaN, -1]) {
+      calculate.mockResolvedValueOnce({ priceRub, currency: "RUB" });
+      await expect(service.calculatePrice({ id: YANDEX_OPTION_PVZ }, SELECTION,
+        CONTEXT as unknown as Record<string, unknown>)).rejects.toThrow(YandexFulfillmentDataError);
+    }
+  });
+
+  it("refuses a zero quote during validation and before creating a carrier order", async () => {
+    const client = service.getYandexClient();
+    jest.spyOn(client, "getPickupPoints").mockResolvedValue([STATION]);
+    const calculate = jest.spyOn(client, "calculatePricing");
+    calculate.mockResolvedValueOnce({ priceRub: 0, currency: "RUB" });
+    await expect(service.validateFulfillmentData({ id: YANDEX_OPTION_PVZ }, SELECTION, CONTEXT))
+      .rejects.toThrow(YandexFulfillmentDataError);
+
+    calculate.mockResolvedValueOnce({ priceRub: 350, currency: "RUB" });
+    const validated = await service.validateFulfillmentData({ id: YANDEX_OPTION_PVZ }, SELECTION, CONTEXT);
+    const create = jest.spyOn(client, "createPvzOrder");
+    await expect(service.createFulfillment({ ...validated, carrier_quote_amount: 0 },
+      [{ line_item_id: ITEM.id, quantity: 2 }], ORDER,
+      { shipping_option_id: "so_yandex_123" })).rejects.toThrow(YandexFulfillmentDataError);
+    expect(create).not.toHaveBeenCalled();
+    calculate.mockResolvedValueOnce({ priceRub: 0, currency: "RUB" });
+    await expect(service.createFulfillment(validated, [{ line_item_id: ITEM.id, quantity: 2 }],
+      ORDER, { shipping_option_id: "so_yandex_123" })).rejects.toThrow(YandexFulfillmentDataError);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("creates fulfillment with a Medusa so_ ID only after PVZ, quote and order items are verified", async () => {

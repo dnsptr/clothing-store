@@ -92,28 +92,14 @@ npm run integrations:check:yandex
 
 The command looks up Moscow, lists Yandex Market pickup points, and calculates
 `self_pickup` pricing for an explicitly illustrative parcel (1 kg, 20×15×10 cm).
-It does not validate real product measurements, create an offer, confirm a
-shipment, or verify production access when pointed at a test host.
+Yandex delivery is paid by the buyer: a positive quote for the measured,
+packaged order must appear in checkout and the payment total before enabling
+its shipping option. The check does not validate real product measurements,
+create an offer, confirm a shipment, or verify production access when pointed
+at a test host. Three dispatch points are known, but this integration accepts
+one configured source station: confirm its mapping to the actual dispatch
+location before running it.
 
-## Russian Post (Почта России)
-
-Use the Otpravka API credentials issued in `otpravka.pochta.ru`:
-
-```dotenv
-POCHTA_ACCESS_TOKEN=...
-POCHTA_USER_KEY=...
-POCHTA_API_BASE_URL=https://otpravka-api.pochta.ru/1.0
-POCHTA_FROM_INDEX=... # confirmed postcode of dispatch
-```
-
-Run the read-only check from the repository root:
-
-```bash
-npm run integrations:check:pochta
-```
-
-The command calculates tariffs for "Посылка онлайн" and "Курьер онлайн" between
-Moscow and Saint Petersburg. It does not create batch orders or barcodes.
 
 Official references:
 
@@ -123,4 +109,3 @@ Official references:
 - https://developer.tbank.ru/eacq/api/check-order
 - https://developer.tbank.ru/eacq/intro/developer/token
 - https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/
-- https://otpravka.pochta.ru/specification

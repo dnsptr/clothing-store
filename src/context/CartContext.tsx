@@ -56,14 +56,12 @@ export interface CheckoutDetails {
    */
   shippingOptionId: string;
   comment: string;
-  deliveryType: "cdek-pvz" | "cdek-courier" | "pickup-store" | "pochta-parcel" | "pochta-courier" | "own-courier-mkad" | "yandex-pvz";
+  deliveryType: "cdek-pvz" | "cdek-courier" | "pickup-store" | "own-courier-mkad" | "yandex-pvz";
   cdekPvzCode?: string;
   cdekPvzAddress?: string;
   cdekCityCode?: number;
   pickupStoreId?: string;
   pickupStoreName?: string;
-  pochtaOfficeIndex?: string;
-  pochtaOfficeAddress?: string;
   yandexPvzId?: string;
   yandexPvzName?: string;
   yandexPvzAddress?: string;
