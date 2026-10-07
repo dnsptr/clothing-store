@@ -172,7 +172,7 @@ jobs:
           DB_USERNAME: postgres
           DB_PASSWORD: postgres
 
-      # Run the payment recovery lease and projection tests against PostgreSQL,
+      # Run payment recovery and fiscal audit persistence against PostgreSQL,
       # not as silently skipped unit suites without TBANK_INBOX_TEST_DATABASE_URL.
       - name: Run TBank notification integration tests
         run: npm run test:integration:modules -- --runTestsByPath src/modules/tbank-notifications/__tests__/persistence.integration.spec.ts src/modules/tbank-notifications/__tests__/fiscal-persistence.integration.spec.ts src/modules/tbank/__tests__/payment-reconciler.integration.spec.ts
