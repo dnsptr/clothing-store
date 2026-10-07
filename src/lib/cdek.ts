@@ -131,7 +131,7 @@ export const MARIO_MIKKE_PICKUP_STORES: PickupStore[] = [
   {
     id: "store_govorovo",
     name: "ТЦ «Говорово»",
-    address: "г. Москва, 47-й км МКАД, д. 31, стр. 1",
+    address: "г. Москва, 47-й км МКАД, вл. 31, стр. 1",
     metro: "м. Говорово",
     workHours: "10:00 — 22:00 ежедневно",
     phone: "+7 (926) 057-72-05",

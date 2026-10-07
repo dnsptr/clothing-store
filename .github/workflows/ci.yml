@@ -243,6 +243,8 @@ jobs:
           TBANK_SUCCESS_URL: https://mariomikke.shop/checkout/success
           TBANK_FAIL_URL: https://mariomikke.shop/checkout/fail
           TBANK_NOTIFICATION_URL: https://api.mariomikke.shop/hooks/payment/tbank
+          TELEGRAM_BOT_TOKEN: OfflinePickupBot
+          TELEGRAM_CHAT_ID: "-1001234567890"
           CDEK_ENABLED: "false"
           YANDEX_DELIVERY_ENABLED: "false"
           POCHTA_ENABLED: "false"

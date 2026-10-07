@@ -78,7 +78,7 @@ async function stopStorefront(child: ChildProcess): Promise<void> {
 describeBrowser("browser checkout against real Medusa and PostgreSQL (offline bank)", () => {
   medusaIntegrationTestRunner({
     testSuite: ({ api, getContainer }) => {
-      it("creates one captured order after signed CONFIRMED and its replay, without a real bank request", async () => {
+      it("preserves the selected Govorovo store through signed payment and one staff alert on replay", async () => {
         const container = getContainer();
         const query = container.resolve(ContainerRegistrationKeys.QUERY);
         await seedInitialData({ container });
@@ -108,10 +108,10 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
         });
         await createShippingOptionsWorkflow(container).run({
           input: [{
-            name: "Тестовая доставка", price_type: "flat", provider_id: "manual_manual",
+            name: "Самовывоз из магазина", price_type: "flat", provider_id: "manual_manual",
             service_zone_id: fulfillmentSet.service_zones[0].id,
             shipping_profile_id: profile.id,
-            type: { label: "Тестовая доставка", description: "Только изолированная БД", code: "browser-fixture" },
+            type: { label: "Самовывоз", description: "Только изолированная БД", code: "pickup-store" },
             prices: [{ currency_code: "rub", amount: 0 }],
             rules: [
               { attribute: "enabled_in_store", value: "true", operator: "eq" },
@@ -129,11 +129,17 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
         if (typeof backendUrl !== "string") throw new Error("Medusa test server has no HTTP baseURL");
         const originalFetch = global.fetch;
         const bankCalls: string[] = [];
+        const telegramMessages: Array<{ chat_id: string; text: string }> = [];
         let bankStatus = "NEW";
         const bankPaymentId = "3456789";
         let bankOrderId = "";
         const bank = jest.spyOn(global, "fetch").mockImplementation(async (input, options) => {
           const url = String(input);
+          if (url === "https://api.telegram.org/botOfflinePickupBot/sendMessage") {
+            const message = JSON.parse(String(options?.body)) as { chat_id: string; text: string };
+            telegramMessages.push(message);
+            return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 1 } }) } as Response;
+          }
           if (url.startsWith("https://rest-api-test.tinkoff.ru/v2/")) {
             const method = url.slice(url.lastIndexOf("/") + 1);
             if (method !== "Init" && method !== "GetState") throw new Error(`Unexpected bank operation: ${method}`);
@@ -172,14 +178,14 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
           }, cartId);
           await page.goto(`${SITE_URL}/checkout`);
           await expectBrowser(page.getByRole("heading", { name: "Оформление заказа" })).toBeVisible();
-          await expectBrowser(page.locator('input[name="shippingOption"]')).toBeChecked({ timeout: 20_000 });
+          await expectBrowser(page.getByRole("tab", { name: /Самовывоз/ })).toHaveAttribute("aria-selected", "true");
+          await page.getByText("ТЦ «Говорово»").click();
+          await expectBrowser(page.locator('input[name="pickupStore"]').nth(1)).toBeChecked();
+          await expectBrowser(page.getByText("г. Москва, 47-й км МКАД, вл. 31, стр. 1")).toBeVisible();
           await page.locator('input[name="firstName"]').fill("Тест");
           await page.locator('input[name="lastName"]').fill("Покупатель");
           await page.locator('input[name="email"]').fill("browser-checkout@example.test");
           await page.locator('input[name="phone"]').fill("+79991234567");
-          await page.locator('input[name="city"]').fill("Москва");
-          await page.locator('input[name="zip"]').fill("101000");
-          await page.locator('input[name="address"]').fill("Тестовая, 1");
           await page.locator('input[type="checkbox"]').check();
           await page.getByRole("button", { name: "Подтвердить заказ" }).click();
           await expectBrowser(page).toHaveURL(BANK_URL, { timeout: 30_000 });
@@ -213,6 +219,12 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
             await delay(200);
           }
           expect(processed).toBe(true);
+          for (let attempt = 0; attempt < 100 && telegramMessages.length === 0; attempt++) await delay(200);
+          expect(telegramMessages).toHaveLength(1);
+          expect(telegramMessages[0]).toMatchObject({
+            chat_id: "-1001234567890",
+            text: expect.stringContaining("Магазин самовывоза: ТЦ «Говорово» — г. Москва, 47-й км МКАД, вл. 31, стр. 1"),
+          });
           expect((await api.post("/hooks/payment/tbank", notification)).data).toBe("OK");
 
           const { data: orders } = await query.graph({
@@ -222,11 +234,22 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
             entity: "payment", fields: ["id", "payment_session_id", "captured_at"], filters: { payment_session_id: sessionId },
           });
           expect(orders).toHaveLength(1);
+          const { data: [paidOrder] } = await query.graph({
+            entity: "order", fields: ["shipping_methods.name", "shipping_methods.data"],
+            filters: { id: orders[0].order_id },
+          });
+          expect(paidOrder.shipping_methods).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+              name: "Самовывоз из магазина",
+              data: expect.objectContaining({ pickup_store_id: "store_govorovo" }),
+            }),
+          ]));
           expect(payments).toHaveLength(1);
           expect(payments[0].captured_at).toBeTruthy();
           expect(await inbox.listTbankPaymentAttempts({ payment_session_id: sessionId })).toHaveLength(1);
           expect(await inbox.listTbankNotifications({ payment_id: bankPaymentId, status: "CONFIRMED" })).toHaveLength(1);
           expect(bankCalls.filter((method) => method === "Init")).toHaveLength(1);
+          expect(telegramMessages).toHaveLength(1);
           expect((await api.get(`/store/payment-status/${cartId}`, { headers })).data)
             .toEqual({ payment: "confirmed", order: "ready" });
 
