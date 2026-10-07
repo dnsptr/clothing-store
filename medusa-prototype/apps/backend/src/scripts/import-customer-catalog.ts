@@ -84,10 +84,27 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
 
   const { data: existingProducts } = await query.graph({
     entity: "product",
-    fields: ["id", "handle", "status", "metadata", "images.url", "options.id", "options.title", "options.values.value", "variants.id", "variants.sku"],
+    fields: ["id", "handle", "status", "metadata", "images.url", "options.id", "options.title", "options.values.value", "variants.id", "variants.sku", "variants.manage_inventory", "variants.allow_backorder", "variants.inventory_items.inventory_item_id"],
     filters: { handle: desired.map(product => product.handle) },
   })
   const existingByHandle = new Map(existingProducts.map(product => [product.handle, product]))
+  // Never claim an unrelated product by handle or silently turn an unmanaged
+  // variant into a managed one: the latter would still have no inventory item
+  // and Medusa would have no quantity to reserve at checkout.
+  for (const product of desired) {
+    const existing = existingByHandle.get(product.handle)
+    if (!existing) continue
+    if ((existing.metadata as Record<string, unknown> | null)?.import_source !== IMPORT_SOURCE) {
+      throw new Error(`Refusing to overwrite ${product.handle}: product is not owned by the customer-sheet import`)
+    }
+    const desiredSkus = new Set(product.variants.map(variant => variant.sku))
+    for (const variant of existing.variants ?? []) {
+      if (!desiredSkus.has(variant.sku ?? "")) continue
+      if (!variant.manage_inventory || !(variant.inventory_items ?? []).some(item => item?.inventory_item_id)) {
+        throw new Error(`Refusing to import ${product.handle}/${variant.sku}: existing variant has no managed inventory item`)
+      }
+    }
+  }
   const create = desired.filter(product => !existingByHandle.has(product.handle))
   const update = desired.filter(product => existingByHandle.has(product.handle))
 
@@ -116,6 +133,8 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
     const hasRealImage = (existing.images ?? []).some(image => image?.url && image.url !== placeholderUrl)
     await updateProductsWorkflow(container).run({ input: { products: [{
       id: existing.id,
+      // Re-import must never publish a sheet row that has not been approved.
+      status: ProductStatus.DRAFT,
       title: `${product.row.name} ${product.row.article}`,
       category_ids: [product.categoryId],
       shipping_profile_id: shippingProfileId,
@@ -140,6 +159,7 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
     const variantsToUpdate = product.variants.filter(variant => existingBySku.has(variant.sku)).map(variant => ({
       id: existingBySku.get(variant.sku)!.id,
       title: variant.title,
+      allow_backorder: false,
       ...(product.row.price ? { prices: variant.prices } : {}),
     }))
     if (variantsToCreate.length || variantsToUpdate.length) await batchProductVariantsWorkflow(container).run({ input: { create: variantsToCreate, update: variantsToUpdate } })

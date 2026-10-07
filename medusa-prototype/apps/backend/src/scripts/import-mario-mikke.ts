@@ -93,6 +93,14 @@ type ExecArgs = {
 };
 
 export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
+  // This catalog contains demo products and invents 25 units per new variant.
+  // Never expose those invented quantities as real stock at launch.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Demo catalog import is disabled in production: its 25-unit inventory levels are not verified 1C stock. Use the customer catalog draft import instead.",
+    );
+  }
+
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER);
   const link = container.resolve(ContainerRegistrationKeys.LINK);
   const query = container.resolve(ContainerRegistrationKeys.QUERY);

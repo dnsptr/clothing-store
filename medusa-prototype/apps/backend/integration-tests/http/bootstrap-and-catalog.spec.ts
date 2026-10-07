@@ -4,11 +4,13 @@ import {
   ContainerRegistrationKeys,
   ModuleRegistrationName,
   Modules,
+  ProductStatus,
 } from "@medusajs/framework/utils";
-import { createShippingProfilesWorkflow } from "@medusajs/medusa/core-flows";
+import { createInventoryLevelsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow, updateProductVariantsWorkflow } from "@medusajs/medusa/core-flows";
 
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import importMarioMikkeCatalog from "../../src/scripts/import-mario-mikke";
+import importCustomerCatalog from "../../src/scripts/import-customer-catalog";
 
 // Booting the full Medusa app (create DB -> migrate -> start) and running the
 // seed/import twice comfortably exceeds Jest's 5s default, so raise the per-file
@@ -264,6 +266,76 @@ medusaIntegrationTestRunner({
           (level) => level.location_id === stockLocation.id
         );
         expect(sampleLevel?.stocked_quantity).toBe(SENTINEL_QUANTITY);
+      });
+    });
+
+    describe("customer sheet import (launch stock safety)", () => {
+      it("keeps re-imported products in draft with managed non-backorder variants and no invented stock", async () => {
+        const container = getContainer();
+        const query = container.resolve(ContainerRegistrationKeys.QUERY);
+        const inventory = container.resolve(Modules.INVENTORY) as unknown as InventoryModuleLike;
+        await seedInitialData({ container });
+        await ensureDefaultShippingProfile(container);
+        await importCustomerCatalog({ container });
+
+        const { data: products } = await query.graph({
+          entity: "product",
+          fields: [
+            "id", "handle", "status", "variants.id", "variants.manage_inventory",
+            "variants.allow_backorder", "variants.inventory_items.inventory_item_id",
+          ],
+          filters: { handle: "mario-mikke-2016" },
+        });
+        const product = products[0];
+        expect(product.status).toBe("draft");
+        const variant = product.variants?.[0];
+        expect(variant?.manage_inventory).toBe(true);
+        expect(variant?.allow_backorder).toBe(false);
+        const inventoryItemId = variant?.inventory_items?.[0]?.inventory_item_id;
+        expect(inventoryItemId).toBeTruthy();
+        expect(await inventory.listInventoryLevels({ inventory_item_id: [inventoryItemId!] })).toEqual([]);
+
+        const { data: keys } = await query.graph({
+          entity: "api_key", fields: ["token", "type"],
+        });
+        const publishableKey = keys.find(key => key.type === "publishable");
+        const hidden = await api.get("/store/products", {
+          headers: { "x-publishable-api-key": publishableKey!.token },
+          params: { handle: product.handle },
+        });
+        expect(hidden.status).toBe(200);
+        expect(hidden.data.products).toEqual([]);
+
+        const { data: locations } = await query.graph({
+          entity: "stock_location", fields: ["id"],
+        });
+        await createInventoryLevelsWorkflow(container).run({
+          input: { inventory_levels: [{
+            location_id: locations[0].id,
+            inventory_item_id: inventoryItemId!,
+            stocked_quantity: 2,
+          }] },
+        });
+        await updateProductsWorkflow(container).run({
+          input: { products: [{ id: product.id, status: ProductStatus.PUBLISHED }] },
+        });
+        await updateProductVariantsWorkflow(container).run({
+          input: { product_variants: [{ id: variant!.id, allow_backorder: true }] },
+        });
+
+        await importCustomerCatalog({ container });
+        const { data: [updated] } = await query.graph({
+          entity: "product",
+          fields: ["id", "status", "variants.id", "variants.allow_backorder", "variants.manage_inventory", "variants.inventory_items.inventory_item_id"],
+          filters: { id: product.id },
+        });
+        expect(updated.status).toBe("draft");
+        expect(updated.variants?.[0]?.id).toBe(variant!.id);
+        expect(updated.variants?.[0]?.manage_inventory).toBe(true);
+        expect(updated.variants?.[0]?.allow_backorder).toBe(false);
+        expect(updated.variants?.[0]?.inventory_items?.[0]?.inventory_item_id).toBe(inventoryItemId);
+        const levels = await inventory.listInventoryLevels({ inventory_item_id: [inventoryItemId!] });
+        expect(levels[0]?.stocked_quantity).toBe(2);
       });
     });
 
