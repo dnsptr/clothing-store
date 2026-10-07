@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { Migration20260726153050 } from "../migrations/Migration20260726153050";
 import { Migration20260909120000 } from "../migrations/Migration20260909120000";
 import { Migration20260926150000 } from "../migrations/Migration20260926150000";
+import { Migration20260928120000 } from "../migrations/Migration20260928120000";
 import TbankNotificationModuleService from "../service";
 
 const DATABASE_URL = process.env.TBANK_INBOX_TEST_DATABASE_URL;
@@ -24,7 +25,7 @@ function queryManager(client: Client) {
 
 async function applyQueries(
   client: Client,
-  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000,
+  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20260928120000,
 ): Promise<void> {
   for (const query of migration.getQueries()) {
     if (typeof query !== "string") throw new TypeError("Test migration contains a non-string query");
@@ -33,6 +34,7 @@ async function applyQueries(
 }
 
 async function rebuildSchema(client: Client): Promise<void> {
+  await client.query('drop table if exists "tbank_payment_attempt_action" cascade');
   await client.query('drop table if exists "tbank_notification_conflict" cascade');
   await client.query('drop table if exists "tbank_payment_attempt" cascade');
   await client.query('drop table if exists "tbank_notification" cascade');
@@ -52,6 +54,9 @@ async function rebuildSchema(client: Client): Promise<void> {
   const poll = new Migration20260926150000({} as never, {} as never);
   await poll.up();
   await applyQueries(client, poll);
+  const operations = new Migration20260928120000({} as never, {} as never);
+  await operations.up();
+  await applyQueries(client, operations);
 }
 
 async function insertPending(client: Client, id: string): Promise<void> {
@@ -593,5 +598,142 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     )).toEqual([]);
     expect(await database.query(`select poll_state from tbank_payment_attempt where id = 'paid'`))
       .toEqual(expect.objectContaining({ rows: [{ poll_state: "complete" }] }));
+  });
+  it("retries a quarantined 25-hour-old attempt only within a fresh bounded window", async () => {
+    const now = new Date("2026-09-28T12:00:00Z");
+    const old = new Date(now.getTime() - 25 * 60 * 60_000);
+    await insertPollAttempt(database, "old-retry", old);
+    await database.query(
+      `update tbank_payment_attempt set poll_state = 'manual_review', poll_manual_review_at = $1,
+       poll_consecutive_errors = 5, poll_alert_sent_at = $1 where id = 'old-retry'`,
+      [now],
+    );
+    const poll = TbankNotificationModuleService.prototype;
+    const manager = queryManager(database);
+    const retried = await poll.retryPaymentAttemptManualReview.call(
+      {}, { id: "old-retry", now, operatorId: "staff-1", reason: "Bank state can be checked again", terminalKey: "terminal", expectedReviewAt: now },
+      { manager } as never,
+    );
+    expect(retried).toEqual([expect.objectContaining({
+      poll_state: "pending", poll_consecutive_errors: 0, poll_alert_sent_at: null,
+      poll_retry_until: new Date(now.getTime() + 60 * 60_000),
+      created_at: old,
+    })]);
+    expect(await poll.expireStalePaymentAttemptPolls.call(
+      {}, { now, terminalKey: "terminal" }, { manager } as never,
+    )).toEqual([]);
+    const claimed = await poll.claimDuePaymentAttempts.call(
+      {}, { now: new Date(now.getTime() + 1_000), leaseToken: "poll", limit: 1, terminalKey: "terminal" },
+      { manager } as never,
+    );
+    expect(claimed).toEqual([expect.objectContaining({ id: "old-retry", poll_state: "leased" })]);
+    const afterWindow = new Date(now.getTime() + 60 * 60_000 + 1_000);
+    expect(await poll.expireStalePaymentAttemptPolls.call(
+      {}, { now: afterWindow, terminalKey: "terminal" }, { manager } as never,
+    )).toEqual([expect.objectContaining({ id: "old-retry", poll_state: "manual_review", poll_manual_review_at: afterWindow })]);
+    expect((await poll.listPollReviewActions.call({}, "old-retry", { manager } as never))
+      .map((action) => ({ action: action.action, operator: action.operator_id, reason: action.reason })))
+      .toEqual([{ action: "retry", operator: "staff-1", reason: "Bank state can be checked again" }]);
+  });
+
+  it("serializes competing operator actions and audits exactly one winning transition", async () => {
+    const now = new Date("2026-09-28T12:00:00Z");
+    await insertPollAttempt(database, "operator-race", new Date(now.getTime() - 10 * 60_000));
+    await database.query(`update tbank_payment_attempt set poll_state = 'manual_review',
+      poll_manual_review_at = $1 where id = 'operator-race'`, [now]);
+    const first = await connect();
+    const second = await connect();
+    const poll = TbankNotificationModuleService.prototype;
+    const [retry, resolve] = await Promise.all([
+      poll.retryPaymentAttemptManualReview.call({}, {
+        id: "operator-race", operatorId: "staff-retry", reason: "Retry", now,
+        terminalKey: "terminal", expectedReviewAt: now,
+      }, { manager: queryManager(first) } as never),
+      poll.resolvePaymentAttemptManualReview.call({}, {
+        id: "operator-race", operatorId: "staff-resolve", reason: "Verified", now, expectedReviewAt: now,
+      }, { manager: queryManager(second) } as never),
+    ]);
+    expect(retry.length + resolve.length).toBe(1);
+    const result = await database.query(
+      `select attempt.poll_state, action.action, action.operator_id, action.reason
+       from tbank_payment_attempt attempt join tbank_payment_attempt_action action
+         on action.payment_attempt_id = attempt.id where attempt.id = 'operator-race'`,
+    );
+    expect(result.rows).toEqual([retry.length ? {
+      poll_state: "pending", action: "retry", operator_id: "staff-retry", reason: "Retry",
+    } : {
+      poll_state: "complete", action: "resolve", operator_id: "staff-resolve", reason: "Verified",
+    }]);
+    expect(await poll.retryPaymentAttemptManualReview.call({}, {
+      id: "operator-race", operatorId: "staff-late", reason: "Stale", now,
+      terminalKey: "terminal", expectedReviewAt: now,
+    }, { manager: queryManager(database) } as never)).toEqual([]);
+  });
+
+  it("keeps a newer review visible when an operator uses a stale epoch or an inactive terminal", async () => {
+    const now = new Date("2026-09-28T12:00:00Z");
+    const oldEpoch = new Date(now.getTime() - 60_000);
+    await insertPollAttempt(database, "review-after-rotation", new Date(now.getTime() - 25 * 60 * 60_000));
+    await database.query(`update tbank_payment_attempt set poll_state = 'manual_review',
+      poll_manual_review_at = $1 where id = 'review-after-rotation'`, [now]);
+    const poll = TbankNotificationModuleService.prototype;
+    const manager = queryManager(database);
+    const action = { id: "review-after-rotation", now, operatorId: "staff", reason: "Retry" };
+    expect(await poll.retryPaymentAttemptManualReview.call({}, {
+      ...action, terminalKey: "terminal", expectedReviewAt: oldEpoch,
+    }, { manager } as never)).toEqual([]);
+    expect(await poll.retryPaymentAttemptManualReview.call({}, {
+      ...action, terminalKey: "retired-terminal", expectedReviewAt: now,
+    }, { manager } as never)).toEqual([]);
+    const persisted = await database.query(`select poll_state, poll_manual_review_at, poll_alert_sent_at
+      from tbank_payment_attempt where id = 'review-after-rotation'`);
+    expect(persisted.rows).toEqual([{
+      poll_state: "manual_review", poll_manual_review_at: now, poll_alert_sent_at: null,
+    }]);
+    expect((await poll.listPollReviewActions.call({}, action.id, { manager } as never))).toEqual([]);
+  });
+
+  it("claims alert rows once, fences stale tokens, and re-alerts a new review epoch after retry", async () => {
+    const now = new Date("2026-09-28T12:00:00Z");
+    await insertPollAttempt(database, "alert-review", new Date(now.getTime() - 10 * 60_000));
+    await database.query(`update tbank_payment_attempt set poll_state = 'manual_review',
+      poll_manual_review_at = $1 where id = 'alert-review'`, [now]);
+    const first = await connect();
+    const second = await connect();
+    const poll = TbankNotificationModuleService.prototype;
+    const [left, right] = await Promise.all([
+      poll.claimPendingPollReviewAlerts.call({}, { limit: 1, leaseToken: "left", now }, { manager: queryManager(first) } as never),
+      poll.claimPendingPollReviewAlerts.call({}, { limit: 1, leaseToken: "right", now }, { manager: queryManager(second) } as never),
+    ]);
+    expect(left.length + right.length).toBe(1);
+    const token = left.length ? "left" : "right";
+    const other = left.length ? "right" : "left";
+    const lease = { id: "alert-review", now, leaseToken: token };
+    const manager = queryManager(database);
+    expect(await poll.markPollReviewAlertSent.call(
+      {}, { ...lease, leaseToken: other }, { manager } as never,
+    )).toEqual([]);
+    expect(await poll.releasePollReviewAlert.call({}, lease, { manager } as never))
+      .toEqual([expect.objectContaining({ id: "alert-review", poll_manual_review_at: now })]);
+    const claimed = await poll.claimPendingPollReviewAlerts.call(
+      {}, { limit: 1, leaseToken: "redeliver", now }, { manager } as never,
+    );
+    expect(claimed).toHaveLength(1);
+    expect(await poll.markPollReviewAlertSent.call(
+      {}, { id: "alert-review", now, leaseToken: "redeliver" }, { manager } as never,
+    )).toHaveLength(1);
+    expect(await poll.claimPendingPollReviewAlerts.call(
+      {}, { limit: 1, leaseToken: "duplicate", now }, { manager } as never,
+    )).toEqual([]);
+    await poll.retryPaymentAttemptManualReview.call({}, {
+      id: "alert-review", now, operatorId: "staff", reason: "Re-check",
+      terminalKey: "terminal", expectedReviewAt: now,
+    }, { manager } as never);
+    const next = new Date(now.getTime() + 1_000);
+    await database.query(`update tbank_payment_attempt set poll_state = 'manual_review',
+      poll_manual_review_at = $1 where id = 'alert-review'`, [next]);
+    expect(await poll.claimPendingPollReviewAlerts.call(
+      {}, { limit: 1, leaseToken: "new-epoch", now: next }, { manager } as never,
+    )).toEqual([expect.objectContaining({ id: "alert-review", poll_manual_review_at: next })]);
   });
 });

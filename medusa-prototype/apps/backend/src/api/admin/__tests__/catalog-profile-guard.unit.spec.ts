@@ -8,6 +8,14 @@ async function check(body: Record<string, unknown>, current?: Record<string, unk
   await catalogProfileGuard(req as never, res as never, next)
   return { next, res }
 }
+function publishable(images = [{ url: "https://example.org/photo.jpg" }]) {
+  const profile = Object.fromEntries(PROFILE_FIELDS.map(([key]) => [key, "filled"]))
+  profile.manufactured_at = "08.2026"; profile.registry_url = "https://example.org/registry"
+  return { status: "published", title: "Product", metadata: { catalog_profile: profile },
+    images, categories: [{ id: "pcat_1" }],
+    variants: [{ prices: [{ currency_code: "rub", amount: 1990 }] }],
+  }
+}
 
 describe("publication guard", () => {
   it("rejects invalid measurements even on drafts", async () => {
@@ -16,13 +24,17 @@ describe("publication guard", () => {
     expect(result.next).not.toHaveBeenCalled()
   })
   it("allows a complete card with a priced variant", async () => {
-    const profile = Object.fromEntries(PROFILE_FIELDS.map(([key]) => [key, "filled"]))
-    profile.manufactured_at = "08.2026"; profile.registry_url = "https://example.org/registry"
-    const result = await check({ status: "published", title: "Product", metadata: { catalog_profile: profile },
-      images: [{ url: "https://example.org/photo.jpg" }], categories: [{ id: "pcat_1" }],
-      variants: [{ prices: [{ currency_code: "rub", amount: 1990 }] }],
-    })
-    expect(result.next).toHaveBeenCalled()
+    expect((await check(publishable())).next).toHaveBeenCalled()
+  })
+  it("rejects publication with the customer-import placeholder, including persisted images", async () => {
+    const placeholder = [{ url: "https://shop.example/images/product-placeholder.webp" }]
+    const creation = await check(publishable(placeholder))
+    expect(creation.res.status).toHaveBeenCalledWith(400)
+    expect(creation.next).not.toHaveBeenCalled()
+    const update = await check({ status: "published" }, { ...publishable(placeholder), status: "draft" })
+    expect(update.res.status).toHaveBeenCalledWith(400)
+    expect(update.next).not.toHaveBeenCalled()
+    expect((await check(publishable([...placeholder, { url: "https://shop.example/photo.webp" }]))).next).toHaveBeenCalled()
   })
   it("allows incomplete drafts", async () => {
     expect((await check({ status: "draft", metadata: { catalog_profile: {} } })).next).toHaveBeenCalled()

@@ -1,4 +1,4 @@
-import { CUSTOMER_CATALOG, customerVariantSku, parseCustomerColors } from "../customer-catalog"
+import { CUSTOMER_CATALOG, customerVariantSku, indexStableCustomerVariants, parseCustomerColors } from "../customer-catalog"
 
 describe("customer catalog source", () => {
   it("contains one unique row for every customer article", () => {
@@ -21,5 +21,27 @@ describe("customer catalog source", () => {
     const skus = CUSTOMER_CATALOG.flatMap(row => parseCustomerColors(row.colors).map((_, index) => customerVariantSku(row.article, index)))
     expect(new Set(skus).size).toBe(skus.length)
     expect(customerVariantSku("1453-1", 0)).toBe("MM-1453-1-OS-01")
+  })
+  it("rejects reassigning an existing SKU after a color reorder or insertion", () => {
+    const existing = [
+      { id: "white", sku: customerVariantSku("1453-1", 0), title: "ONE SIZE / белый" },
+      { id: "black", sku: customerVariantSku("1453-1", 1), title: "ONE SIZE / черный" },
+    ]
+    for (const colors of ["черный, белый", "бежевый, белый, черный"]) {
+      const desired = parseCustomerColors(colors).map((color, index) => ({
+        sku: customerVariantSku("1453-1", index), title: `ONE SIZE / ${color}`,
+      }))
+      expect(() => indexStableCustomerVariants("mario-mikke-1453-1", desired, existing))
+        .toThrow(/SKU MM-1453-1-OS-01.*Изменение соответствия SKU и цвета запрещено/)
+    }
+  })
+  it("retains variant identities when the existing order is unchanged and colors are appended", () => {
+    const existing = [{ id: "white", sku: customerVariantSku("1453-1", 0), title: "ONE SIZE / белый" }]
+    const desired = parseCustomerColors("белый, черный").map((color, index) => ({
+      sku: customerVariantSku("1453-1", index), title: `ONE SIZE / ${color}`,
+    }))
+    const indexed = indexStableCustomerVariants("mario-mikke-1453-1", desired, existing)
+    expect(indexed.get(desired[0].sku)?.id).toBe("white")
+    expect(indexed.has(desired[1].sku)).toBe(false)
   })
 })

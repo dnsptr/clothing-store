@@ -1,5 +1,6 @@
 import type { MedusaContainer } from "@medusajs/types";
 import { PaymentReconcilerService } from "../modules/tbank/services/payment-reconciler";
+import { sendPollManualReviewAlerts } from "../modules/tbank/services/poll-manual-review-alerts";
 
 export default async function tbankReconcilerJob(container: MedusaContainer) {
   const logger = container.resolve("logger");
@@ -24,6 +25,17 @@ export default async function tbankReconcilerJob(container: MedusaContainer) {
       }`,
     );
     throw error;
+  } finally {
+    try {
+      const alerts = await sendPollManualReviewAlerts(container);
+      if (alerts.sent > 0) {
+        logger.info(`tbank reconciler job: delivered ${alerts.sent} payment review alert(s)`);
+      }
+    } catch (error) {
+      logger.error(
+        `tbank reconciler job: manual review alerts failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }
 
