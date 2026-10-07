@@ -182,6 +182,9 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
           await page.getByText("ТЦ «Говорово»").click();
           await expectBrowser(page.locator('input[name="pickupStore"]').nth(1)).toBeChecked();
           await expectBrowser(page.getByText("г. Москва, 47-й км МКАД, вл. 31, стр. 1")).toBeVisible();
+          const evidence = resolve(REPOSITORY_ROOT, "test-results");
+          await mkdir(evidence, { recursive: true });
+          await page.screenshot({ path: resolve(evidence, "real-medusa-govorovo-pickup.png"), fullPage: true });
           await page.locator('input[name="firstName"]').fill("Тест");
           await page.locator('input[name="lastName"]').fill("Покупатель");
           await page.locator('input[name="email"]').fill("browser-checkout@example.test");
@@ -190,8 +193,6 @@ describeBrowser("browser checkout against real Medusa and PostgreSQL (offline ba
           await page.getByRole("button", { name: "Подтвердить заказ" }).click();
           await expectBrowser(page).toHaveURL(BANK_URL, { timeout: 30_000 });
           await expectBrowser(page.getByRole("heading", { name: "Bank payment boundary" })).toBeVisible();
-          const evidence = resolve(REPOSITORY_ROOT, "test-results");
-          await mkdir(evidence, { recursive: true });
           await page.screenshot({ path: resolve(evidence, "real-medusa-bank-boundary.png") });
           expect(bankCalls.filter((method) => method === "Init")).toHaveLength(1);
           expect(bankOrderId).not.toBe("");
