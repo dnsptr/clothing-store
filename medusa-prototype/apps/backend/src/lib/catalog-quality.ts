@@ -43,10 +43,19 @@ export interface QualityProduct {
   images?: unknown[]; categories?: unknown[]
   variants?: { prices?: { currency_code: string; amount: number }[]; price_set?: { prices?: { currency_code: string; amount: number }[] } }[]
 }
+// The customer catalog importer deliberately uses this image until merchant photos arrive.
+export function hasRealProductImage(images: readonly unknown[] | null | undefined): boolean {
+  return Array.isArray(images) && images.some(image => {
+    const url = (image as { url?: unknown } | null)?.url
+    return typeof url === "string" && !!url.trim() &&
+      !/(?:^|\/)images\/product-placeholder\.webp(?:[?#].*)?$/.test(url)
+  })
+}
+
 export function catalogQuality(product: QualityProduct) {
   const profile = readProfile(product.metadata?.catalog_profile)
   const raw = product.metadata?.catalog_profile as Record<string, unknown> | undefined
-  const noPhotos = !product.images?.length
+  const noPhotos = !hasRealProductImage(product.images)
   const noPrice = !product.variants?.length || product.variants.some(v => !(v.prices ?? v.price_set?.prices)?.some(p => p.currency_code === "rub" && Number(p.amount) > 0))
   const missing = [
     ...(!product.title?.trim() ? ["Наименование"] : []), ...profileProblems(profile),
