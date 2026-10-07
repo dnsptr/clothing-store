@@ -7,7 +7,7 @@ import { useCart } from "../../context/CartContext";
 import { useCatalog } from "../../context/CatalogContext";
 import { productImageSrc } from "../../lib/assets";
 import { formatPrice, formatPriceOrUnknown } from "../../lib/format";
-import { isCheckoutEnabled, type MedusaShippingOption } from "../../lib/medusa";
+import { isCheckoutEnabled, isPurchasableShippingOption, type MedusaShippingOption } from "../../lib/medusa";
 import {
   type CdekCity,
   type CdekDeliveryPoint,
@@ -51,7 +51,8 @@ function findShippingOption(
   deliveryType: DeliveryType,
   shippingOptions: readonly MedusaShippingOption[] | null,
 ): MedusaShippingOption | undefined {
-  return shippingOptions?.find((option) => option.type?.code === deliveryType);
+  return shippingOptions?.find((option) =>
+    option.type?.code === deliveryType && isPurchasableShippingOption(option));
 }
 
 function firstAvailableDeliveryType(
@@ -238,7 +239,6 @@ export default function CheckoutClient() {
     addToCart,
     completeCheckout,
     getShippingOptions,
-    checkOwnCourierAvailability,
     prepareCheckout,
     updateQuantity,
     removeFromCart,
@@ -247,9 +247,6 @@ export default function CheckoutClient() {
   // Способы доставки Medusa
   const [shippingOptions, setShippingOptions] = useState<MedusaShippingOption[] | null>(null);
   const [shippingOptionsFailed, setShippingOptionsFailed] = useState(false);
-  const [isCheckingOwnCourier, setIsCheckingOwnCourier] = useState(false);
-  const [ownCourierMessage, setOwnCourierMessage] = useState("");
-  const ownCourierRequestRef = useRef(0);
   const [hasConsented, setHasConsented] = useState(false);
 
   // Delivery module state
@@ -454,18 +451,6 @@ export default function CheckoutClient() {
     return () => window.removeEventListener("pageshow", resetSubmission);
   }, []);
 
-  const invalidateOwnCourierAvailability = () => {
-    ownCourierRequestRef.current += 1;
-    setIsCheckingOwnCourier(false);
-    if (shippingOptions?.some((option) => option.type?.code === "own-courier-mkad")) {
-      const remainingOptions = shippingOptions.filter((option) => option.type?.code !== "own-courier-mkad");
-      setShippingOptions(remainingOptions);
-      if (deliveryType === "own-courier-mkad") {
-        setDeliveryType(firstAvailableDeliveryType(remainingOptions) ?? deliveryType);
-      }
-    }
-    setOwnCourierMessage("");
-  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -480,9 +465,6 @@ export default function CheckoutClient() {
       setIsLoadingPochta(/^\d{6}$/.test(value));
       setIsPochtaPickerOpen(true);
     }
-    if (name === "city" || name === "address" || name === "zip" || name === "apartment") {
-      invalidateOwnCourierAvailability();
-    }
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
@@ -493,7 +475,6 @@ export default function CheckoutClient() {
     ++cdekCitySearchRequestRef.current;
     setDeliveryCity(value);
     setForm((prev) => ({ ...prev, city: value }));
-    invalidateOwnCourierAvailability();
     setCdekCityCode(null);
     setCitySuggestions([]);
     setPvzList([]);
@@ -526,39 +507,6 @@ export default function CheckoutClient() {
     }
   };
 
-  const checkOwnCourier = async () => {
-    const addressErrors: FormErrors = {};
-    if (!form.city.trim()) addressErrors.city = "Введите город доставки";
-    if (!form.address.trim()) addressErrors.address = "Введите улицу и дом";
-    if (!/^\d{6}$/.test(form.zip)) addressErrors.zip = "Введите индекс из 6 цифр";
-    if (Object.keys(addressErrors).length > 0) {
-      setErrors((previous) => ({ ...previous, ...addressErrors }));
-      return;
-    }
-
-    const requestId = ++ownCourierRequestRef.current;
-    setIsCheckingOwnCourier(true);
-    setOwnCourierMessage("");
-    try {
-      const options = await checkOwnCourierAvailability({
-        city: form.city.trim(), address: form.address.trim(), apartment: form.apartment.trim(), zip: form.zip.trim(),
-      });
-      if (requestId !== ownCourierRequestRef.current) return;
-      setDeliveryType((current) =>
-        findShippingOption(current, options) ? current : firstAvailableDeliveryType(options) ?? current,
-      );
-      setShippingOptions(options);
-      if (!findShippingOption("own-courier-mkad", options)) {
-        setOwnCourierMessage("Курьерская доставка по этому адресу недоступна.");
-      }
-    } catch (error) {
-      if (requestId === ownCourierRequestRef.current) {
-        setOwnCourierMessage(error instanceof Error ? error.message : "Не удалось проверить доставку курьером.");
-      }
-    } finally {
-      if (requestId === ownCourierRequestRef.current) setIsCheckingOwnCourier(false);
-    }
-  };
 
   const handleSelectCity = (city: CdekCity) => {
     ++cdekCitySearchRequestRef.current;
@@ -566,7 +514,6 @@ export default function CheckoutClient() {
     setDeliveryCity(city.city);
     setCdekCityCode(city.code);
     setForm((prev) => ({ ...prev, city: city.city }));
-    invalidateOwnCourierAvailability();
     setShowCityDropdown(false);
     setCitySuggestions([]);
     setPvzList([]);
@@ -1155,32 +1102,13 @@ export default function CheckoutClient() {
               </div>
             )}
 
-            {shippingOptions !== null && !findShippingOption("own-courier-mkad", shippingOptions) && (
-              <div className={styles.deliveryEstimateBanner}>
-                <div className={styles.deliveryEstimateInfo}>
-                  <span className={styles.deliveryEstimateTimeline}>Курьер по Москве</span>
-                  <span className={styles.deliveryEstimateSub}>Укажите адрес, чтобы проверить доступность внутри МКАД.</span>
-                </div>
-                <div>
-                  <div className={styles.formRow}>
-                    <input name="city" className={styles.formInput} placeholder="Город" value={form.city} onChange={handleChange} />
-                    <input name="zip" className={styles.formInput} placeholder="Индекс" value={form.zip} onChange={handleChange} />
-                  </div>
-                  <input name="address" className={styles.formInput} placeholder="Улица, дом" value={form.address} onChange={handleChange} />
-                  <button type="button" className={styles.changePvzBtn} onClick={checkOwnCourier} disabled={isCheckingOwnCourier}>
-                    {isCheckingOwnCourier ? "Проверяем..." : "Проверить доставку курьером"}
-                  </button>
-                  {ownCourierMessage && <span className={styles.fieldError} role="alert">{ownCourierMessage}</span>}
-                </div>
-              </div>
-            )}
 
             {selectedShippingOption && (
               <div className={styles.deliveryEstimateBanner}>
                 <div className={styles.deliveryEstimateInfo}>
                   <span className={styles.deliveryEstimateTimeline}>
                     {deliveryType === "pickup-store"
-                      ? "Готовность к выдаче подтвердим после обработки заказа"
+                      ? "Готовность к выдаче магазин подтвердит отдельно"
                       : "Срок доставки уточняется"}
                   </span>
                   <span className={styles.deliveryEstimateSub}>

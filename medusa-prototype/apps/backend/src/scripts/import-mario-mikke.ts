@@ -30,10 +30,7 @@ import {
   resolveDeliveryShippingOptions,
 } from "../modules/cdek/shipping-options";
 import { parseCdekEnvironment } from "../modules/cdek/config";
-import { parsePochtaEnvironment } from "../modules/pochta/config";
-import { parseYandexDeliveryEnvironment } from "../modules/yandex-delivery/config";
-import { parseOwnCourierEnvironment } from "../modules/own-courier/config";
-import { OWN_COURIER_OPTION, OWN_COURIER_RULE } from "../modules/own-courier/provider-id";
+import { OWN_COURIER_OPTION } from "../modules/own-courier/provider-id";
 
 const IMPORT_SOURCE = "mario-mikke-demo";
 // Поля варианта с весом и габаритами упаковки: по ним агрегатор доставки
@@ -226,9 +223,6 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
 
   const deliveryOptionsToEnsure = resolveDeliveryShippingOptions({
     cdekEnabled: parseCdekEnvironment(process.env).enabled,
-    yandexEnabled: parseYandexDeliveryEnvironment(process.env).enabled,
-    pochtaEnabled: parsePochtaEnvironment(process.env).enabled,
-    ownCourierEnabled: parseOwnCourierEnvironment(process.env).enabled,
   });
   const linkedProviderIds = new Set(
     (stockLocation.fulfillment_providers || []).map((provider) => provider?.id),
@@ -283,59 +277,20 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     fields: ["id", "name", "service_zone_id", "type.code"],
   });
 
-  // Сначала по машинному коду: display name редактируется в Admin, и поиск
-  // только по нему после переименования создал бы дубликат опции с тем же
-  // type.code (витрина выбирает по коду и могла бы молча получить дубль).
-  const ruShippingOption =
-    shippingOptions.find((option) => option.type?.code === "mvp-ru") ??
-    shippingOptions.find((option) => option.name === "MVP доставка по России");
-
-  if (!ruShippingOption) {
-    await createShippingOptionsWorkflow(container).run({
-      input: [
-        {
-          name: "MVP доставка по России",
-          price_type: "flat",
-          provider_id: "manual_manual",
-          service_zone_id: ruServiceZoneId,
-          shipping_profile_id: shippingProfile.id,
-          type: {
-            label: "MVP доставка",
-            description: "Тестовая доставка для локального MVP.",
-            code: "mvp-ru",
-          },
-          prices: [{ currency_code: "rub", amount: 0 }],
-          rules: [
-            { attribute: "enabled_in_store", value: "true", operator: "eq" },
-            { attribute: "is_return", value: "false", operator: "eq" },
-          ],
-        },
-      ],
-    });
-  } else {
-    // Идемпотентный upsert атрибутов существующей опции. type.code = "mvp-ru" —
-    // машинный идентификатор, по которому витрина выбирает опцию доставки
-    // (display name редактируется в Admin и контрактом не является); базы,
-    // засеянные до появления кода, получают его здесь.
-    const optionUpdate: {
-      service_zone_id?: string;
-      type?: { label: string; description: string; code: string };
-    } = {};
-    if (ruShippingOption.service_zone_id !== ruServiceZoneId) {
-      optionUpdate.service_zone_id = ruServiceZoneId;
-    }
-    if (ruShippingOption.type?.code !== "mvp-ru") {
-      optionUpdate.type = {
-        label: "MVP доставка",
-        description: "Тестовая доставка для локального MVP.",
-        code: "mvp-ru",
-      };
-    }
-    if (Object.keys(optionUpdate).length > 0) {
-      await fulfillmentModuleService.updateShippingOptions(
-        ruShippingOption.id,
-        optionUpdate,
-      );
+  // Credentials alone do not approve a customer price. A previous import may
+  // have left flat 0 RUB carrier (or legacy MVP) methods in the database:
+  // disable those before ensuring pickup, including on repeat imports.
+  const unpricedDeliveryCodes: Record<string, true> = {
+    "mvp-ru": true, "cdek-pvz": true, "cdek-courier": true,
+    "yandex-pvz": true, "pochta-parcel": true, "pochta-courier": true,
+    [OWN_COURIER_OPTION]: true,
+  };
+  for (const option of shippingOptions) {
+    if (unpricedDeliveryCodes[option.type?.code ?? ""] === true ||
+        (option.name === "MVP доставка по России" && !option.type?.code)) {
+      await fulfillmentModuleService.updateShippingOptions(option.id, {
+        rules: [{ attribute: "enabled_in_store", value: "false", operator: "eq" }],
+      });
     }
   }
 
@@ -362,23 +317,17 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
             rules: [
               { attribute: "enabled_in_store", value: "true", operator: "eq" },
               { attribute: "is_return", value: "false", operator: "eq" },
-              ...(opt.code === OWN_COURIER_OPTION
-                ? [{ attribute: OWN_COURIER_RULE, value: "true", operator: "eq" as const }]
-                : []),
             ],
           },
         ],
       });
     } else {
       await fulfillmentModuleService.updateShippingOptions(existing.id, {
-        ...(opt.code === OWN_COURIER_OPTION ? {
-          price_type: "flat" as const,
-          rules: [
-            { attribute: "enabled_in_store", value: "true", operator: "eq" as const },
-            { attribute: "is_return", value: "false", operator: "eq" as const },
-            { attribute: OWN_COURIER_RULE, value: "true", operator: "eq" as const },
-          ],
-        } : {}),
+        price_type: "flat",
+        rules: [
+          { attribute: "enabled_in_store", value: "true", operator: "eq" },
+          { attribute: "is_return", value: "false", operator: "eq" },
+        ],
         provider_id: opt.providerId,
         service_zone_id: ruServiceZoneId,
         type: {

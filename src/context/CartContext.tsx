@@ -12,6 +12,7 @@ import {
   isMedusaConfigured,
   initializeMedusaPaymentSession,
   listMedusaShippingOptions,
+  isPurchasableShippingOption,
   mapCartLineToProduct,
   medusaPaymentProviderId,
   type MedusaPaymentSession,
@@ -23,6 +24,7 @@ import {
   updateMedusaCartLineItem,
   updateMedusaCart,
 } from "../lib/medusa";
+import { MARIO_MIKKE_PICKUP_STORES } from "../lib/cdek";
 import { approvedTbankPaymentUrl, decideTbankSession } from "../lib/paymentSessionPolicy";
 
 export interface CartItem {
@@ -68,12 +70,6 @@ export interface CheckoutDetails {
   yandexGeoId?: number;
 }
 
-export interface OwnCourierAvailabilityAddress {
-  city: string;
-  address: string;
-  apartment: string;
-  zip: string;
-}
 
 type CheckoutCompletion =
   | { type: "redirect"; paymentUrl: string }
@@ -87,7 +83,6 @@ interface CartContextType {
   removeFromCart: (productId: string, size: string, colorHex: string) => Promise<void>;
   updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
   prepareCheckout: (details: CheckoutDetails) => Promise<void>;
-  checkOwnCourierAvailability: (address: OwnCourierAvailabilityAddress) => Promise<MedusaShippingOption[]>;
   getShippingOptions: () => Promise<MedusaShippingOption[]>;
   completeCheckout: () => Promise<CheckoutCompletion>;
   toggleCart: () => void;
@@ -533,6 +528,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Checkout requires Medusa mode with a configured Store API.");
     }
 
+    // Do not allow a stale 0 RUB carrier method or a forged pickup store to
+    // progress toward a payment session, even if the UI had cached the option.
+    if (details.deliveryType !== "pickup-store") {
+      throw new Error("Доставка сейчас недоступна. Выберите самовывоз из магазина.");
+    }
+    const pickupStore = MARIO_MIKKE_PICKUP_STORES.find(
+      (store) => store.id === details.pickupStoreId,
+    );
+    if (!pickupStore) {
+      throw new Error("Выберите действующий магазин для самовывоза.");
+    }
+
     if (!details.shippingOptionId) {
       throw new Error("Не выбран способ доставки.");
     }
@@ -558,12 +565,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (details.cdekPvzAddress) {
       metadata.cdek_pvz_address = details.cdekPvzAddress;
     }
-    if (details.pickupStoreId) {
-      metadata.pickup_store_id = details.pickupStoreId;
-    }
-    if (details.pickupStoreName) {
-      metadata.pickup_store_name = details.pickupStoreName;
-    }
+    metadata.pickup_store_id = pickupStore.id;
+    metadata.pickup_store_name = pickupStore.name;
     if (details.pochtaOfficeIndex) {
       metadata.pochta_office_index = details.pochtaOfficeIndex;
     }
@@ -606,7 +609,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     // уходит ровно то, что выбрано в форме.
     const shippingOptions = await listMedusaShippingOptions(cartId);
     const shippingOption = shippingOptions.find(
-      (option) => option.id === details.shippingOptionId && option.type?.code === details.deliveryType,
+      (option) => option.id === details.shippingOptionId &&
+        option.type?.code === details.deliveryType &&
+        isPurchasableShippingOption(option),
     );
     if (!shippingOption) {
       throw new Error(
@@ -647,23 +652,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     ));
   });
 
-  const checkOwnCourierAvailability = (address: OwnCourierAvailabilityAddress) => enqueueCartMutation(async () => {
-    if (!isMedusaConfigured) {
-      throw new Error("Checkout requires Medusa mode with a configured Store API.");
-    }
-
-    const cartId = await getMedusaCartId();
-    await updateMedusaCart(cartId, {
-      shipping_address: {
-        address_1: address.address,
-        address_2: address.apartment || undefined,
-        city: address.city,
-        country_code: "ru",
-        postal_code: address.zip,
-      },
-    });
-    return listMedusaShippingOptions(cartId);
-  });
 
   /**
    * Способы доставки, доступные для текущей корзины.
@@ -768,7 +756,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         removeFromCart,
         updateQuantity,
         prepareCheckout,
-        checkOwnCourierAvailability,
         getShippingOptions,
         completeCheckout,
         clearCart,

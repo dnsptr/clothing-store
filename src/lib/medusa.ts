@@ -150,6 +150,12 @@ export interface MedusaShippingOption {
   type?: { code?: string | null } | null;
 }
 
+// Carrier credentials and 0 RUB placeholders are not approved customer tariffs.
+// Until pricing is established, the only purchasable fulfillment is free pickup.
+export function isPurchasableShippingOption(option: MedusaShippingOption): boolean {
+  return option.type?.code === "pickup-store" && option.amount === 0;
+}
+
 interface MedusaShippingOptionsResponse {
   shipping_options?: MedusaShippingOption[];
 }
@@ -1042,10 +1048,6 @@ export async function updateMedusaCart(cartId: string, body: Record<string, unkn
   return response.cart;
 }
 
-/** Машинный идентификатор MVP-опции доставки (type.code в Medusa). Витрина
- * выбирает опцию по нему, а не по отображаемому имени: имя редактируется в
- * Admin и не является контрактом. Код проставляется скриптом импорта каталога. */
-export const MVP_SHIPPING_OPTION_CODE = "mvp-ru";
 
 export async function listMedusaShippingOptions(cartId: string) {
   // `amount` нужен, чтобы показать цену доставки ДО того, как способ выбран и
