@@ -1089,57 +1089,71 @@ describe("cancelPayment", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("считает ошибку отмены идемпотентной только после GetState=CANCELED", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: false, ErrorCode: "9999", Message: "уже отменён" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: true, ErrorCode: "0", Status: "CANCELED" }),
-      }) as unknown as typeof fetch;
+  it.each(["CANCELED", "REVERSED", "REJECTED", "DEADLINE_EXPIRED"])(
+    "очищает сессию только когда банк уже подтвердил терминальный статус %s",
+    async (status) => {
+      const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0", Status: status });
+
+      await expect(
+        makeService().cancelPayment({ data: { paymentId: "3456789" } } as never),
+      ).resolves.toBeDefined();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(`${OPTIONS.apiBaseUrl}/GetState`);
+    },
+  );
+
+  it.each(["NEW", "FORM_SHOWED", "AUTHORIZING", "CONFIRMED", "REFUNDED", "PARTIAL_REFUNDED", undefined])(
+    "не вызывает Cancel при статусе %s: даже предзапрос GetState не защищает от гонки с захватом",
+    async (status) => {
+      const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0", Status: status });
+
+      await expect(
+        makeService().cancelPayment({ data: { paymentId: "3456789" } } as never),
+      ).rejects.toThrow(/автоматическая отмена заблокирована/);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(`${OPTIONS.apiBaseUrl}/GetState`);
+    },
+  );
+
+  it("не удаляет сессию и не отправляет Cancel при недоступном GetState", async () => {
+    const fetchMock = jest.fn().mockRejectedValue(new Error("socket reset"));
+    global.fetch = fetchMock as unknown as typeof fetch;
 
     await expect(
-      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
-    ).resolves.toBeDefined();
-  });
-
-  it("не удаляет сессию после неоднозначной сетевой ошибки Cancel", async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(new Error("socket reset"))
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: true, ErrorCode: "0", Status: "NEW" }),
-      }) as unknown as typeof fetch;
-
-    await expect(
-      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
+      makeService().cancelPayment({ data: { paymentId: "3456789" } } as never),
     ).rejects.toThrow(/NETWORK/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${OPTIONS.apiBaseUrl}/GetState`);
+  });
+});
+
+describe("deletePayment", () => {
+  it("не обходит запрет возврата даже для ранее захваченного платежа", async () => {
+    const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0", Status: "CONFIRMED" });
+
+    await expect(
+      makeService().deletePayment({ data: { paymentId: "3456789" } } as never),
+    ).rejects.toThrow(/автоматическая отмена заблокирована/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${OPTIONS.apiBaseUrl}/GetState`);
   });
 });
 
 describe("refundPayment", () => {
-  it("без PaymentId бросает, а не делает вид, что вернул деньги", async () => {
-    await expect(
-      makeService().refundPayment({ data: {}, amount: 100 } as never),
-    ).rejects.toThrow(/PaymentId/);
-  });
-
-  it("отправляет сумму возврата в копейках", async () => {
+  it.each([
+    {},
+    { paymentId: "3456789" },
+    { paymentId: "3456789", received_at: "2026-10-07T12:00:00Z" },
+  ])("не возвращает деньги без проверяемой приёмки товара и возвратного чека (%j)", async (data) => {
     const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
-    await makeService().refundPayment({
-      data: { paymentId: "3456789" },
-      amount: 18990,
-    } as never);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.Amount).toBe(1899000);
+    await expect(
+      makeService().refundPayment({ data, amount: 18990 } as never),
+    ).rejects.toThrow(/автоматический возврат заблокирован/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

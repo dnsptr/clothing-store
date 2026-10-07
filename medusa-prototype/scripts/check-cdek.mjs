@@ -9,7 +9,7 @@ const required = (name) => {
 const baseUrl = required("CDEK_API_BASE_URL").replace(/\/$/, "");
 const clientId = required("CDEK_CLIENT_ID");
 const clientSecret = required("CDEK_CLIENT_SECRET");
-const fromCityCode = Number(process.env.CDEK_FROM_CITY_CODE || 44);
+const fromCityCode = Number(required("CDEK_FROM_CITY_CODE"));
 const toCityCode = Number(process.env.CDEK_TO_CITY_CODE || 137);
 
 if (!Number.isInteger(fromCityCode) || !Number.isInteger(toCityCode)) {
@@ -88,11 +88,28 @@ async function main() {
     throw new Error("Tariff calculation: no tariffs returned for the sample parcel");
   }
   console.log(`Tariffs: OK (${available.length} available)`);
-  for (const tariff of available.slice(0, 5)) {
-    console.log(
-      `  ${tariff.tariff_code}: ${tariff.tariff_name} - ${tariff.delivery_sum} RUB, ` +
-        `${tariff.period_min}-${tariff.period_max} days`,
-    );
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const pad = (value) => String(value).padStart(2, "0");
+  const date = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}+0300`;
+  for (const tariffCode of [136, 137]) {
+    const quote = await fetchJson(`${baseUrl}/calculator/tariff`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        date,
+        type: 1,
+        currency: 1,
+        lang: "rus",
+        tariff_code: tariffCode,
+        from_location: { code: fromCityCode },
+        to_location: { code: toCityCode },
+        packages: [{ weight: 1000, length: 30, width: 20, height: 10 }],
+      }),
+    }, `Tariff ${tariffCode}`);
+    if (typeof quote?.delivery_sum !== "number" || !Number.isFinite(quote.delivery_sum) || quote.delivery_sum < 0) {
+      throw new Error(`Tariff ${tariffCode}: no valid carrier quote`);
+    }
+    console.log(`Tariff ${tariffCode}: OK (${quote.delivery_sum} RUB)`);
   }
 }
 
