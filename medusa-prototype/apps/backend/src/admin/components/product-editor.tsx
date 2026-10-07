@@ -5,6 +5,7 @@ import { Badge, Button, Heading, Input, Label, Textarea, toast } from "@medusajs
 import { sdk } from "../lib/sdk"
 import { resolveMediaPreviewUrl } from "../lib/media"
 import { PROFILE_FIELDS, profileProblems, readProfile, type CatalogProfile } from "../../lib/catalog-profile"
+import { applyProfileTemplate, readMeasurements, measurementProblems, type Measurement } from "../../lib/catalog-quality"
 
 interface ProductRow {
   id: string; title: string; description?: string | null; status: string; updated_at: string
@@ -14,7 +15,7 @@ interface ProductRow {
   variants?: { id: string; title: string; sku?: string; prices?: { currency_code: string; amount: number }[] }[]
 }
 type LabelImage = { name: string; url: string }
-const tabs = ["Карточка", "Варианты и цены", "Фотографии", "Каталог", "Метрики"]
+const tabs = ["Карточка", "Обмеры", "Варианты и цены", "Фотографии", "Каталог", "Метрики"]
 
 export const ProductEditor = ({ id }: { id: string }) => {
   const [product, setProduct] = useState<ProductRow | null>(null)
@@ -32,6 +33,11 @@ export const ProductEditor = ({ id }: { id: string }) => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [dirty, setDirty] = useState(false)
+  const [measurements, setMeasurements] = useState<Measurement[]>([])
+  const [templateQuery, setTemplateQuery] = useState("")
+  const [templates, setTemplates] = useState<{ id: string; title: string }[]>([])
+  const [templateId, setTemplateId] = useState("")
+  const [overwrite, setOverwrite] = useState(false)
 
   const load = useCallback(async () => {
     setError("")
@@ -42,6 +48,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
       const p = data.product
       setProduct(p); setTitle(p.title); setDescription(p.description ?? "")
       setProfile(readProfile(p.metadata?.catalog_profile))
+      setMeasurements(readMeasurements((p.metadata?.catalog_profile as Record<string, unknown> | undefined)?.measurements))
       setImages([...(p.thumbnail ? [p.thumbnail] : []), ...p.images.map((image) => image.url)].filter((url, i, all) => all.indexOf(url) === i))
       setCategoryIds(p.categories?.map((category) => category.id) ?? [])
       setCollectionId(p.collection_id ?? ""); setDirty(false)
@@ -67,6 +74,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
     setProfile((previous) => ({ ...previous, [key]: value })); setDirty(true)
   }
   const missing = [
+    ...measurementProblems(measurements),
     ...(!title.trim() ? ["Наименование"] : []), ...profileProblems(profile),
     ...(!images.length ? ["Фото товара"] : []), ...(!categoryIds.length ? ["Категория"] : []),
     ...(!product?.variants?.length ? ["Варианты, размеры и цены"] : []),
@@ -75,6 +83,8 @@ export const ProductEditor = ({ id }: { id: string }) => {
 
   async function save(status: "draft" | "published") {
     if (!product) return
+    const errors = measurementProblems(measurements)
+    if (errors.length) { toast.error(errors[0]); return }
     if (status === "published" && missing.length) { toast.error("Заполните карточку перед публикацией"); return }
     setBusy(true)
     try {
@@ -82,7 +92,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
       if (current.updated_at !== product.updated_at) throw new Error("Товар изменён другим сотрудником. Обновите страницу и проверьте изменения.")
       await sdk.admin.product.update(id, {
         title: title.trim() || product.title, description, status,
-        metadata: { ...current.metadata, catalog_profile: { ...profile, label_images: labels } },
+        metadata: { ...current.metadata, catalog_profile: { ...(current.metadata?.catalog_profile as Record<string, unknown> ?? {}), ...profile, measurements: readMeasurements(measurements), label_images: labels } },
         images: images.map((url) => ({ url })), thumbnail: images[0] ?? null,
         categories: categoryIds.map((categoryId) => ({ id: categoryId })), collection_id: collectionId || null,
       })
@@ -119,6 +129,26 @@ export const ProductEditor = ({ id }: { id: string }) => {
     setLabels(labels.filter((_, i) => i !== index)); setDirty(true)
   }
 
+  async function findTemplates() {
+    setBusy(true)
+    try {
+      const { products } = await sdk.admin.product.list({ q: templateQuery, limit: 30 })
+      setTemplates(products.filter(p => p.id !== id).map(p => ({ id: p.id, title: p.title }))); setTemplateId("")
+    } catch { toast.error("Не удалось найти карточки") }
+    finally { setBusy(false) }
+  }
+
+  async function applyTemplate() {
+    if (!templateId || (overwrite && !window.confirm("Заменить общие характеристики данными выбранной карточки?"))) return
+    setBusy(true)
+    try {
+      const { product: source } = await sdk.admin.product.retrieve(templateId, { fields: "+metadata" })
+      setProfile(previous => applyProfileTemplate(previous, source.metadata?.catalog_profile, overwrite))
+      setDirty(true); toast.success("Характеристики перенесены. Проверьте и сохраните карточку.")
+    } catch { toast.error("Не удалось применить шаблон") }
+    finally { setBusy(false) }
+  }
+
   if (error) return <div role="alert"><p>{error}</p><Button onClick={() => void load()}>Повторить</Button></div>
   if (!product) return <p role="status">Загрузка карточки…</p>
   return <div className="space-y-6">
@@ -137,6 +167,16 @@ export const ProductEditor = ({ id }: { id: string }) => {
     </div>
     <div role="tabpanel" aria-label={tab}>
       {tab === "Карточка" && <div className="grid gap-5 md:grid-cols-2">
+        <details className="md:col-span-2">
+          <summary>Характеристики из другой карточки</summary>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Input aria-label="Найти карточку-шаблон" className="max-w-sm" value={templateQuery} onChange={e => setTemplateQuery(e.target.value)} />
+            <Button variant="secondary" disabled={busy} onClick={() => void findTemplates()}>Найти</Button>
+            <select aria-label="Карточка-шаблон" className="bg-ui-bg-field max-w-full rounded border p-2 text-sm" value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Выберите товар</option>{templates.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} />Заменить заполненные характеристики</label>
+            <Button disabled={busy || !templateId} onClick={() => void applyTemplate()}>Применить характеристики</Button>
+          </div>
+        </details>
         <div><Label htmlFor="product-title">Наименование товара</Label><Input id="product-title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true) }} /></div>
         {PROFILE_FIELDS.map(([key, label]) => <div key={key}>
           <Label htmlFor={`profile-${key}`}>{label}</Label>
@@ -146,6 +186,15 @@ export const ProductEditor = ({ id }: { id: string }) => {
           {key === "lining" && <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={profile.no_lining} onChange={(e) => change("no_lining", e.target.checked)} />Без подкладки</label>}
         </div>)}
         <div className="md:col-span-2"><Label htmlFor="product-description">Описание</Label><Textarea id="product-description" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true) }} /></div>
+      </div>}
+      {tab === "Обмеры" && <div className="space-y-4">
+        <Heading level="h3">Обмеры изделия, см</Heading>
+        {measurements.map((row, index) => <div key={index} className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_2fr_1fr_auto]">
+          {([["size", "Размер"], ["label", "Измерение"], ["value", "Сантиметры"]] as const).map(([key, label]) => <div key={key}><Label htmlFor={`measurement-${index}-${key}`}>{label}</Label><Input id={`measurement-${index}-${key}`} value={row[key]} inputMode={key === "value" ? "decimal" : "text"} disabled={busy} onChange={e => { setMeasurements(previous => previous.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item)); setDirty(true) }} /></div>)}
+          <button type="button" aria-label={`Удалить обмер ${index + 1}`} title="Удалить обмер" disabled={busy} onClick={() => { setMeasurements(measurements.filter((_, i) => i !== index)); setDirty(true) }}><Trash /></button>
+        </div>)}
+        <Button variant="secondary" disabled={busy || measurements.length >= 100} onClick={() => { setMeasurements([...measurements, { size: "", label: "", value: "" }]); setDirty(true) }}>Добавить обмер</Button>
+        {measurementProblems(measurements).map(message => <p key={message} className="text-ui-fg-error text-sm">{message}</p>)}
       </div>}
       {tab === "Варианты и цены" && <div className="space-y-4">
         <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th>Цвет / размер</th><th>SKU</th><th>Цена</th></tr></thead><tbody>

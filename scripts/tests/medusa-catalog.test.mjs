@@ -52,6 +52,15 @@ function client(products = [fixture()]) {
   return { api: exports, requests, state };
 }
 
+test('measurements expose only valid product data', async () => {
+  const { api } = client([fixture({ metadata: { catalog_profile: { measurements: [
+    { size: 'os', label: 'Length', value: '65,5', internal: 'secret' },
+    { size: 'S', label: 'Width', value: '-10' }, null,
+  ] } } })]);
+  const product = await api.fetchMedusaProductByFrontendId('prod_admin');
+  assert.equal(JSON.stringify(product.measurements), JSON.stringify([{ size: 'ONE SIZE', label: 'Length', value: '65.5' }]));
+});
+
 test('admin-created product resolves by id, not a fabricated handle', async () => {
   const { api, requests } = client();
   const product = await api.fetchMedusaProductByFrontendId('prod_admin');
