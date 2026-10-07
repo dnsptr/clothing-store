@@ -6,11 +6,12 @@ import {
   Modules,
   ProductStatus,
 } from "@medusajs/framework/utils";
-import { createInventoryLevelsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow, updateProductVariantsWorkflow } from "@medusajs/medusa/core-flows";
+import { createInventoryLevelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow, updateProductVariantsWorkflow } from "@medusajs/medusa/core-flows";
 
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import importMarioMikkeCatalog from "../../src/scripts/import-mario-mikke";
 import importCustomerCatalog from "../../src/scripts/import-customer-catalog";
+import disableUnpricedDelivery from "../../src/scripts/disable-unpriced-delivery";
 
 // Booting the full Medusa app (create DB -> migrate -> start) and running the
 // seed/import twice comfortably exceeds Jest's 5s default, so raise the per-file
@@ -354,6 +355,41 @@ medusaIntegrationTestRunner({
         });
         await expect(importCustomerCatalog({ container }))
           .rejects.toThrow("existing variant has no managed inventory item");
+      });
+    });
+
+    describe("legacy shipping option migration", () => {
+      it("disables persisted zero-price carrier options without disabling pickup", async () => {
+        const container = getContainer();
+        const query = container.resolve(ContainerRegistrationKeys.QUERY);
+        await seedInitialData({ container });
+        await ensureDefaultShippingProfile(container);
+        await importMarioMikkeCatalog({ container, args: [] });
+        const { data: options } = await query.graph({
+          entity: "shipping_option",
+          fields: ["id", "provider_id", "service_zone_id", "shipping_profile_id", "type.code"],
+        });
+        const pickup = options.find(option => option.type?.code === "pickup-store");
+        expect(pickup).toBeDefined();
+        await createShippingOptionsWorkflow(container).run({ input: [{
+          name: "Старый бесплатный перевозчик",
+          price_type: "flat",
+          provider_id: pickup!.provider_id,
+          service_zone_id: pickup!.service_zone_id,
+          shipping_profile_id: pickup!.shipping_profile_id,
+          type: { label: "СДЭК", description: "Изолированная тестовая БД", code: "cdek-pvz" },
+          prices: [{ currency_code: "rub", amount: 0 }],
+          rules: [{ attribute: "enabled_in_store", value: "true", operator: "eq" }],
+        }] });
+        await disableUnpricedDelivery({ container });
+        const { data: migrated } = await query.graph({
+          entity: "shipping_option",
+          fields: ["id", "type.code", "rules.attribute", "rules.value"],
+        });
+        const carrier = migrated.find(option => option.type?.code === "cdek-pvz");
+        expect(carrier?.rules?.some(rule => rule.attribute === "enabled_in_store" && rule.value === "false")).toBe(true);
+        const stillPickup = migrated.find(option => option.id === pickup!.id);
+        expect(stillPickup?.rules?.some(rule => rule.attribute === "enabled_in_store" && rule.value === "true")).toBe(true);
       });
     });
 
