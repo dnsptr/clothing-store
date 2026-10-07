@@ -8,6 +8,8 @@
 
 import { TBankPaymentProviderService } from "../service";
 import { TBankClient } from "../lib/client";
+import { buildReceipt } from "../lib/receipt";
+import { ReceiptSnapshotCodec } from "../lib/receipt-snapshot";
 import { generateToken } from "../lib/token";
 import { TBANK_NOTIFICATION_MODULE } from "../../tbank-notifications";
 import { MedusaError } from "@medusajs/framework/utils";
@@ -46,6 +48,27 @@ function authoritativeCart(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+const SESSION_ID = "payses_01JABCDEFGHJKMNPQRSTVWXYZ";
+const CART_ID = "cart_01JABCDEFGHJKMNPQRSTVWXYZ";
+
+function signedFiscalData() {
+  return {
+    orderId: SESSION_ID,
+    cartSnapshot: {
+      cartId: CART_ID,
+      orderId: SESSION_ID,
+      currencyCode: "rub",
+      amountKopecks: 1_899_000,
+    },
+    receiptSnapshotEnvelope: new ReceiptSnapshotCodec(OPTIONS.receiptSnapshotSecret).seal({
+      sessionId: SESSION_ID,
+      cartId: CART_ID,
+      cartLines: [{ id: "item_1", quantity: 2 }],
+      receipt: buildReceipt(authoritativeCart(), 1_899_000),
+    }),
+  };
+}
+
 
 type GraphRequest = {
   readonly entity: string;
@@ -352,7 +375,7 @@ describe("initiatePayment", () => {
     expect(initSpy).not.toHaveBeenCalled();
   });
 
-  it("reuses the immutable receipt snapshot when an indeterminate Init is safely retried", async () => {
+  it("blocks an indeterminate Init retry when the same-total cart's receipt changed", async () => {
     const cart = authoritativeCart();
     const service = makeService(undefined, cart);
     const sessionData: Record<string, unknown> = {};
@@ -363,7 +386,6 @@ describe("initiatePayment", () => {
     await expect(service.initiatePayment({ ...input, data: sessionData } as never)).rejects.toThrow(
       /indeterminate/,
     );
-    const initialReceipt = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string).Receipt;
     const snapshotEnvelope = sessionData.receiptSnapshotEnvelope;
     expect(typeof snapshotEnvelope).toBe("string");
     expect(sessionData).not.toHaveProperty("receiptSnapshot");
@@ -372,29 +394,38 @@ describe("initiatePayment", () => {
       email: "changed@example.com",
       items: [{ id: "item_2", product_title: "Изменённый товар", quantity: 1, total: 18900 }],
     });
-    const retryFetch = jest
-      .fn()
+    const retryFetch = jest.fn();
+    global.fetch = retryFetch as unknown as typeof fetch;
+
+    await expect(service.initiatePayment({ ...input, data: sessionData } as never))
+      .rejects.toThrow(/фискальный состав/);
+    expect(retryFetch).not.toHaveBeenCalled();
+    expect(sessionData.receiptSnapshotEnvelope).toBe(snapshotEnvelope);
+  });
+
+  it("reuses a signed receipt when an unchanged indeterminate Init is safely retried", async () => {
+    const cart = authoritativeCart();
+    const service = makeService(undefined, cart);
+    const sessionData: Record<string, unknown> = {};
+    global.fetch = jest.fn().mockRejectedValue(new Error("request timeout"));
+    await expect(service.initiatePayment({ ...input, data: sessionData } as never))
+      .rejects.toThrow(/indeterminate/);
+    const snapshotEnvelope = sessionData.receiptSnapshotEnvelope;
+    const retryFetch = jest.fn()
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
+        ok: true, status: 200,
         json: async () => ({ Success: false, ErrorCode: "914", Message: "not found" }),
       })
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
+        ok: true, status: 200,
         json: async () => ({
-          Success: true,
-          ErrorCode: "0",
-          PaymentId: "3456789",
+          Success: true, ErrorCode: "0", PaymentId: "3456789",
           PaymentURL: "https://securepay.tinkoff.ru/xxx",
         }),
       });
     global.fetch = retryFetch as unknown as typeof fetch;
-
     await service.initiatePayment({ ...input, data: sessionData } as never);
-
-    const initBody = JSON.parse(retryFetch.mock.calls[1][1].body as string);
-    expect(initBody.Receipt).toEqual(initialReceipt);
+    expect(retryFetch).toHaveBeenCalledTimes(2);
     expect(sessionData.receiptSnapshotEnvelope).toBe(snapshotEnvelope);
   });
 
@@ -519,35 +550,48 @@ describe("initiatePayment", () => {
     it("идемпотентный повтор: при наличии активной попытки возвращает её без повторного Init", async () => {
       const fetchMock = jest.fn();
       global.fetch = fetchMock as unknown as typeof fetch;
-
       const inputWithExistingSession = {
         ...input,
         data: {
+          ...signedFiscalData(),
           paymentId: "3456789",
           paymentUrl: "https://securepay.tinkoff.ru/xxx",
-          orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
           status: "NEW",
-          receiptSnapshot: { Email: "legacy@example.com" },
-          receiptSnapshotSignature: "legacy-mac",
-          cartSnapshot: {
-            amountKopecks: 1899000,
-            currencyCode: "rub",
-            orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
-          },
         },
       };
-
       const result = await makeService().initiatePayment(inputWithExistingSession as never);
-
       expect(fetchMock).not.toHaveBeenCalled();
       expect(result.status).toBe("pending_authorization");
       expect(result.id).toBe("3456789");
-      expect((result.data as Record<string, unknown>).paymentUrl).toBe(
-        "https://securepay.tinkoff.ru/xxx",
-      );
-      expect(result.data).not.toHaveProperty("receiptSnapshot");
-      expect(result.data).not.toHaveProperty("receiptSnapshotSignature");
     });
+    it("blocks active retry when same-total cart fiscal contents changed", async () => {
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock as unknown as typeof fetch;
+      await expect(makeService(undefined, authoritativeCart({
+        email: "changed@example.com",
+        items: [{ id: "item_2", product_title: "Брюки", quantity: 2, total: 18900 }],
+      })).initiatePayment({
+        ...input,
+        data: {
+          ...signedFiscalData(),
+          paymentId: "3456789",
+          paymentUrl: "https://securepay.tinkoff.ru/xxx",
+          status: "NEW",
+        },
+      } as never)).rejects.toThrow(/фискальный состав/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("blocks a legacy active retry without a signed receipt", async () => {
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock as unknown as typeof fetch;
+      await expect(makeService().initiatePayment({
+        ...input,
+        data: { paymentId: "3456789", paymentUrl: "https://securepay.tinkoff.ru/xxx" },
+      } as never)).rejects.toThrow(/подписанный чек/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
 
     it("запрещает повторное использование, если корзина изменилась по сумме", async () => {
       const inputWithModifiedAmount = {
@@ -597,8 +641,8 @@ describe("initiatePayment", () => {
       const inputIndeterminate = {
         ...input,
         data: {
+          ...signedFiscalData(),
           paymentId: "3456789",
-          orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
           status: "indeterminate",
         },
       };
@@ -624,7 +668,7 @@ describe("initiatePayment", () => {
       const inputIndeterminateNoId = {
         ...input,
         data: {
-          orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+          ...signedFiscalData(),
           status: "indeterminate",
         },
       };
@@ -644,7 +688,7 @@ describe("initiatePayment", () => {
       const inputIndeterminateFailed = {
         ...input,
         data: {
-          orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+          ...signedFiscalData(),
           status: "indeterminate",
         },
       };
@@ -968,9 +1012,10 @@ describe("authorizePayment", () => {
    * никем не обновлялся. Если верить ему, платёж навсегда останется `NEW`.
    */
   const session = {
+    ...signedFiscalData(),
     paymentId: "3456789",
     paymentUrl: "https://securepay.tinkoff.ru/xxx",
-    orderId: "payses_01JABCDEF",
+    orderId: SESSION_ID,
     status: "NEW",
   };
 
@@ -1031,7 +1076,7 @@ describe("authorizePayment", () => {
     const data = result.data as Record<string, unknown>;
     expect(data.status).toBe("CONFIRMED");
     expect(data.paymentId).toBe("3456789");
-    expect(data.orderId).toBe("payses_01JABCDEF");
+    expect(data.orderId).toBe(SESSION_ID);
   });
 
   it("не валит оформление, если банк не ответил", async () => {
@@ -1067,18 +1112,32 @@ describe("authorizePayment", () => {
       Amount: 100000, // 1000 руб вместо 18990 руб
     });
 
-    const sessionWithSnapshot = {
-      ...session,
-      cartSnapshot: {
-        amountKopecks: 1899000,
-        currencyCode: "rub",
-        orderId: "payses_01JABCDEF",
-      },
-    };
+    const sessionWithSnapshot = session;
 
     await expect(
       makeService().authorizePayment({ data: { ...sessionWithSnapshot } } as never),
     ).rejects.toThrow(/сумма подтверждения банка .* не совпадает со снапшотом корзины/);
+  });
+
+  it.each([
+    ["item", { items: [{ id: "item_2", product_title: "Брюки", quantity: 2, total: 18900 }] }],
+    ["recipient", { email: "other@example.com" }],
+  ])("rejects bank-confirmed authorization for changed same-total %s", async (_kind, changes) => {
+    const fetchMock = mockFetchOnce({
+      Success: true, ErrorCode: "0", PaymentId: "3456789", Status: "CONFIRMED",
+      Amount: 1_899_000,
+    });
+    await expect(makeService(undefined, authoritativeCart(changes)).authorizePayment({
+      data: { ...session },
+    } as never)).rejects.toThrow(/фискальный состав/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects confirmed legacy sessions without a signed receipt", async () => {
+    mockFetchOnce({ Success: true, ErrorCode: "0", Status: "CONFIRMED" });
+    await expect(makeService().authorizePayment({
+      data: { ...session, receiptSnapshotEnvelope: undefined },
+    } as never)).rejects.toThrow(/снапшота корзины и чека/);
   });
 });
 
@@ -1152,7 +1211,6 @@ describe("refundPayment", () => {
     await expect(
       makeService().refundPayment({ data, amount: 18990 } as never),
     ).rejects.toThrow(/автоматический возврат заблокирован/);
-
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

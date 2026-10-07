@@ -11,6 +11,15 @@ import {
   type OperatorAction,
 } from "./manual-review-operations";
 import { reconcilePaymentAttempt } from "./reconcile-payment-attempt";
+import {
+  inspectPollReview,
+  resolvePollReview,
+  retryPollReview,
+  type PollManualReviewDetails,
+  PollReviewStateError,
+  type PollReviewAction,
+  type PollReviewStore,
+} from "./poll-manual-review-operations";
 import { reconcileNotification } from "./reconcile-notification";
 import {
   parseNotificationRow,
@@ -32,6 +41,7 @@ import { LeaseController, StaleLeaseError } from "./reconciliation-lease";
 export type {
   DurableLinkageChecker,
   ManualReviewDetails,
+  PollManualReviewDetails,
   PollMissingNotificationsResult,
   PollPaymentAttemptResult,
   PaymentReconcilerDependencies,
@@ -209,6 +219,29 @@ export class PaymentReconcilerService {
   async resolveManualReview(id: string, action: OperatorAction): Promise<void> {
     await resolveManualReview(this.services.notifications, id, action);
     this.services.logger.info(`tbank.manual_review.resolve: ${id}: ${action.operatorId}: ${action.reason}`);
+  }
+
+  inspectPollReview(id: string): Promise<PollManualReviewDetails> {
+    return inspectPollReview(this.services.notifications as TbankNotificationStore & PollReviewStore, this.services, id);
+  }
+
+  async retryPollReview(id: string, action: PollReviewAction): Promise<void> {
+    const config = parseTbankEnvironment(process.env);
+    if (!config.enabled) throw new PollReviewStateError(id, "current T-Bank terminal is disabled");
+    await retryPollReview(
+      this.services.notifications as TbankNotificationStore & PollReviewStore,
+      id, action, config.options.terminalKey,
+    );
+    this.services.logger.info(`tbank.poll_manual_review.retry: ${id}: ${action.operatorId}`);
+  }
+
+  async resolvePollReview(id: string, action: PollReviewAction): Promise<void> {
+    const services = this.forReconciliation();
+    await resolvePollReview(
+      this.services.notifications as TbankNotificationStore & PollReviewStore,
+      services, id, action, (paymentId, operation) => this.withPaymentLock(paymentId, operation),
+    );
+    this.services.logger.info(`tbank.poll_manual_review.resolve: ${id}: ${action.operatorId}`);
   }
 }
 

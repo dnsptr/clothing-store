@@ -14,8 +14,10 @@ import {
   ManualReviewActionSchema,
   ManualReviewListQuerySchema,
 } from "./admin/tbank/manual-review/validators";
+import { PollReviewActionSchema } from "./admin/tbank/payment-attempts/manual-review/validators";
 
 import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
+import { requireCapturedTbankPayment } from "./store/complete-payment-guard";
 
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
@@ -39,6 +41,11 @@ export default defineMiddlewares({
       matcher: "/store/payment-collections/:id/payment-sessions",
       method: "POST",
       middlewares: [requirePaidPaymentProvider],
+    },
+    {
+      matcher: "/store/carts/:id/complete",
+      method: "POST",
+      middlewares: [requireCapturedTbankPayment],
     },
     {
       matcher: "/admin/products/:id",
@@ -82,6 +89,23 @@ export default defineMiddlewares({
     },
     {
       matcher: "/admin/tbank/manual-review",
+      method: "GET",
+      middlewares: [
+        validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
+      ],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review/:id/retry",
+      method: "POST",
+      middlewares: [validateAndTransformBody(PollReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review/:id/resolve",
+      method: "POST",
+      middlewares: [validateAndTransformBody(PollReviewActionSchema)],
+    },
+    {
+      matcher: "/admin/tbank/payment-attempts/manual-review",
       method: "GET",
       middlewares: [
         validateAndTransformQuery(ManualReviewListQuerySchema, { isList: false }),
