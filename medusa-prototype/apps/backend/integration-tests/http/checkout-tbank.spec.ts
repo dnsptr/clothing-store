@@ -214,7 +214,7 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           expect(replay.data).toBe("OK");
 
           let orders: Array<{ order_id: string; cart_id: string }> = [];
-          let payments: Array<{ payment_session_id: string; captured_at: Date | null }> = [];
+          let payments: Array<{ payment_session_id: string; captured_at?: Date | string | null }> = [];
           for (let attempt = 0; attempt < 50; attempt++) {
             ({ data: orders } = await query.graph({
               entity: "order_cart", fields: ["order_id", "cart_id"], filters: { cart_id: cartId },

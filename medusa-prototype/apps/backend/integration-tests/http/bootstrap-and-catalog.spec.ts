@@ -117,10 +117,8 @@ const snapshotCatalog = async (
       }
       variantIdBySku[variant.sku] = variant.id;
 
-      const inventoryItems = (variant.inventory_items ?? []).filter(Boolean);
-      if (inventoryItems.length > 0) {
-        inventoryItemIdBySku[variant.sku] = inventoryItems[0].inventory_item_id;
-      }
+      const inventoryItemId = variant.inventory_items?.find(item => item?.inventory_item_id)?.inventory_item_id;
+      if (inventoryItemId) inventoryItemIdBySku[variant.sku] = inventoryItemId;
     }
   }
 
@@ -187,7 +185,9 @@ medusaIntegrationTestRunner({
             "supported_currencies.is_default",
           ],
         });
-        const currencies = (store.supported_currencies ?? []).filter(Boolean);
+        const currencies = (store.supported_currencies ?? []).filter(
+          (currency): currency is NonNullable<typeof currency> => currency !== null
+        );
         expect(currencies.map((currency) => currency.currency_code)).toEqual([
           "rub",
         ]);
@@ -461,6 +461,7 @@ medusaIntegrationTestRunner({
           (key) => key.type === "publishable"
         );
         expect(publishableKey).toBeTruthy();
+        if (!publishableKey) throw new Error("Publishable API key was not seeded");
 
         const response = await api.get("/store/products", {
           headers: { "x-publishable-api-key": publishableKey.token },
