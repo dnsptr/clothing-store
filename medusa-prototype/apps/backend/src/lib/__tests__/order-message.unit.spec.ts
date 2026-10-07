@@ -123,6 +123,38 @@ describe("buildNewOrderMessage", () => {
     expect(message).toContain("Итого: 18 990 ₽");
   });
 
+  it("names the selected pickup store in the paid order message instead of inferring it from the customer's address", () => {
+    const message = buildNewOrderMessage({
+      ...ORDER,
+      shipping_methods: [{ name: "Самовывоз из магазина", data: { pickup_store_id: "store_nebo" } }],
+    });
+
+    expect(message).toContain("Магазин самовывоза: ТЦ «Небо» — г. Москва, ул. Авиаторов, д. 3А");
+    expect(message).not.toContain("ул. Тверская, 1");
+    expect(message).not.toContain("готов к выдаче");
+  });
+
+  it.each(["store_unknown", undefined])("warns staff rather than guessing an unrecognized pickup store (%s)", (storeId) => {
+    const message = buildNewOrderMessage({
+      ...ORDER,
+      shipping_methods: [{ name: "Самовывоз из магазина", data: { pickup_store_id: storeId, pickup_store_name: "ТЦ «Небо»" } }],
+    });
+
+    expect(message).toContain("Магазин самовывоза: не определён — проверьте заказ");
+    expect(message).not.toContain("ТЦ «Небо»");
+    expect(message).not.toContain("ул. Тверская, 1");
+  });
+
+  it("does not mistake a courier method carrying a stale pickup ID for store pickup", () => {
+    const message = buildNewOrderMessage({
+      ...ORDER,
+      shipping_methods: [{ name: "Курьер по Москве", data: { delivery_mode: "courier", pickup_store_id: "store_nebo" } }],
+    });
+
+    expect(message).toContain("Курьер по Москве — 125009, Москва, ул. Тверская, 1");
+    expect(message).not.toContain("Магазин самовывоза");
+  });
+
   it("не оставляет разметки — имена покупателей не надо экранировать", () => {
     const message = buildNewOrderMessage({
       ...ORDER,

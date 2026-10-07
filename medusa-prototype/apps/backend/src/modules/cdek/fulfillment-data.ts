@@ -27,7 +27,7 @@ export const MOSCOW_PICKUP_STORES: readonly PickupStoreLocation[] = [
   {
     id: "store_govorovo",
     name: "ТЦ «Говорово»",
-    address: "г. Москва, 47-й км МКАД, стр. 1",
+    address: "г. Москва, 47-й км МКАД, вл. 31, стр. 1",
     metro: "м. Говорово",
     workHours: "10:00 — 22:00 ежедневно",
     phone: "+7 (926) 057-72-05",
