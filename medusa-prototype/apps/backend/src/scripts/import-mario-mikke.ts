@@ -28,9 +28,9 @@ import {
 import {
   MANUAL_FULFILLMENT_PROVIDER_ID,
   resolveDeliveryShippingOptions,
+  shippingOptionIdsToDeactivate,
 } from "../modules/cdek/shipping-options";
 import { parseCdekEnvironment } from "../modules/cdek/config";
-import { OWN_COURIER_OPTION } from "../modules/own-courier/provider-id";
 
 const IMPORT_SOURCE = "mario-mikke-demo";
 // Поля варианта с весом и габаритами упаковки: по ним агрегатор доставки
@@ -280,18 +280,10 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
   // Credentials alone do not approve a customer price. A previous import may
   // have left flat 0 RUB carrier (or legacy MVP) methods in the database:
   // disable those before ensuring pickup, including on repeat imports.
-  const unpricedDeliveryCodes: Record<string, true> = {
-    "mvp-ru": true, "cdek-pvz": true, "cdek-courier": true,
-    "yandex-pvz": true, "pochta-parcel": true, "pochta-courier": true,
-    [OWN_COURIER_OPTION]: true,
-  };
-  for (const option of shippingOptions) {
-    if (unpricedDeliveryCodes[option.type?.code ?? ""] === true ||
-        (option.name === "MVP доставка по России" && !option.type?.code)) {
-      await fulfillmentModuleService.updateShippingOptions(option.id, {
-        rules: [{ attribute: "enabled_in_store", value: "false", operator: "eq" }],
-      });
-    }
+  for (const optionId of shippingOptionIdsToDeactivate(shippingOptions)) {
+    await fulfillmentModuleService.updateShippingOptions(optionId, {
+      rules: [{ attribute: "enabled_in_store", value: "false", operator: "eq" }],
+    });
   }
 
   for (const opt of deliveryOptionsToEnsure) {
