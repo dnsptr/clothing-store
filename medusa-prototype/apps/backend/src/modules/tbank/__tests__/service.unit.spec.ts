@@ -15,6 +15,7 @@ import { MedusaError } from "@medusajs/framework/utils";
 const OPTIONS = {
   terminalKey: "TinkoffBankTest",
   password: "TinkoffBankTest",
+  receiptSnapshotSecret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
   apiBaseUrl: "https://rest-api-test.tinkoff.ru/v2",
   notificationUrl: "https://api.mariomikke.shop/hooks/payment/tbank",
 };
@@ -115,13 +116,23 @@ afterEach(() => {
 });
 
 describe("validateOptions", () => {
-  it("требует terminalKey и password", () => {
+  it("requires the merchant password and an independent receipt snapshot secret", () => {
     expect(() => TBankPaymentProviderService.validateOptions({})).toThrow();
     expect(() =>
       TBankPaymentProviderService.validateOptions({ terminalKey: "x" }),
     ).toThrow();
     expect(() =>
       TBankPaymentProviderService.validateOptions({ terminalKey: "x", password: "y" }),
+    ).toThrow(/TBANK_RECEIPT_SNAPSHOT_SECRET/);
+    expect(() =>
+      TBankPaymentProviderService.validateOptions({
+        terminalKey: "x",
+        password: OPTIONS.password,
+        receiptSnapshotSecret: OPTIONS.password,
+      }),
+    ).toThrow(/TBANK_RECEIPT_SNAPSHOT_SECRET/);
+    expect(() =>
+      TBankPaymentProviderService.validateOptions({ terminalKey: "x", password: "y", receiptSnapshotSecret: OPTIONS.receiptSnapshotSecret }),
     ).not.toThrow();
   });
 });
@@ -352,7 +363,11 @@ describe("initiatePayment", () => {
     await expect(service.initiatePayment({ ...input, data: sessionData } as never)).rejects.toThrow(
       /indeterminate/,
     );
-    const receiptSnapshot = sessionData.receiptSnapshot;
+    const initialReceipt = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body as string).Receipt;
+    const snapshotEnvelope = sessionData.receiptSnapshotEnvelope;
+    expect(typeof snapshotEnvelope).toBe("string");
+    expect(sessionData).not.toHaveProperty("receiptSnapshot");
+    expect(sessionData).not.toHaveProperty("receiptSnapshotSignature");
     Object.assign(cart, {
       email: "changed@example.com",
       items: [{ id: "item_2", product_title: "Изменённый товар", quantity: 1, total: 18900 }],
@@ -379,30 +394,17 @@ describe("initiatePayment", () => {
     await service.initiatePayment({ ...input, data: sessionData } as never);
 
     const initBody = JSON.parse(retryFetch.mock.calls[1][1].body as string);
-    expect(initBody.Receipt).toEqual(receiptSnapshot);
+    expect(initBody.Receipt).toEqual(initialReceipt);
+    expect(sessionData.receiptSnapshotEnvelope).toBe(snapshotEnvelope);
   });
 
-  it("rejects an unsigned receipt snapshot supplied in payment data", async () => {
+  it("rejects a tampered receipt snapshot envelope supplied in payment data", async () => {
     const initSpy = jest.spyOn(TBankClient.prototype, "init");
-    const forgedReceipt = {
-      Email: "attacker@example.com",
-      Taxation: "usn_income",
-      Items: [{
-        Name: "Подменённый товар",
-        Price: 1899000,
-        Quantity: 1,
-        Amount: 1899000,
-        Tax: "vat105",
-        PaymentMethod: "full_prepayment",
-        PaymentObject: "commodity",
-        MeasurementUnit: "шт",
-      }],
-    };
 
     await expect(makeService().initiatePayment({
       ...input,
-      data: { receiptSnapshot: forgedReceipt },
-    } as never)).rejects.toThrow(/подпись сохранённого чека/);
+      data: { receiptSnapshotEnvelope: "v1.forged.forged.forged" },
+    } as never)).rejects.toThrow(/сохранённый чек недействителен/);
     expect(initSpy).not.toHaveBeenCalled();
   });
 
@@ -480,6 +482,13 @@ describe("initiatePayment", () => {
     expect((result.data as Record<string, unknown>).paymentUrl).toBe(
       "https://securepay.tinkoff.ru/xxx",
     );
+    expect(result.data).not.toHaveProperty("receiptSnapshot");
+    expect(result.data).not.toHaveProperty("receiptSnapshotSignature");
+    expect(typeof (result.data as Record<string, unknown>).receiptSnapshotEnvelope).toBe("string");
+    const storefrontData = JSON.stringify(result.data);
+    expect(storefrontData).not.toContain("buyer@example.com");
+    expect(storefrontData).not.toContain("receiptSnapshotSignature");
+    expect(storefrontData).not.toContain(OPTIONS.password);
   });
 
   it("отвергает валюту, отличную от RUB", async () => {
@@ -518,6 +527,8 @@ describe("initiatePayment", () => {
           paymentUrl: "https://securepay.tinkoff.ru/xxx",
           orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
           status: "NEW",
+          receiptSnapshot: { Email: "legacy@example.com" },
+          receiptSnapshotSignature: "legacy-mac",
           cartSnapshot: {
             amountKopecks: 1899000,
             currencyCode: "rub",
@@ -534,6 +545,8 @@ describe("initiatePayment", () => {
       expect((result.data as Record<string, unknown>).paymentUrl).toBe(
         "https://securepay.tinkoff.ru/xxx",
       );
+      expect(result.data).not.toHaveProperty("receiptSnapshot");
+      expect(result.data).not.toHaveProperty("receiptSnapshotSignature");
     });
 
     it("запрещает повторное использование, если корзина изменилась по сумме", async () => {
@@ -679,8 +692,8 @@ describe("initiatePayment", () => {
       );
     });
 
-    it("принимает PaymentURL для тестового и боевого хостов Т-Банка", async () => {
-      for (const host of ["securepay.tinkoff.ru", "rest-api-test.tinkoff.ru"]) {
+    it("принимает PaymentURL на хостах API и платежной формы Т-Банка", async () => {
+      for (const host of ["securepay.tinkoff.ru", "rest-api-test.tinkoff.ru", "pay.tbank-online.com"]) {
         mockFetchOnce({
           Success: true,
           ErrorCode: "0",

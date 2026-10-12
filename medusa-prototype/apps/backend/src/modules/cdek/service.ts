@@ -7,6 +7,20 @@ import type {
 } from "@medusajs/types";
 
 import type { CdekProviderOptions } from "./config";
+import {
+  CdekFulfillmentDataError,
+  MOSCOW_PICKUP_STORES,
+  buildCdekCartPackage,
+  buildCdekPackage,
+  parseCourierSelection,
+  parseDeliveryMode,
+  parseDestinationCityCode,
+  parsePvzSelection,
+  requireText,
+  resolvePickupStore,
+  UnsupportedCdekCancellationError,
+  UnsupportedCdekReturnError,
+} from "./fulfillment-data";
 import { CdekClient } from "./lib/cdek-client";
 import {
   CDEK_OPTION_COURIER,
@@ -17,41 +31,8 @@ import {
   CDEK_TARIFF_PVZ,
 } from "./provider-id";
 
-export interface PickupStoreLocation {
-  id: string;
-  name: string;
-  address: string;
-  metro: string;
-  workHours: string;
-  phone: string;
-}
-
-export const MOSCOW_PICKUP_STORES: PickupStoreLocation[] = [
-  {
-    id: "store_vodny",
-    name: "ТЦ «Водный»",
-    address: "г. Москва, Головинское шоссе, д. 5, корп. 1",
-    metro: "м. Водный стадион",
-    workHours: "10:00 — 22:00 ежедневно",
-    phone: "+7 (926) 057-72-05",
-  },
-  {
-    id: "store_govorovo",
-    name: "ТЦ «Говорово»",
-    address: "г. Москва, 47-й км МКАД, д. 31, стр. 1",
-    metro: "м. Говорово",
-    workHours: "10:00 — 22:00 ежедневно",
-    phone: "+7 (926) 057-72-05",
-  },
-  {
-    id: "store_nebo",
-    name: "ТЦ «Небо»",
-    address: "г. Москва, ул. Авиаторов, д. 3А",
-    metro: "м. Солнцево",
-    workHours: "10:00 — 22:00 ежедневно",
-    phone: "+7 (926) 057-72-05",
-  },
-];
+export { MOSCOW_PICKUP_STORES } from "./fulfillment-data";
+export type { PickupStoreLocation } from "./fulfillment-data";
 
 export default class CdekFulfillmentProviderService extends AbstractFulfillmentProviderService {
   static identifier = CDEK_PROVIDER_IDENTIFIER;
@@ -69,6 +50,17 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
     return this.client;
   }
 
+  private async calculateCarrierQuote(
+    optionId: typeof CDEK_OPTION_PVZ | typeof CDEK_OPTION_COURIER,
+    data: Record<string, unknown>,
+    context: Record<string, unknown>,
+  ) {
+    return this.client.calculateTariff({
+      toCityCode: parseDestinationCityCode(data["city_code"]),
+      tariffCode: optionId === CDEK_OPTION_COURIER ? CDEK_TARIFF_COURIER : CDEK_TARIFF_PVZ,
+      packages: [buildCdekCartPackage(context["items"])],
+    });
+  }
   async getFulfillmentOptions(): Promise<FulfillmentOption[]> {
     return [
       {
@@ -83,10 +75,7 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
         id: CDEK_OPTION_PICKUP,
         name: "Самовывоз из магазина (Москва, бесплатно)",
       },
-      {
-        id: `${CDEK_OPTION_PVZ}-return`,
-        is_return: true,
-      },
+
     ];
   }
 
@@ -102,33 +91,64 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
   async validateFulfillmentData(
     optionData: Record<string, unknown>,
     data: Record<string, unknown>,
-    _context: ValidateFulfillmentDataContext,
+    context: ValidateFulfillmentDataContext,
   ): Promise<Record<string, unknown>> {
     const optionId = String(optionData?.id || "");
 
-    // For PVZ option, we expect cdek_pvz_code or delivery_point if already chosen
     if (optionId === CDEK_OPTION_PVZ) {
-      const pvzCode = data?.cdek_pvz_code || data?.delivery_point;
+      const selection = parsePvzSelection(data);
+      const points = await this.client.getDeliveryPoints(selection.city_code);
+      const point = points.find(
+        (candidate) =>
+          candidate.code === selection.cdek_pvz_code &&
+          candidate.location.city_code === selection.city_code,
+      );
+      if (!point) {
+        throw new CdekFulfillmentDataError(
+          `PVZ ${selection.cdek_pvz_code} is not available in city ${selection.city_code}`,
+        );
+      }
+      const quote = await this.calculateCarrierQuote(CDEK_OPTION_PVZ, data, context);
       return {
         ...data,
-        cdek_pvz_code: pvzCode ? String(pvzCode) : undefined,
-        cdek_pvz_address: data?.cdek_pvz_address ? String(data.cdek_pvz_address) : undefined,
+        delivery_mode: CDEK_OPTION_PVZ,
+        city_code: selection.city_code,
+        cdek_pvz_code: point.code,
+        cdek_pvz_address: point.location.address,
+        carrier_quote_amount: quote.delivery_sum,
+        carrier_quote_currency: "RUB",
+        carrier_quote_provider: "cdek",
+        carrier_quote_tariff_code: quote.tariff_code,
       };
     }
 
-    // For store pickup, store_id can be passed
     if (optionId === CDEK_OPTION_PICKUP) {
-      const storeId = data?.pickup_store_id ? String(data.pickup_store_id) : "store_vodny";
-      const store = MOSCOW_PICKUP_STORES.find((s) => s.id === storeId) || MOSCOW_PICKUP_STORES[0];
+      const store = resolvePickupStore(data);
       return {
         ...data,
+        delivery_mode: CDEK_OPTION_PICKUP,
         pickup_store_id: store.id,
         pickup_store_name: store.name,
         pickup_store_address: store.address,
       };
     }
 
-    return data;
+    if (optionId === CDEK_OPTION_COURIER) {
+      const selection = parseCourierSelection(data);
+      const quote = await this.calculateCarrierQuote(CDEK_OPTION_COURIER, data, context);
+      return {
+        ...data,
+        delivery_mode: CDEK_OPTION_COURIER,
+        city_code: selection.city_code,
+        delivery_address: selection.delivery_address,
+        carrier_quote_amount: quote.delivery_sum,
+        carrier_quote_currency: "RUB",
+        carrier_quote_provider: "cdek",
+        carrier_quote_tariff_code: quote.tariff_code,
+      };
+    }
+
+    throw new CdekFulfillmentDataError("option");
   }
 
   async calculatePrice(
@@ -137,40 +157,18 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
     context: Record<string, unknown>,
   ): Promise<CalculatedShippingOptionPrice> {
     const optionId = String(optionData?.id || "");
-
-    // Store pickup is always free
     if (optionId === CDEK_OPTION_PICKUP) {
-      return {
-        calculated_amount: 0,
-        is_calculated_price_tax_inclusive: true,
-      };
+      return { calculated_amount: 0, is_calculated_price_tax_inclusive: true };
+    }
+    if (optionId !== CDEK_OPTION_PVZ && optionId !== CDEK_OPTION_COURIER) {
+      throw new CdekFulfillmentDataError("option");
     }
 
-    // On MVP launch, shipping is free for customers (0 RUB promo policy)
-    // We can also calculate actual CDEK tariff and store in data for analytics
-    try {
-      const destinationCityCode = Number(data?.city_code || context?.shipping_address?.city_code || 44);
-      const tariffCode = optionId === CDEK_OPTION_COURIER ? CDEK_TARIFF_COURIER : CDEK_TARIFF_PVZ;
-
-      // Calculate real tariff to verify delivery is possible to this destination
-      await this.client.calculateTariff({
-        toCityCode: destinationCityCode,
-        tariffCode,
-      });
-
-      // Free shipping for customer on launch stage
-      return {
-        calculated_amount: 0,
-        is_calculated_price_tax_inclusive: true,
-      };
-    } catch {
-      // If CDEK API is temporarily unavailable or city_code not yet specified,
-      // return 0 for launch promo so shopper is not blocked
-      return {
-        calculated_amount: 0,
-        is_calculated_price_tax_inclusive: true,
-      };
-    }
+    await this.calculateCarrierQuote(optionId, data, context);
+    return {
+      calculated_amount: 0,
+      is_calculated_price_tax_inclusive: true,
+    };
   }
 
   async createFulfillment(
@@ -179,107 +177,86 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
     order: Record<string, unknown> | undefined,
     fulfillment: Record<string, unknown>,
   ): Promise<CreateFulfillmentResult> {
-    const optionId = String(data?.option_id || fulfillment?.shipping_option_id || "");
+    const optionId = parseDeliveryMode(data);
 
-    // Store pickup doesn't register with CDEK
-    if (optionId === CDEK_OPTION_PICKUP || data?.pickup_store_id) {
-      const storeName = data?.pickup_store_name || "ТЦ «Водный»";
+    if (optionId === CDEK_OPTION_PICKUP) {
+      const store = resolvePickupStore(data);
       return {
         data: {
           delivery_mode: "pickup",
-          store: storeName,
+          pickup_store_id: store.id,
+          store: store.name,
+          address: store.address,
         },
         labels: [],
       };
     }
 
-    const orderNumber = String(order?.display_id || order?.id || `ORD-${Date.now()}`);
+    const orderNumber = requireText(
+      String(order?.display_id ?? order?.id ?? ""),
+      "order identity",
+    );
     const shippingAddress = (order?.shipping_address || {}) as Record<string, unknown>;
     const recipientName = [shippingAddress.first_name, shippingAddress.last_name]
       .filter(Boolean)
-      .join(" ") || "Покупатель Mario Mikke";
-    const recipientPhone = String(shippingAddress.phone || "+79000000000");
+      .join(" ");
+    requireText(recipientName, "recipient name");
+    const recipientPhone = requireText(shippingAddress.phone, "recipient phone");
     const recipientEmail = typeof order?.email === "string" ? order.email : undefined;
 
     const isCourier = optionId === CDEK_OPTION_COURIER;
     const tariffCode = isCourier ? CDEK_TARIFF_COURIER : CDEK_TARIFF_PVZ;
-    const pvzCode = data?.cdek_pvz_code ? String(data.cdek_pvz_code) : undefined;
+    const pvzSelection = isCourier ? undefined : parsePvzSelection(data);
+    const courierSelection = isCourier ? parseCourierSelection(data) : undefined;
+    const toAddress = courierSelection
+      ? {
+          cityCode: courierSelection.city_code,
+          address: courierSelection.delivery_address,
+        }
+      : undefined;
 
-    // Estimate package weight (average 800g per apparel item)
-    const itemCount = Array.isArray(items) ? items.length : 1;
-    const totalWeight = Math.max(500, itemCount * 700);
+    const packageData = buildCdekPackage(items, order);
 
-    try {
-      const cdekOrder = await this.client.createOrder({
-        orderNumber,
-        tariffCode,
-        recipient: {
-          name: recipientName,
-          phones: [{ number: recipientPhone }],
-          email: recipientEmail,
+    const cdekOrder = await this.client.createOrder({
+      orderNumber,
+      tariffCode,
+      recipient: {
+        name: recipientName,
+        phones: [{ number: recipientPhone }],
+        email: recipientEmail,
+      },
+      deliveryPoint: pvzSelection?.cdek_pvz_code,
+      toAddress,
+      packages: [
+        {
+          number: "1",
+          ...packageData,
         },
-        deliveryPoint: !isCourier ? pvzCode : undefined,
-        toAddress: isCourier
-          ? {
-              address: [shippingAddress.address_1, shippingAddress.address_2].filter(Boolean).join(", ") || "Адрес доставки",
-            }
-          : undefined,
-        packages: [
-          {
-            number: "1",
-            weight: totalWeight,
-            length: 30,
-            width: 25,
-            height: 10,
-          },
-        ],
-      });
+      ],
+    });
 
-      const uuid = cdekOrder.entity.uuid;
-      return {
-        data: {
-          cdek_uuid: uuid,
-          tariff_code: tariffCode,
-          pvz_code: pvzCode,
+    const uuid = cdekOrder.entity.uuid;
+    return {
+      data: {
+        cdek_uuid: uuid,
+        tariff_code: tariffCode,
+        pvz_code: pvzSelection?.cdek_pvz_code,
+      },
+      labels: [
+        {
+          tracking_number: uuid,
+          tracking_url: `https://www.cdek.ru/ru/tracking?order_id=${uuid}`,
+          label_url: "",
         },
-        labels: [
-          {
-            tracking_number: uuid,
-            tracking_url: `https://www.cdek.ru/ru/tracking?order_id=${uuid}`,
-            label_url: "",
-          },
-        ],
-      };
-    } catch (error) {
-      // Do not block order fulfillment creation in local/offline test mode
-      const fallbackTrackingId = `CDEK-MOCK-${orderNumber}`;
-      return {
-        data: {
-          cdek_mock: true,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        labels: [
-          {
-            tracking_number: fallbackTrackingId,
-            tracking_url: `https://www.cdek.ru/ru/tracking?order_id=${fallbackTrackingId}`,
-            label_url: "",
-          },
-        ],
-      };
-    }
+      ],
+    };
   }
 
-  async cancelFulfillment(fulfillment: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return {
-      canceled_at: new Date().toISOString(),
-      fulfillment_id: fulfillment?.id,
-    };
+  async cancelFulfillment(_fulfillment: Record<string, unknown>): Promise<Record<string, unknown>> {
+    throw new UnsupportedCdekCancellationError();
   }
 
   async createReturnFulfillment(): Promise<CreateFulfillmentResult> {
-    return {
-      data: { is_return: true },
-      labels: [],
-    };
+    throw new UnsupportedCdekReturnError();
   }
 }

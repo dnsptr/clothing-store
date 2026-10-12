@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse, MedusaNextFunction } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { profileProblems, readProfile } from "../../lib/catalog-profile"
+import { measurementProblems } from "../../lib/catalog-quality"
 
 // Legacy cards can still be edited, but explicit publication requires a profile.
 export async function catalogProfileGuard(req: MedusaRequest, res: MedusaResponse, next: MedusaNextFunction) {
@@ -11,8 +12,10 @@ export async function catalogProfileGuard(req: MedusaRequest, res: MedusaRespons
     filters: { id: req.params.id },
   }) : { data: [] }
   const current = data[0]
-  const previous = current?.metadata?.catalog_profile
+  const previous = current?.metadata?.catalog_profile as Record<string, unknown> | null | undefined
   const incoming = body.metadata?.catalog_profile
+  const measurementErrors = measurementProblems(incoming?.measurements !== undefined ? incoming.measurements : previous?.measurements)
+  if (measurementErrors.length) { res.status(400).json({ message: measurementErrors.join("; ") }); return }
   if (previous === undefined && incoming === undefined && body.status !== "published") { next(); return }
   if (incoming === null || (previous !== undefined && body.metadata === null)) { res.status(400).json({ message: "Профиль карточки нельзя удалить. Сохраните товар черновиком." }); return }
   const profile = readProfile(incoming ?? previous)

@@ -364,6 +364,12 @@ function normalizeImageUrl(url: string) {
 function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
   const metadata = isRecord(product.metadata) ? product.metadata : {};
   const profile = isRecord(metadata.catalog_profile) ? metadata.catalog_profile : {};
+  const measurements = (Array.isArray(profile.measurements) ? profile.measurements.slice(0, 100) : []).flatMap((row) => {
+    if (!isRecord(row) || typeof row.size !== "string" || typeof row.label !== "string" || typeof row.value !== "string") return [];
+    const value = row.value.trim().replace(",", ".");
+    if (!row.size.trim() || row.size.length > 50 || !row.label.trim() || row.label.length > 80 || !/^\d+(\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) > 1000) return [];
+    return [{ size: /^(os|one\s*size)$/i.test(row.size.trim()) ? "ONE SIZE" : row.size.trim(), label: row.label.trim(), value }];
+  });
   const fields: [string, string][] = [
     ["model", "Модель"], ["brand", "Бренд"], ["composition", "Состав изделия"],
     ["lining", "Подкладка"], ["country", "Страна изготовления"],
@@ -452,6 +458,7 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
     name: product.title,
     description,
     characteristics,
+    measurements,
     registryUrl,
     labelImages: Array.isArray(profile.label_images) ? profile.label_images.flatMap((image) => {
       if (!isRecord(image) || typeof image.url !== "string") return [];

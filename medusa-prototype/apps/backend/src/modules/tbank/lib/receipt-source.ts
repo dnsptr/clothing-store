@@ -1,8 +1,7 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-
 import { MedusaError } from "@medusajs/framework/utils";
 
 import { buildReceipt, receiptAmount, type ReceiptCart, type TBankReceipt } from "./receipt";
+import { ReceiptSnapshotCodec } from "./receipt-snapshot";
 
 export type ReceiptQuery = {
   graph<TData>(input: {
@@ -14,15 +13,14 @@ export type ReceiptQuery = {
 
 type ReceiptRequest = {
   readonly sessionId: string;
-  readonly existingReceipt?: TBankReceipt;
-  readonly existingSignature?: string;
+  readonly existingSnapshotEnvelope?: string;
   readonly paymentAmountKopecks: number;
 };
 
 export type ReceiptResolution = {
   readonly cartId: string;
   readonly receipt: TBankReceipt;
-  readonly receiptSignature: string;
+  readonly snapshotEnvelope: string;
 };
 
 type PaymentSessionLink = {
@@ -43,49 +41,33 @@ const CART_FIELDS = [
   "subtotal",
   "discount_total",
   "shipping_total",
+  "shipping_methods.amount",
+  "shipping_methods.is_tax_inclusive",
+  "shipping_methods.tax_lines.rate",
+  "shipping_methods.adjustments.amount",
   "items.id",
   "items.title",
   "items.product_title",
   "items.variant_title",
   "items.quantity",
   "items.unit_price",
+  "items.is_tax_inclusive",
+  "items.tax_lines.rate",
   "items.subtotal",
   "items.discount_total",
   "items.total",
   "items.adjustments.amount",
+  "items.adjustments.is_tax_inclusive",
 ] as const;
 
 export class TBankReceiptSource {
+  private readonly snapshotCodec: ReceiptSnapshotCodec;
+
   constructor(
     private readonly query: ReceiptQuery,
-    private readonly snapshotSecret: string,
-  ) {}
-
-  private signature(receipt: TBankReceipt): string {
-    const canonical = JSON.stringify({
-      Email: receipt.Email ?? null,
-      Phone: receipt.Phone ?? null,
-      Taxation: receipt.Taxation,
-      Items: receipt.Items.map((item) => ({
-        Name: item.Name,
-        Price: item.Price,
-        Quantity: item.Quantity,
-        Amount: item.Amount,
-        Tax: item.Tax,
-        PaymentMethod: item.PaymentMethod,
-        PaymentObject: item.PaymentObject,
-        MeasurementUnit: item.MeasurementUnit,
-      })),
-    });
-    return createHmac("sha256", this.snapshotSecret).update(canonical).digest("hex");
-  }
-
-  private hasValidSignature(receipt: TBankReceipt, signature: string): boolean {
-    if (!/^[a-f0-9]{64}$/.test(signature)) return false;
-    return timingSafeEqual(
-      Buffer.from(this.signature(receipt), "hex"),
-      Buffer.from(signature, "hex"),
-    );
+    snapshotSecret: string,
+  ) {
+    this.snapshotCodec = new ReceiptSnapshotCodec(snapshotSecret);
   }
 
   private async cartIdForSession(sessionId: string): Promise<string> {
@@ -138,15 +120,15 @@ export class TBankReceiptSource {
 
   async resolve(request: ReceiptRequest): Promise<ReceiptResolution> {
     const cartId = await this.cartIdForSession(request.sessionId);
-    if (request.existingReceipt) {
-      const existingSignature = request.existingSignature;
-      if (!existingSignature || !this.hasValidSignature(request.existingReceipt, existingSignature)) {
+    if (request.existingSnapshotEnvelope) {
+      const snapshot = this.snapshotCodec.open(request.existingSnapshotEnvelope);
+      if (snapshot.payload.sessionId !== request.sessionId || snapshot.payload.cartId !== cartId) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
-          "tbank: подпись сохранённого чека недействительна",
+          "tbank: сохранённый чек относится к другой сессии или корзине",
         );
       }
-      if (receiptAmount(request.existingReceipt) !== request.paymentAmountKopecks) {
+      if (receiptAmount(snapshot.payload.receipt) !== request.paymentAmountKopecks) {
         throw new MedusaError(
           MedusaError.Types.INVALID_DATA,
           "tbank: сумма сохранённого чека не совпадает с суммой платежа",
@@ -154,8 +136,8 @@ export class TBankReceiptSource {
       }
       return {
         cartId,
-        receipt: request.existingReceipt,
-        receiptSignature: existingSignature,
+        receipt: snapshot.payload.receipt,
+        snapshotEnvelope: request.existingSnapshotEnvelope,
       };
     }
 
@@ -177,7 +159,7 @@ export class TBankReceiptSource {
     return {
       cartId,
       receipt,
-      receiptSignature: this.signature(receipt),
+      snapshotEnvelope: this.snapshotCodec.seal({ sessionId: request.sessionId, cartId, receipt }),
     };
   }
 }

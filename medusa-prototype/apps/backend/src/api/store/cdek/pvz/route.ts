@@ -1,44 +1,64 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
+import { z } from "zod";
 
-import { parseCdekEnvironment } from "../../../../modules/cdek/config";
-import { CdekClient } from "../../../../modules/cdek/lib/cdek-client";
+import type { CdekDeliveryPoint } from "../../../../modules/cdek/lib/cdek-client";
+import {
+  getPublicCdekClient,
+  PublicCdekGuardError,
+  publicCdekGuard,
+} from "../../../../modules/cdek/public-api";
 
-let cdekClientInstance: CdekClient | null = null;
-
-function getClient(): CdekClient | null {
-  if (!cdekClientInstance) {
-    const config = parseCdekEnvironment(process.env);
-    if (config.enabled) {
-      cdekClientInstance = new CdekClient(config.options);
-    }
-  }
-  return cdekClientInstance;
-}
+const POSITIVE_INTEGER_TEXT = z.string().regex(/^\d+$/u).transform(Number);
+const PVZ_QUERY_SCHEMA = z.object({
+  city_code: POSITIVE_INTEGER_TEXT.pipe(z.number().int().min(1).max(10_000_000)),
+  limit: POSITIVE_INTEGER_TEXT.pipe(z.number().int().min(1).max(100)).default(100),
+});
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
-  const cityCodeStr = req.query.city_code;
-  const cityCode = Number(cityCodeStr);
+  try {
+    publicCdekGuard.checkRate(req);
+  } catch (error) {
+    if (error instanceof PublicCdekGuardError && error.reason === "rate_limited") {
+      return res.status(429).json({ message: "Too many requests", pvz: [] });
+    }
+    throw error;
+  }
 
-  if (!Number.isInteger(cityCode) || cityCode <= 0) {
+  const queryResult = PVZ_QUERY_SCHEMA.safeParse(req.query);
+  if (!queryResult.success) {
     return res.status(400).json({
-      message: "city_code parameter must be a positive integer",
+      message: "Invalid request",
       pvz: [],
     });
   }
 
-  const client = getClient();
-  if (!client) {
+  let client;
+  try {
+    client = getPublicCdekClient();
+  } catch {
+    return res.status(503).json({ message: "Delivery service unavailable", pvz: [] });
+  }
+  if (client === null) {
     return res.status(503).json({
-      message: "CDEK module is not configured or disabled",
+      message: "Delivery service unavailable",
       pvz: [],
     });
   }
 
   try {
-    const pvz = await client.getDeliveryPoints(cityCode);
-    res.json({ pvz });
+    const { city_code: cityCode, limit } = queryResult.data;
+    const pvz = await publicCdekGuard.run<CdekDeliveryPoint[]>({
+      key: `pvz:${cityCode}:${limit}`,
+      cacheTtlMs: 60_000,
+      execute: () => client.getDeliveryPoints(cityCode),
+    });
+    return res.json({ pvz: pvz.slice(0, limit) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to query CDEK PVZ";
-    res.status(500).json({ message, pvz: [] });
+    if (error instanceof PublicCdekGuardError) {
+      const status = error.reason === "rate_limited" ? 429 : 503;
+      const message = error.reason === "rate_limited" ? "Too many requests" : "Delivery service busy";
+      return res.status(status).json({ message, pvz: [] });
+    }
+    return res.status(502).json({ message: "Delivery provider unavailable", pvz: [] });
   }
 }

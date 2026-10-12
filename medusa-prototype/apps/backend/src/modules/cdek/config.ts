@@ -1,10 +1,6 @@
 import { z } from "zod";
 
-import {
-  CDEK_PROVIDER_CONFIG_ID,
-  CDEK_PROVIDER_IDENTIFIER,
-  DEFAULT_FROM_CITY_CODE,
-} from "./provider-id";
+import { CDEK_PROVIDER_IDENTIFIER } from "./provider-id";
 
 const CDEK_ENABLED_SCHEMA = z.enum(["true", "false"]).optional();
 
@@ -17,14 +13,19 @@ const CDEK_REQUIRED_VARIABLES = [
 const CDEK_ENVIRONMENT_SCHEMA = z.object({
   CDEK_CLIENT_ID: z.string().trim().min(1),
   CDEK_CLIENT_SECRET: z.string().trim().min(1),
-  CDEK_API_BASE_URL: z.string().trim().url(),
+  CDEK_API_BASE_URL: z.enum([
+    "https://api.cdek.ru/v2",
+    "https://api.edu.cdek.ru/v2",
+    "https://api.cdek.ru/v2/",
+    "https://api.edu.cdek.ru/v2/",
+  ]),
   CDEK_FROM_CITY_CODE: z
     .string()
     .trim()
-    .optional()
-    .transform((v) => (v ? Number(v) : DEFAULT_FROM_CITY_CODE))
-    .refine((v) => Number.isInteger(v) && v > 0, {
-      message: "CDEK_FROM_CITY_CODE must be a positive integer",
+    .regex(/^[1-9]\d*$/, "CDEK_FROM_CITY_CODE must be a positive integer")
+    .transform(Number)
+    .refine(Number.isSafeInteger, {
+      message: "CDEK_FROM_CITY_CODE must be a safe integer",
     }),
 });
 

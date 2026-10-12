@@ -1,16 +1,9 @@
 /**
- * Оповещение о новом заказе.
+ * Оповещает сотрудников и покупателя только после проверки, что списание
+ * Т-Банка и связь заказа с корзиной сохранены. Событие `order.placed` Medusa
+ * публикует раньше авторизации платежа, поэтому по нему письма отправлять нельзя.
  *
- * До этого обработчика заказ не порождал ни одного уведомления: покупатель не
- * получал подтверждения, а менеджеры и логисты узнавали о заказе, только если
- * сами открывали админку. Для магазина, который собирается продавать, это
- * блокирующий пробел, а не удобство.
- *
- * Каналов два: Telegram сотрудникам и письмо покупателю. Они независимы —
- * заказ читается один раз, а дальше каждая отправка живёт своей жизнью: нет
- * токена Telegram или упал SMTP — второй канал всё равно срабатывает. Сам
- * обработчик не падает никогда: заказ уже создан и оплачен, а падение здесь
- * означало бы бесконечные ретраи BullMQ из-за чужого недоступного сервиса.
+ * Каналы независимы: ошибка Telegram не препятствует попытке отправить письмо.
  */
 
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework";
@@ -68,7 +61,7 @@ export default async function orderPlacedHandler({
     })) as unknown as OrderForEmail;
   } catch (error) {
     logger.error(
-      `order.placed: заказ ${orderId} не прочитан, уведомления не отправлены: ${
+      `tbank.order.paid: заказ ${orderId} не прочитан, уведомления не отправлены: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -99,10 +92,10 @@ export default async function orderPlacedHandler({
         idempotency_key: `order-placed:${orderId}:${STAFF_CHANNEL}`,
       });
 
-      logger.info(`order.placed: уведомление о заказе ${orderNumber(order)} отправлено`);
+      logger.info(`tbank.order.paid: уведомление о заказе ${orderNumber(order)} передано провайдеру`);
     } catch (error) {
       logger.error(
-        `order.placed: не отправлено уведомление о заказе ${orderId}: ${
+        `tbank.order.paid: не отправлено уведомление о заказе ${orderId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -113,7 +106,7 @@ export default async function orderPlacedHandler({
   if (!customerEmail) {
     // Заказ без почты — не ошибка обработчика: писать некому, и сказать об
     // этом можно только в лог.
-    logger.warn(`order.placed: у заказа ${orderId} нет почты, письмо не отправлено`);
+    logger.warn(`tbank.order.paid: у заказа ${orderId} нет почты, письмо не отправлено`);
     return;
   }
 
@@ -146,10 +139,10 @@ export default async function orderPlacedHandler({
       idempotency_key: `order-placed:${orderId}:${CUSTOMER_CHANNEL}`,
     });
 
-    logger.info(`order.placed: письмо о заказе ${orderNumber(order)} отправлено покупателю`);
+    logger.info(`tbank.order.paid: письмо о заказе ${orderNumber(order)} передано провайдеру`);
   } catch (error) {
     logger.error(
-      `order.placed: не отправлено письмо о заказе ${orderId}: ${
+      `tbank.order.paid: не отправлено письмо о заказе ${orderId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -157,6 +150,6 @@ export default async function orderPlacedHandler({
 }
 
 export const config: SubscriberConfig = {
-  event: "order.placed",
+  event: "tbank.order.paid",
   context: { subscriberId: "order-placed-notifications" },
 };

@@ -1,12 +1,9 @@
 /**
- * Платёжный провайдер Т-Банка (шаг 1 в §12.2 проектного решения).
+ * Платёжный провайдер Т-Банка: создание платежа, опрос состояния,
+ * отмена/возврат и разбор нотификаций.
  *
- * Что здесь есть: создание платежа, опрос состояния, отмена/возврат и разбор
- * нотификаций. Чего здесь ещё нет и почему:
- *
- * - **Дедупликация нотификаций** — шаг 6, требует явного выбора между
- *   вариантами А и Б в §5.2. Здесь провайдер только разбирает и отображает
- *   нотификацию; хранение пары `(PaymentId, Status)` — забота роута.
+ * Подписанный webhook и дедупликация пары `(PaymentId, Status)` реализованы
+ * отдельно в маршруте и PostgreSQL inbox.
  *
  * Опциональные методы контракта (`*AccountHolder`, `listPaymentMethods`,
  * `savePaymentMethod`, `deletePaymentMethod`) не реализованы намеренно: они
@@ -14,7 +11,8 @@
  * `OperationInitiatorType` и отдельный разговор про 152-ФЗ (§2).
  */
 
-import { AbstractPaymentProvider, MedusaError } from "@medusajs/framework/utils";
+import { container as applicationContainer } from "@medusajs/framework";
+import { AbstractPaymentProvider, ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/utils";
 import type { Logger } from "@medusajs/framework/types";
 import type {
   AuthorizePaymentInput,
@@ -42,8 +40,8 @@ import type {
 
 import { TBankApiError, TBankClient } from "./lib/client";
 import { rublesToKopecks } from "./lib/money";
-import type { TBankReceipt } from "./lib/receipt";
 import { TBankReceiptSource, type ReceiptQuery } from "./lib/receipt-source";
+import { isStrongReceiptSnapshotSecret } from "./lib/receipt-snapshot";
 import { TBankAttemptPersistenceError } from "./errors";
 import {
   parseNotification,
@@ -59,6 +57,7 @@ import {
 export type TBankOptions = {
   terminalKey: string;
   password: string;
+  readonly receiptSnapshotSecret: string;
   apiBaseUrl?: string;
   successUrl?: string;
   failUrl?: string;
@@ -74,16 +73,36 @@ import type {
 
 export type InjectedDependencies = {
   logger: Logger;
-  query: ReceiptQuery;
+  query?: ReceiptQuery;
   [TBANK_NOTIFICATION_MODULE]?: TbankNotificationStore;
   [key: string]: unknown;
 };
+
+function providerDependency<T>(
+  injected: InjectedDependencies,
+  key: string,
+  optional = false,
+): T | undefined {
+  // Medusa creates payment providers in the payment module's own Awilix
+  // container. Application-level query and custom modules live in the app
+  // container, not that cradle; accessing an absent cradle key throws.
+  let value: T | undefined;
+  try {
+    value = injected[key] as T | undefined;
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== "AwilixResolutionError") {
+      throw error;
+    }
+  }
+  return value ?? applicationContainer.resolve<T>(key, { allowUnregistered: optional });
+}
 
 const DEFAULT_API_BASE_URL = "https://securepay.tinkoff.ru/v2";
 
 export const APPROVED_PAYMENT_URL_HOSTNAMES = new Set([
   "securepay.tinkoff.ru",
   "rest-api-test.tinkoff.ru",
+  "pay.tbank-online.com",
 ]);
 
 export function validatePaymentUrl(urlStr?: string): void {
@@ -139,8 +158,7 @@ export type TBankSessionData = {
   cartSnapshot?: CartSnapshot;
   initiatedAt?: string;
   indeterminateReason?: string;
-  receiptSnapshot?: TBankReceipt;
-  receiptSnapshotSignature?: string;
+  receiptSnapshotEnvelope?: string;
 };
 
 export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOptions> {
@@ -171,21 +189,28 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         "tbank: требуется password (TBANK_PASSWORD)",
       );
     }
+    if (
+      typeof options.receiptSnapshotSecret !== "string" ||
+      !isStrongReceiptSnapshotSecret(options.receiptSnapshotSecret) ||
+      options.receiptSnapshotSecret === options.password
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_ARGUMENT,
+        "tbank: требуется отдельный высокоэнтропийный TBANK_RECEIPT_SNAPSHOT_SECRET",
+      );
+    }
   }
 
   constructor(container: InjectedDependencies, options: TBankOptions) {
     super(container, options);
     this.logger_ = container.logger;
-    this.receiptSource_ = new TBankReceiptSource(container.query, options.password);
+    const query = providerDependency<ReceiptQuery>(container, ContainerRegistrationKeys.QUERY);
+    if (!query) throw new Error("tbank: application query is not registered");
+    this.receiptSource_ = new TBankReceiptSource(query, options.receiptSnapshotSecret);
     this.options_ = options;
-    this.notificationService_ =
-      (container[TBANK_NOTIFICATION_MODULE] as TbankNotificationStore | undefined) ??
-      (typeof (container as unknown as { resolve?: (key: string, opts?: unknown) => unknown }).resolve === "function"
-        ? ((container as unknown as { resolve: (key: string, opts?: unknown) => unknown }).resolve(
-            TBANK_NOTIFICATION_MODULE,
-            { allowUnregistered: true },
-          ) as TbankNotificationStore | undefined)
-        : undefined);
+    this.notificationService_ = providerDependency<TbankNotificationStore>(
+      container, TBANK_NOTIFICATION_MODULE, true,
+    );
     this.client_ = new TBankClient(
       {
         terminalKey: options.terminalKey,
@@ -238,6 +263,10 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   ): Promise<InitiatePaymentOutput> {
     const amountKopecks = rublesToKopecks(input.amount);
     const existingData = (input.data ?? {}) as TBankSessionData;
+    if (input.data && typeof input.data === "object") {
+      delete input.data.receiptSnapshot;
+      delete input.data.receiptSnapshotSignature;
+    }
 
     if (input.currency_code.toLowerCase() !== "rub") {
       throw new MedusaError(
@@ -382,20 +411,17 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     const attemptId = persistedAttemptId ?? `tbatt_${sessionId}_${Date.now()}`;
     const receiptResolution = await this.receiptSource_.resolve({
       sessionId,
-      existingReceipt: existingData.receiptSnapshot,
-      existingSignature: existingData.receiptSnapshotSignature,
+      existingSnapshotEnvelope: existingData.receiptSnapshotEnvelope,
       paymentAmountKopecks: amountKopecks,
     });
     const {
       cartId,
       receipt,
-      receiptSignature,
+      snapshotEnvelope,
     } = receiptResolution;
-    existingData.receiptSnapshot = receipt;
-    existingData.receiptSnapshotSignature = receiptSignature;
+    existingData.receiptSnapshotEnvelope = snapshotEnvelope;
     if (input.data && typeof input.data === "object") {
-      input.data.receiptSnapshot = receipt;
-      input.data.receiptSnapshotSignature = receiptSignature;
+      input.data.receiptSnapshotEnvelope = snapshotEnvelope;
     }
     const cartSnapshot: CartSnapshot = {
       cartId,
@@ -457,8 +483,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         attemptId,
         cartSnapshot,
         initiatedAt: new Date().toISOString(),
-        receiptSnapshot: receipt,
-        receiptSnapshotSignature: receiptSignature,
+        receiptSnapshotEnvelope: snapshotEnvelope,
       };
 
       if (input.data && typeof input.data === "object") {
@@ -486,8 +511,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
           mutableData.orderId = sessionId;
           mutableData.attemptId = attemptId;
           mutableData.cartSnapshot = cartSnapshot;
-          mutableData.receiptSnapshot = receipt;
-          mutableData.receiptSnapshotSignature = receiptSignature;
+          mutableData.receiptSnapshotEnvelope = snapshotEnvelope;
           mutableData.indeterminateReason =
             error instanceof Error ? error.message : String(error);
           mutableData.initiatedAt = new Date().toISOString();

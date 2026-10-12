@@ -75,7 +75,7 @@ describe("manual review admin route contracts", () => {
       notification: { id: "tbnotif_detail", payment_id: "pay_detail", lifecycle_state: "manual_review", canonical_payload_hash: "secret" },
       paymentAttempt: { id: "tbatt_detail", order_id: "ps_detail", terminal_key: "secret-terminal" },
       conflicts: [{ id: "tbconf_detail", conflict_kind: "identity_mismatch", conflicting_payload_hash: "secret" }],
-      paymentSession: { id: "ps_detail", status: "pending", data: { token: "secret" } },
+      paymentSession: { id: "ps_detail", status: "pending", data: { token: "secret" } } as any,
     });
     const response = responseHarness();
 

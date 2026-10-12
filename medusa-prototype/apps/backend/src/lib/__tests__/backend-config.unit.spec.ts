@@ -10,6 +10,7 @@ const VALID_ENABLED_ENVIRONMENT = {
   TBANK_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",
   TBANK_TERMINAL_KEY: "TinkoffBankTest",
   TBANK_PASSWORD: "fixture-password",
+  TBANK_RECEIPT_SNAPSHOT_SECRET: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
   TBANK_API_BASE_URL: "https://securepay.tinkoff.ru/v2",
   TBANK_SUCCESS_URL: "https://www.mariomikke.shop/checkout/success",
   TBANK_FAIL_URL: "https://www.mariomikke.shop/checkout/fail",
@@ -37,6 +38,7 @@ describe("backend payment configuration", () => {
               options: {
                 terminalKey: "TinkoffBankTest",
                 password: "fixture-password",
+                receiptSnapshotSecret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
                 apiBaseUrl: "https://securepay.tinkoff.ru/v2",
                 successUrl: "https://www.mariomikke.shop/checkout/success",
                 failUrl: "https://www.mariomikke.shop/checkout/fail",
@@ -49,7 +51,7 @@ describe("backend payment configuration", () => {
     ]);
   });
 
-  it("propagates exactly eight T-Bank variables through rendered Compose config", () => {
+  it("propagates exactly nine T-Bank variables through rendered Compose config", () => {
     const composeFile = resolve(__dirname, "../../../../../compose.production.yml");
     const environmentFile = resolve(__dirname, "../../../../../.env.production.payment-fixture");
     const testEnv = Object.fromEntries(
@@ -83,8 +85,45 @@ describe("backend payment configuration", () => {
       TBANK_NOTIFICATION_URL: "https://api.mariomikke.shop/hooks/payment/tbank",
       TBANK_PASSWORD: "fixture-password",
       TBANK_PAYMENT_PROVIDER_ID: "pp_tbank_tbank",
+      TBANK_RECEIPT_SNAPSHOT_SECRET: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
       TBANK_SUCCESS_URL: "https://www.mariomikke.shop/checkout/success",
       TBANK_TERMINAL_KEY: "fixture-terminal",
+    });
+  });
+
+  it("propagates the complete CDEK configuration through rendered Compose config", () => {
+    const composeFile = resolve(__dirname, "../../../../../compose.production.yml");
+    const environmentFile = resolve(__dirname, "fixtures/compose.production.env");
+    const testEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.startsWith("CDEK_")),
+    );
+    const rendered = spawnSync(
+      "docker",
+      ["compose", "--env-file", environmentFile, "-f", composeFile, "config", "--format", "json"],
+      { encoding: "utf8", timeout: 30_000, env: testEnv },
+    );
+
+    if (rendered.status !== 0) {
+      throw new Error("Docker Compose CDEK config validation failed");
+    }
+
+    const parsed = z.object({
+      services: z.object({
+        medusa: z.object({ environment: z.record(z.string(), z.string()) }),
+      }),
+    }).parse(JSON.parse(rendered.stdout));
+    const cdekEnvironment = Object.fromEntries(
+      Object.entries(parsed.services.medusa.environment)
+        .filter(([name]) => name.startsWith("CDEK_"))
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+
+    expect(cdekEnvironment).toEqual({
+      CDEK_API_BASE_URL: "https://api.cdek.ru/v2",
+      CDEK_CLIENT_ID: "fixture-cdek-client",
+      CDEK_CLIENT_SECRET: "fixture-cdek-secret",
+      CDEK_ENABLED: "true",
+      CDEK_FROM_CITY_CODE: "44",
     });
   });
 

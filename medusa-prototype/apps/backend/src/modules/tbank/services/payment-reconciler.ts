@@ -10,14 +10,18 @@ import {
   retryManualReview,
   type OperatorAction,
 } from "./manual-review-operations";
+import { reconcilePaymentAttempt } from "./reconcile-payment-attempt";
 import { reconcileNotification } from "./reconcile-notification";
 import {
   parseNotificationRow,
   type DurableLinkageChecker,
   type ManualReviewDetails,
   type PaymentReconcilerDependencies,
+  type PollMissingNotificationsResult,
+  type PollPaymentAttemptResult,
   type ProcessBatchResult,
   type ProcessNotificationResult,
+  type PaidOrderEvents,
   type QueryService,
   type ReconcilerWorkflowRunner,
   type ReconciliationServices,
@@ -28,6 +32,8 @@ import { LeaseController, StaleLeaseError } from "./reconciliation-lease";
 export type {
   DurableLinkageChecker,
   ManualReviewDetails,
+  PollMissingNotificationsResult,
+  PollPaymentAttemptResult,
   PaymentReconcilerDependencies,
   ProcessBatchResult,
   ProcessNotificationResult,
@@ -48,6 +54,7 @@ export class PaymentReconcilerConfigurationError extends Error {
 export class PaymentReconcilerService {
   private readonly services: ReconciliationServices;
   private readonly locking: PaymentReconcilerDependencies["locking"];
+  private configuredServices?: ReconciliationServices;
 
   constructor(dependencies: PaymentReconcilerDependencies) {
     const container = dependencies.container;
@@ -57,19 +64,7 @@ export class PaymentReconcilerService {
     const payment = dependencies.payment ?? container?.resolve(Modules.PAYMENT);
     const query = dependencies.query ??
       container?.resolve<QueryService>("query", { allowUnregistered: true });
-    let bank = dependencies.tbankClient;
-    let expectedTerminalKey = dependencies.expectedTerminalKey;
-    if (!bank || !expectedTerminalKey) {
-      const config = parseTbankEnvironment(process.env);
-      if (config.enabled) {
-        expectedTerminalKey = expectedTerminalKey ?? config.options.terminalKey;
-        bank = bank ?? new TBankClient({
-          terminalKey: config.options.terminalKey,
-          password: config.options.password,
-          apiBaseUrl: config.options.apiBaseUrl,
-        });
-      }
-    }
+    const events = dependencies.events ?? container?.resolve<PaidOrderEvents>("event_bus");
     if (!logger) throw new PaymentReconcilerConfigurationError("logger");
     if (!notifications) throw new PaymentReconcilerConfigurationError("TbankNotificationModuleService");
     if (!payment) throw new PaymentReconcilerConfigurationError("PaymentModuleService");
@@ -79,13 +74,31 @@ export class PaymentReconcilerService {
       logger,
       notifications,
       payment,
-      expectedTerminalKey: expectedTerminalKey ?? "",
-      ...(bank ? { bank } : {}),
+      expectedTerminalKey: dependencies.expectedTerminalKey ?? "",
+      ...(dependencies.tbankClient ? { bank: dependencies.tbankClient } : {}),
       ...(dependencies.workflowRunner ? { workflow: dependencies.workflowRunner } : {}),
       ...(dependencies.durableLinkageChecker ? { linkageChecker: dependencies.durableLinkageChecker } : {}),
+      ...(events ? { events } : {}),
       ...(query ? { query } : {}),
       ...(container ? { container } : {}),
     };
+  }
+
+  private forReconciliation(): ReconciliationServices {
+    if (this.configuredServices) return this.configuredServices;
+    if (this.services.bank && this.services.expectedTerminalKey) return this.services;
+    const config = parseTbankEnvironment(process.env);
+    if (!config.enabled) return this.services;
+    this.configuredServices = {
+      ...this.services,
+      expectedTerminalKey: this.services.expectedTerminalKey || config.options.terminalKey,
+      bank: this.services.bank ?? new TBankClient({
+        terminalKey: config.options.terminalKey,
+        password: config.options.password,
+        apiBaseUrl: config.options.apiBaseUrl,
+      }),
+    };
+    return this.configuredServices;
   }
 
   private async withPaymentLock<T>(paymentId: string, operation: () => Promise<T>): Promise<T> {
@@ -106,15 +119,17 @@ export class PaymentReconcilerService {
   }
 
   async processNotification(id: string): Promise<ProcessNotificationResult> {
+    const services = this.forReconciliation();
     const leaseToken = randomUUID();
     const rows = await this.services.notifications.claimNotificationById({ id, leaseToken, now: new Date() });
     const claimed = rows[0];
     if (!claimed) return { status: "not_claimed", id };
     const row = parseNotificationRow(claimed);
-    return this.withPaymentLock(row.payment_id, () => reconcileNotification(this.services, row, leaseToken));
+    return this.withPaymentLock(row.payment_id, () => reconcileNotification(services, row, leaseToken));
   }
 
   async processPendingBatch(limit = 10): Promise<ProcessBatchResult> {
+    const services = this.forReconciliation();
     const leaseToken = randomUUID();
     const now = new Date();
     const exhausted = await this.services.notifications.quarantineExpiredExhausted({ now });
@@ -140,11 +155,46 @@ export class PaymentReconcilerService {
           }
           return { status: "retry_scheduled", id: row.id, error: error instanceof Error ? error.message : String(error) } satisfies ProcessNotificationResult;
         }
-        return reconcileNotification(this.services, row, leaseToken);
+        return reconcileNotification(services, row, leaseToken);
       });
       results.push(result);
     }
     return { claimed: rows.length, results };
+  }
+
+  async pollMissingNotifications(limit = 10): Promise<PollMissingNotificationsResult> {
+    const config = parseTbankEnvironment(process.env);
+    if (!config.enabled) return { claimed: 0, expired: 0, results: [], skipped: "tbank_disabled" };
+    const services = this.forReconciliation();
+    const leaseToken = randomUUID();
+    const now = new Date();
+    const expired = await this.services.notifications.expireStalePaymentAttemptPolls({
+      now,
+      terminalKey: config.options.terminalKey,
+    });
+    let expiredCount = 0;
+    for (const attempt of expired) {
+      if (attempt.poll_state === "manual_review") {
+        expiredCount++;
+        this.services.logger.error(`tbank.manual_review: payment attempt ${attempt.id}: polling expired after 24 hours`);
+      }
+    }
+    const rows = await this.services.notifications.claimDuePaymentAttempts({
+      limit,
+      leaseToken,
+      now,
+      terminalKey: config.options.terminalKey,
+    });
+    const results: PollPaymentAttemptResult[] = [];
+    for (const row of rows) {
+      results.push(await reconcilePaymentAttempt(
+        services,
+        row,
+        leaseToken,
+        (paymentId, operation) => this.withPaymentLock(paymentId, operation),
+      ));
+    }
+    return { claimed: rows.length, expired: expiredCount, results };
   }
 
   inspectManualReview(id: string): Promise<ManualReviewDetails> {

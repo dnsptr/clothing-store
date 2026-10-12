@@ -17,6 +17,8 @@ import {
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows";
 
+import { parseTbankEnvironment } from "../modules/tbank/config";
+
 // Правило слияния валют магазина — единственная нетривиальная логика сида, и
 // именно она подвела на учении по восстановлению БД 2026-07-27 (§3.1): сид
 // передавал supported_currencies коротким списком «только рубль», а
@@ -246,17 +248,18 @@ export default async function initial_data_seed({
   }
 
   logger.info("Seeding region data...");
+  const tbank = parseTbankEnvironment(process.env);
   const { data: existingRegions } = await query.graph({
     entity: "region",
-    fields: ["id", "name", "currency_code"],
+    fields: ["id", "name", "currency_code", "payment_providers.id"],
   });
   // Detect the RU region by currency_code, matching import-mario-mikke.ts so both
   // scripts recognise the same single region (name "Россия", country "ru").
-  const ruRegionExists = existingRegions.some(
+  const ruRegion = existingRegions.find(
     (existingRegion) => existingRegion.currency_code === "rub",
   );
 
-  if (!ruRegionExists) {
+  if (!ruRegion) {
     await createRegionsWorkflow(container).run({
       input: {
         regions: [
@@ -264,7 +267,9 @@ export default async function initial_data_seed({
             name: "Россия",
             currency_code: "rub",
             countries,
-            payment_providers: ["pp_system_default"],
+            // The built-in provider completes carts without collecting money.
+            // A 100%-prepaid region must never expose it via the Store API.
+            payment_providers: tbank.enabled ? [tbank.paymentProviderId] : [],
             // Region tax lines are computed by Medusa automatically. This is the
             // Region module default (automatic_taxes = boolean().default(true)),
             // set explicitly so the RU-first tax contract is self-evident and
@@ -274,6 +279,25 @@ export default async function initial_data_seed({
         ],
       },
     });
+  } else {
+    const providers = ruRegion.payment_providers ?? [];
+    if (providers.some((provider) => provider?.id === "pp_system_default")) {
+      await link.dismiss({
+        [Modules.REGION]: { region_id: ruRegion.id },
+        [Modules.PAYMENT]: { payment_provider_id: "pp_system_default" },
+      });
+    }
+    if (
+      tbank.enabled &&
+      !providers.some((provider) => provider?.id === tbank.paymentProviderId)
+    ) {
+      // Enabling the bank after the first seed adds only our provider, leaving
+      // other merchant-configured paid methods untouched.
+      await link.create({
+        [Modules.REGION]: { region_id: ruRegion.id },
+        [Modules.PAYMENT]: { payment_provider_id: tbank.paymentProviderId },
+      });
+    }
   }
   logger.info("Finished seeding regions.");
 

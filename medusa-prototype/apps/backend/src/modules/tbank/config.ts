@@ -4,6 +4,7 @@ import {
   TBANK_PAYMENT_PROVIDER_ID,
   TBANK_PROVIDER_CONFIG_ID,
 } from "./provider-id";
+import { isStrongReceiptSnapshotSecret } from "./lib/receipt-snapshot";
 
 const TBANK_ENABLED_SCHEMA = z.enum(["true", "false"]).optional();
 
@@ -11,6 +12,7 @@ const TBANK_PAYMENT_VARIABLES = [
   "TBANK_PAYMENT_PROVIDER_ID",
   "TBANK_TERMINAL_KEY",
   "TBANK_PASSWORD",
+  "TBANK_RECEIPT_SNAPSHOT_SECRET",
   "TBANK_API_BASE_URL",
   "TBANK_SUCCESS_URL",
   "TBANK_FAIL_URL",
@@ -21,6 +23,7 @@ const TBANK_ENVIRONMENT_SCHEMA = z.object({
   TBANK_PAYMENT_PROVIDER_ID: z.literal(TBANK_PAYMENT_PROVIDER_ID),
   TBANK_TERMINAL_KEY: z.string().trim().min(1),
   TBANK_PASSWORD: z.string().min(1).refine((value) => value.trim().length > 0),
+  TBANK_RECEIPT_SNAPSHOT_SECRET: z.string().refine(isStrongReceiptSnapshotSecret),
   TBANK_API_BASE_URL: z.enum([
     "https://securepay.tinkoff.ru/v2",
     "https://rest-api-test.tinkoff.ru/v2",
@@ -36,6 +39,14 @@ const TBANK_ENVIRONMENT_SCHEMA = z.object({
   TBANK_NOTIFICATION_URL: z.literal(
     "https://api.mariomikke.shop/hooks/payment/tbank",
   ),
+}).superRefine((environment, context) => {
+  if (environment.TBANK_RECEIPT_SNAPSHOT_SECRET === environment.TBANK_PASSWORD) {
+    context.addIssue({
+      code: "custom",
+      path: ["TBANK_RECEIPT_SNAPSHOT_SECRET"],
+      message: "Receipt snapshot secret must be independent",
+    });
+  }
 });
 
 type TBankEnvironment = Readonly<Record<string, string | undefined>>;
@@ -43,6 +54,7 @@ type TBankEnvironment = Readonly<Record<string, string | undefined>>;
 type TBankProviderOptions = {
   readonly terminalKey: string;
   readonly password: string;
+  readonly receiptSnapshotSecret: string;
   readonly apiBaseUrl: string;
   readonly successUrl: string;
   readonly failUrl: string;
@@ -110,6 +122,7 @@ export function parseTbankEnvironment(
     options: {
       terminalKey: result.data.TBANK_TERMINAL_KEY,
       password: result.data.TBANK_PASSWORD,
+      receiptSnapshotSecret: result.data.TBANK_RECEIPT_SNAPSHOT_SECRET,
       apiBaseUrl: result.data.TBANK_API_BASE_URL,
       successUrl: result.data.TBANK_SUCCESS_URL,
       failUrl: result.data.TBANK_FAIL_URL,

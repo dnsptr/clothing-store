@@ -1,3 +1,6 @@
+import { Modules } from "@medusajs/framework/utils";
+import orderNotifications from "../../../subscribers/order-placed";
+import { readPaymentStatus } from "../services/payment-status";
 import {
   PaymentReconcilerService,
   type PaymentReconcilerDependencies,
@@ -304,6 +307,119 @@ describe("PaymentReconcilerService unit tests", () => {
       expect(mockNotificationService.completeInbox).toHaveBeenCalled();
     });
 
+    it("notifies staff and buyer only after payment capture and durable order creation", async () => {
+      const previousChat = process.env.TELEGRAM_CHAT_ID;
+      process.env.TELEGRAM_CHAT_ID = "-1001234567890";
+      try {
+        const notifications = { createNotifications: jest.fn().mockResolvedValue({}) };
+        const order = {
+          id: "order_1",
+          display_id: 42,
+          email: "buyer@example.com",
+          currency_code: "rub",
+          total: 500,
+          item_total: 500,
+          shipping_total: 0,
+          items: [{ title: "Пальто", quantity: 1, unit_price: 500, total: 500 }],
+          shipping_methods: [{ name: "Самовывоз" }],
+        };
+        const orderService = { retrieveOrder: jest.fn().mockResolvedValue(order) };
+        const container = {
+          resolve: (key: string) =>
+            key === "logger" ? mockLogger :
+            key === Modules.ORDER ? orderService : notifications,
+        };
+        const linkageChecker = jest.fn(async () => ({
+          paymentCaptured: projectionCompleted,
+          orderLinked: projectionCompleted,
+          ...(projectionCompleted ? { orderId: order.id } : {}),
+        }));
+        const statusDependencies = {
+          query: {
+            graph: jest.fn(async ({ entity }: { entity: string }) => ({
+              data: entity === "cart_payment_collection"
+                ? [{ cart_id: "cart_1", payment_collection_id: "paycol_1" }]
+                : entity === "payment_session"
+                  ? [{ id: sampleSession.id, payment_collection_id: "paycol_1", provider_id: "pp_tbank_tbank", status: projectionCompleted ? "captured" : "pending" }]
+                  : entity === "payment"
+                    ? projectionCompleted ? [{ payment_session_id: sampleSession.id, captured_at: new Date() }] : []
+                    : entity === "order_cart" && projectionCompleted
+                      ? [{ cart_id: "cart_1", order_id: order.id }] : [],
+            })),
+          },
+          attempts: {
+            listTbankPaymentAttempts: jest.fn(async () => [
+              { payment_session_id: sampleSession.id, provider_id: "pp_tbank_tbank" },
+            ]),
+          },
+        };
+        const events = {
+          emit: jest.fn(async (event: { name: string; data: { id: string } }) => {
+            expect(projectionCompleted).toBe(true);
+            expect(event.data.id).toBe(order.id);
+            await orderNotifications({ event: { data: event.data }, container } as never);
+          }),
+        };
+        const reconciler = createReconciler({ durableLinkageChecker: linkageChecker, events });
+        expect(await readPaymentStatus(statusDependencies, "cart_1"))
+          .toMatchObject({ value: { payment: "pending", order: "pending" } });
+        expect(notifications.createNotifications).not.toHaveBeenCalled();
+
+        const result = await reconciler.processNotification("tbnotif_1");
+
+        expect(result).toMatchObject({ status: "processed", action: "captured_projected" });
+        expect(await readPaymentStatus(statusDependencies, "cart_1"))
+          .toMatchObject({ value: { payment: "confirmed", order: "ready" } });
+        expect(events.emit).toHaveBeenCalledTimes(1);
+        expect(notifications.createNotifications.mock.calls.map(([value]) => value.channel))
+          .toEqual(["telegram", "email"]);
+        expect(notifications.createNotifications.mock.calls[0][0].to).toBe("-1001234567890");
+        expect(notifications.createNotifications.mock.calls[1][0].to).toBe("buyer@example.com");
+        expect(notifications.createNotifications.mock.calls[1][0].content.text).toContain("Пальто");
+      } finally {
+        if (previousChat === undefined) delete process.env.TELEGRAM_CHAT_ID;
+        else process.env.TELEGRAM_CHAT_ID = previousChat;
+      }
+    });
+
+    it("does not notify or repeat a capture if the payment was captured without an order", async () => {
+      const events = { emit: jest.fn() };
+      const durableLinkageChecker = jest.fn().mockResolvedValue({
+        paymentCaptured: true,
+        orderLinked: false,
+      });
+      const reconciler = createReconciler({ durableLinkageChecker, events });
+
+      const result = await reconciler.processNotification("tbnotif_1");
+
+      expect(result.status).toBe("retry_scheduled");
+      expect(events.emit).not.toHaveBeenCalled();
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+      expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
+    });
+
+    it("retries publishing a paid order without capturing again if the event bus fails", async () => {
+      const events = {
+        emit: jest.fn()
+          .mockRejectedValueOnce(new Error("event bus unavailable"))
+          .mockResolvedValue(undefined),
+      };
+      const durableLinkageChecker = jest.fn().mockResolvedValue({
+        paymentCaptured: true,
+        orderLinked: true,
+        orderId: "order_1",
+      });
+      const reconciler = createReconciler({ durableLinkageChecker, events });
+
+      expect((await reconciler.processNotification("tbnotif_1")).status).toBe("retry_scheduled");
+      expect(mockNotificationService.completeInbox).not.toHaveBeenCalled();
+      expect(await reconciler.processNotification("tbnotif_1"))
+        .toMatchObject({ status: "processed", action: "already_captured" });
+      expect(mockWorkflowRunner).not.toHaveBeenCalled();
+      expect(events.emit).toHaveBeenCalledTimes(2);
+      expect(mockNotificationService.completeInbox).toHaveBeenCalledTimes(1);
+    });
+
     it("retries if projection succeeds but order was not linked (silent cart completion failure)", async () => {
       // First check (replay barrier): not yet linked
       // Second check (post-projection): payment captured BUT order not linked!
@@ -359,6 +475,27 @@ describe("PaymentReconcilerService unit tests", () => {
 
   describe("Finding 9: Operator surface operations", () => {
     const manualReviewRow = { ...sampleRow, lifecycle_state: "manual_review" };
+
+    it("keeps manual review accessible when bank settings are invalid, but blocks payment processing", async () => {
+      const previousEnabled = process.env.TBANK_ENABLED;
+      const previousSecret = process.env.TBANK_RECEIPT_SNAPSHOT_SECRET;
+      process.env.TBANK_ENABLED = "true";
+      delete process.env.TBANK_RECEIPT_SNAPSHOT_SECRET;
+      try {
+        mockNotificationService.listTbankNotifications.mockResolvedValueOnce([manualReviewRow]);
+        const reconciler = createReconciler({ tbankClient: undefined, expectedTerminalKey: undefined });
+        const details = await reconciler.inspectManualReview("tbnotif_1");
+        expect(details.notification).toEqual(manualReviewRow);
+        await expect(reconciler.processNotification("tbnotif_1"))
+          .rejects.toThrow("TBANK_RECEIPT_SNAPSHOT_SECRET");
+        expect(mockNotificationService.claimNotificationById).not.toHaveBeenCalled();
+      } finally {
+        if (previousEnabled === undefined) delete process.env.TBANK_ENABLED;
+        else process.env.TBANK_ENABLED = previousEnabled;
+        if (previousSecret === undefined) delete process.env.TBANK_RECEIPT_SNAPSHOT_SECRET;
+        else process.env.TBANK_RECEIPT_SNAPSHOT_SECRET = previousSecret;
+      }
+    });
 
     it("inspectManualReview aggregates notification, attempts, conflicts, and session", async () => {
       mockNotificationService.listTbankNotifications.mockResolvedValueOnce([manualReviewRow]);

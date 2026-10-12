@@ -15,6 +15,8 @@ import {
   ManualReviewListQuerySchema,
 } from "./admin/tbank/manual-review/validators";
 
+import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
+
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
  * (`@medusajs/medusa/dist/api/hooks/middlewares.js`). Наш роут его перекрывает,
@@ -33,6 +35,11 @@ import {
  */
 export default defineMiddlewares({
   routes: [
+    {
+      matcher: "/store/payment-collections/:id/payment-sessions",
+      method: "POST",
+      middlewares: [requirePaidPaymentProvider],
+    },
     {
       matcher: "/admin/products/:id",
       method: "POST",

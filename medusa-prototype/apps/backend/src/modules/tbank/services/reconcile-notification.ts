@@ -1,6 +1,6 @@
 import type { PaymentSessionDTO } from "@medusajs/types";
 
-import type { NotificationRow, ProcessNotificationResult, ReconciliationServices } from "./reconciliation-contracts";
+import type { DurableLinkage, NotificationRow, ProcessNotificationResult, ReconciliationServices } from "./reconciliation-contracts";
 import { LeaseController, StaleLeaseError } from "./reconciliation-lease";
 import { projectConfirmedPayment } from "./reconciliation-projection";
 import { checkDurableLinkage, correlateRow, validateBankState } from "./reconciliation-trust";
@@ -44,6 +44,21 @@ async function quarantineConflict(
   return { status: "manual_review", id: row.id, reason };
 }
 
+async function publishPaidOrder(
+  services: ReconciliationServices,
+  linkage: DurableLinkage,
+  lease: LeaseController,
+): Promise<void> {
+  const events = services.events;
+  if (!events) return;
+  const orderId = linkage.orderId;
+  if (!orderId) throw new Error("Captured payment has no durable order ID for notifications");
+  await lease.around(() => events.emit({
+    name: "tbank.order.paid",
+    data: { id: orderId },
+  }));
+}
+
 async function handleConfirmed(
   services: ReconciliationServices,
   row: NotificationRow,
@@ -53,6 +68,7 @@ async function handleConfirmed(
 ): Promise<ProcessNotificationResult> {
   const before = await checkDurableLinkage(services, session);
   if (before.paymentCaptured && before.orderLinked) {
+    await publishPaidOrder(services, before, lease);
     await lease.complete();
     return { status: "processed", id: row.id, action: "already_captured" };
   }
@@ -70,6 +86,7 @@ async function handleConfirmed(
       new Error(after.paymentCaptured ? "Payment captured but order creation is not durably linked" : "Payment capture is not durable"),
     );
   }
+  await publishPaidOrder(services, after, lease);
   await lease.complete();
   return { status: "processed", id: row.id, action };
 }

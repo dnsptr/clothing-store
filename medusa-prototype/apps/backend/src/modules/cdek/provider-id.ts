@@ -9,4 +9,3 @@ export const CDEK_TARIFF_PVZ = 136; // Посылка склад-склад (д�
 export const CDEK_TARIFF_COURIER = 137; // Посылка склад-дверь (курьер)
 export const CDEK_TARIFF_POSTAMAT = 368; // Посылка склад-постамат
 
-export const DEFAULT_FROM_CITY_CODE = 44; // Москва

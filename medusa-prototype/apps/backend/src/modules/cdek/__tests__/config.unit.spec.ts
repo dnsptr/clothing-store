@@ -1,5 +1,5 @@
 import { parseCdekEnvironment, CdekConfigurationError } from "../config";
-import { CDEK_PROVIDER_IDENTIFIER, DEFAULT_FROM_CITY_CODE } from "../provider-id";
+import { CDEK_PROVIDER_IDENTIFIER } from "../provider-id";
 
 const VALID_CDEK_ENVIRONMENT = {
   CDEK_ENABLED: "true",
@@ -32,10 +32,9 @@ describe("parseCdekEnvironment", () => {
     });
   });
 
-  it("defaults fromCityCode to DEFAULT_FROM_CITY_CODE (44) if omitted", () => {
+  it("rejects an enabled provider without an explicitly configured origin city", () => {
     const { CDEK_FROM_CITY_CODE: _, ...withoutCity } = VALID_CDEK_ENVIRONMENT;
-    const config = parseCdekEnvironment(withoutCity);
-    expect(config.enabled && config.options.fromCityCode).toBe(DEFAULT_FROM_CITY_CODE);
+    expect(() => parseCdekEnvironment(withoutCity)).toThrow(CdekConfigurationError);
   });
 
   it("strips trailing slashes from apiBaseUrl", () => {
@@ -56,5 +55,25 @@ describe("parseCdekEnvironment", () => {
     expect(() =>
       parseCdekEnvironment({ ...VALID_CDEK_ENVIRONMENT, CDEK_FROM_CITY_CODE: "invalid" }),
     ).toThrow(CdekConfigurationError);
+  });
+
+  it("rejects a CDEK API URL outside the approved production and sandbox hosts", () => {
+    expect(() => parseCdekEnvironment({
+      ...VALID_CDEK_ENVIRONMENT,
+      CDEK_API_BASE_URL: "https://attacker.example/v2",
+    })).toThrow(CdekConfigurationError);
+  });
+
+  it.each([
+    "http://api.cdek.ru/v2",
+    "https://api.cdek.ru.evil.example/v2",
+    "https://api.cdek.ru/v2?redirect=https://evil.example",
+    "https://user:password@api.cdek.ru/v2",
+    "https://api.cdek.ru/v2//",
+  ])("rejects non-exact CDEK API origin %s", (apiBaseUrl) => {
+    expect(() => parseCdekEnvironment({
+      ...VALID_CDEK_ENVIRONMENT,
+      CDEK_API_BASE_URL: apiBaseUrl,
+    })).toThrow(CdekConfigurationError);
   });
 });

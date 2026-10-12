@@ -10,6 +10,11 @@ async function check(body: Record<string, unknown>, current?: Record<string, unk
 }
 
 describe("publication guard", () => {
+  it("rejects invalid measurements even on drafts", async () => {
+    const result = await check({ status: "draft", metadata: { catalog_profile: { measurements: [{ size: "S", label: "Length", value: "-5" }] } } })
+    expect(result.res.status).toHaveBeenCalledWith(400)
+    expect(result.next).not.toHaveBeenCalled()
+  })
   it("allows a complete card with a priced variant", async () => {
     const profile = Object.fromEntries(PROFILE_FIELDS.map(([key]) => [key, "filled"]))
     profile.manufactured_at = "08.2026"; profile.registry_url = "https://example.org/registry"

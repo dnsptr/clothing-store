@@ -11,6 +11,12 @@ export default async function tbankReconcilerJob(container: MedusaContainer) {
         `tbank reconciler job: claimed and processed ${result.claimed} notification(s)`,
       );
     }
+    const polled = await reconciler.pollMissingNotifications(10);
+    if (polled.claimed > 0) {
+      logger.info(
+        `tbank reconciler job: checked ${polled.claimed} payment attempt(s) without a confirmed webhook`,
+      );
+    }
   } catch (error) {
     logger.error(
       `tbank reconciler job failed: ${
@@ -23,5 +29,5 @@ export default async function tbankReconcilerJob(container: MedusaContainer) {
 
 export const config = {
   name: "tbank-payment-reconciliation",
-  schedule: "* * * * *", // Run every minute for recovery of leased/pending notifications
+  schedule: "* * * * *", // Recover stored notifications and poll older unresolved attempts
 };
