@@ -34,6 +34,11 @@ module.exports = {
 
 if (process.env.TEST_TYPE === "integration:http") {
   module.exports.testMatch = ["**/integration-tests/http/*.spec.[jt]s"];
+  // The browser suite needs the root Playwright install and Chromium; the
+  // dedicated PostgreSQL CI job opts in after installing both.
+  if (process.env.BROWSER_CHECKOUT_TEST !== "true") {
+    module.exports.testPathIgnorePatterns.push("[/\\\\]checkout-browser\\.spec\\.ts$");
+  }
 } else if (process.env.TEST_TYPE === "integration:modules") {
   module.exports.testMatch = [
     "**/src/modules/*/__tests__/**/*.[jt]s",
