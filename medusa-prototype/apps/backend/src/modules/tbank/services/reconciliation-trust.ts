@@ -26,7 +26,6 @@ const TERMINAL_RECONCILIATION_STATUSES = [
   "CANCELED",
   "REVERSED",
 ] as const;
-const POLL_PENDING_STATUSES = ["NEW", "FORM_SHOWED", "AUTHORIZING", "3DS_CHECKING"] as const;
 
 export function correlateRow(
   row: NotificationRow,
@@ -53,7 +52,7 @@ export function validateBankState(
   bankState: TBankGetStateResult,
   row: Pick<NotificationRow, "payment_id" | "order_id" | "amount_kopecks">,
   expectedTerminalKey: string,
-  allowPending = false,
+  allowNonterminal = false,
 ): TrustResult {
   if (bankState.Success !== true) return { valid: false, reason: "Bank GetState Success is not true" };
   const terminalKey = bankState["TerminalKey"];
@@ -72,10 +71,9 @@ export function validateBankState(
   if (
     typeof bankState.Status !== "string" ||
     !isTBankStatus(bankState.Status) ||
-    !TERMINAL_RECONCILIATION_STATUSES.some((status) => status === bankState.Status) &&
-      !(allowPending && POLL_PENDING_STATUSES.some((status) => status === bankState.Status))
+    (!allowNonterminal && !TERMINAL_RECONCILIATION_STATUSES.some((status) => status === bankState.Status))
   ) {
-    return { valid: false, reason: "Bank GetState status is not an allowed reconciliation status" };
+    return { valid: false, reason: "Bank GetState status is missing or unsupported" };
   }
   return { valid: true };
 }

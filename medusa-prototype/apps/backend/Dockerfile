@@ -10,6 +10,12 @@ RUN npm config set maxsockets 5 \
 COPY apps/backend apps/backend
 RUN npm --workspace @dtc/backend run build
 
+# The generated server package is an independent npm root. Preserve the
+# security overrides there and lock the production install before copying it.
+RUN node -e 'const fs = require("node:fs"); const path = "apps/backend/.medusa/server/package.json"; const pkg = JSON.parse(fs.readFileSync(path, "utf8")); pkg.overrides = require("./package.json").overrides; fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");' \
+  && npm --prefix apps/backend/.medusa/server install \
+    --package-lock-only --ignore-scripts --workspaces=false --no-audit --no-fund
+
 FROM node:22.14.0-bookworm-slim AS runner
 
 ENV NODE_ENV=production
@@ -23,7 +29,7 @@ RUN apt-get update \
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 COPY --from=builder /workspace/apps/backend/.medusa/server ./
-RUN npm install --omit=dev --no-audit --no-fund \
+RUN npm ci --omit=dev --no-audit --no-fund \
   && npm cache clean --force \
   && chown -R node:node /app
 

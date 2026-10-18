@@ -61,8 +61,8 @@ export type ShopContacts = {
 const DEFAULT_SHOP_NAME = "Mario Mikke";
 
 const WHAT_NEXT =
-  "Мы соберём заказ и передадим его в доставку. " +
-  "Когда заказ будет отправлен, мы напишем ещё раз.";
+  "Мы соберём заказ. Менеджер свяжется с вами по телефону, " +
+  "чтобы сообщить о готовности самовывоза или согласовать доставку.";
 
 const CONTACT_INVITE =
   "Если нужно что-то уточнить или изменить в заказе, ответьте на это письмо — мы на связи.";
@@ -148,7 +148,7 @@ export function buildOrderEmailText(order: OrderForEmail, shop: ShopContacts = {
   const lines: string[] = [
     greeting(order),
     "",
-    `Мы получили ваш заказ ${orderNumber(order)} и начали его собирать.`,
+    `Мы получили ваш заказ ${orderNumber(order)}. Оплата подтверждена; заказ ожидает сборки.`,
     "",
     "Состав заказа:",
   ];
@@ -274,7 +274,7 @@ export function buildOrderEmailHtml(order: OrderForEmail, shop: ShopContacts = {
     '<body style="margin:0;padding:24px;background:#ffffff;color:#111111;' +
       'font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;">',
     `<p>${esc(greeting(order))}</p>`,
-    `<p>Мы получили ваш заказ ${esc(orderNumber(order))} и начали его собирать.</p>`,
+    `<p>Мы получили ваш заказ ${esc(orderNumber(order))}. Оплата подтверждена; заказ ожидает сборки.</p>`,
     '<table role="presentation" cellpadding="0" cellspacing="0" ' +
       'style="border-collapse:collapse;width:100%;max-width:560px;">',
     "<tbody>",

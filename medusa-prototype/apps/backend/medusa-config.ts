@@ -317,6 +317,7 @@ module.exports = defineConfig({
     fulfillmentModule,
     contentModule,
     ...tbankNotificationModule,
+    { resolve: './src/modules/checkout-access' },
     ...notificationModule,
     ...paymentModules,
   ],

@@ -398,6 +398,13 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         existingData.status === "pending_authorization" ||
         existingData.status === "FORM_SHOWED")
     ) {
+      // A previously issued bank URL must not be re-exposed after the buyer
+      // removes the shipping method from the cart.
+      await this.receiptSource_.resolve({
+        sessionId,
+        existingSnapshotEnvelope: existingData.receiptSnapshotEnvelope,
+        paymentAmountKopecks: amountKopecks,
+      });
       this.logger_.info(
         `tbank: повторный initiatePayment для сессии ${sessionId} — повторное использование существующей попытки ${existingData.paymentId}`,
       );
@@ -632,8 +639,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
    * здесь означало бы сорванное оформление на ровном месте, поэтому сетевая
    * ошибка `GetState` не выпускается наружу: возвращается последнее известное
    * состояние, сессия остаётся в ожидании, а исход доберут повторная
-   * нотификация и сверка (PAY-005) — та же дисциплина «не ронять», что в
-   * `cancelPayment`.
+   * нотификация и сверка (PAY-005).
    */
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -672,8 +678,9 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   }
 
   /**
-   * Отмена до списания. У Т-Банка отмена и возврат — один метод `Cancel`,
-   * различает их сам банк по текущему состоянию платежа.
+   * Cancel у банка может стать возвратом даже после GetState=NEW: состояние
+   * меняется между запросами. До реализации возвратного чека здесь только
+   * чтение состояния; активный банковский платёж отменяется вручную.
    */
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -681,41 +688,20 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       // Платёж не создавался — отменять нечего, и это не ошибка.
       return { data: input.data };
     }
-
-    try {
-      await this.client_.cancel({ paymentId: data.paymentId });
-    } catch (error) {
-      if (!(error instanceof TBankApiError)) {
-        throw error;
-      }
-
-      // `Cancel` не идемпотентен по контракту. После ошибки удалять сессию
-      // можно только если GetState доказывает, что старый URL уже не оплатить.
-      try {
-        const state = await this.client_.getState(data.paymentId);
-        if (
-          state.Status === "CANCELED" ||
-          state.Status === "REVERSED" ||
-          state.Status === "REJECTED" ||
-          state.Status === "DEADLINE_EXPIRED"
-        ) {
-          this.logger_.warn(
-            `tbank: Cancel вернул ${error.errorCode}, но GetState подтвердил ${state.Status}`,
-          );
-          return { data: input.data };
-        }
-      } catch (stateError) {
-        this.logger_.warn(
-          `tbank: после ошибки Cancel не удалось проверить GetState: ${
-            stateError instanceof Error ? stateError.message : String(stateError)
-          }`,
-        );
-      }
-
-      throw error;
+    // Безопасно удалить только уже завершённую неоплачиваемую попытку.
+    const state = await this.client_.getState(data.paymentId);
+    if (
+      state.Status === "CANCELED" ||
+      state.Status === "REVERSED" ||
+      state.Status === "REJECTED" ||
+      state.Status === "DEADLINE_EXPIRED"
+    ) {
+      return { data: input.data };
     }
-
-    return { data: input.data };
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      "tbank: автоматическая отмена активного банковского платежа недоступна; обратитесь к ответственному за ККТ для ручной отмены или возврата с фискализацией",
+    );
   }
 
   /**
@@ -723,8 +709,8 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
    *
    * ВНИМАНИЕ. Возврат по 54-ФЗ требует **возвратного чека** — `Cancel` с
    * `Receipt` (§8). Построение возвратного чека здесь не реализовано: текущий
-   * builder создаёт только чек 100% предоплаты для `Init`. Поэтому возвраты
-   * проводятся через личный кабинет банка, а не этим методом.
+   * builder создаёт только чек 100% предоплаты для `Init`. Метод блокирует
+   * возврат до обращения в банк; ручной возврат требует отдельного чека ККТ.
    */
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -735,12 +721,10 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       );
     }
 
-    await this.client_.cancel({
-      paymentId: data.paymentId,
-      amountKopecks: rublesToKopecks(input.amount),
-    });
-
-    return { data: input.data };
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      "tbank: автоматический возврат недоступен без возвратного чека; обратитесь к ответственному за ККТ для ручного возврата и фискализации",
+    );
   }
 
   async retrievePayment(input: RetrievePaymentInput): Promise<RetrievePaymentOutput> {
@@ -756,14 +740,15 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
 
   /**
    * Сумма платежа в Т-Банке после `Init` не меняется. Обновление означает, что
-   * корзина изменилась, — тогда создаётся новая сессия, а старая удаляется.
-   * Поэтому здесь только перенос данных.
+   * корзина изменилась. Новая попытка допускается только после завершения
+   * старой в банке; активную попытку автоматически отменять нельзя.
+   * Здесь переносим данные, банковская сумма этим методом не изменяется.
    */
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     return { data: input.data };
   }
 
-  /** Удаление сессии = отмена платежа, если он был создан. */
+  /** Удаление сессии допускается только без платежа или после его завершения. */
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
     await this.cancelPayment(input);
     return { data: input.data };

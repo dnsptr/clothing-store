@@ -21,12 +21,15 @@ const YANDEX_ENVIRONMENT_SCHEMA = z.object({
       message: "YANDEX_DELIVERY_API_BASE_URL must be a valid URL",
     }),
   YANDEX_DELIVERY_SOURCE_STATION_ID: z.string().trim().min(1).max(200),
+  YANDEX_DELIVERY_PVZ_PRICE_RUB: z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/u)
+    .transform(Number).refine((value) => Number.isFinite(value) && value > 0),
 });
 
 export type YandexDeliveryProviderOptions = {
   readonly token: string;
   readonly apiBaseUrl: string;
   readonly sourceStationId: string;
+  readonly pvzPriceRub: number;
 };
 
 export type YandexDeliveryConfiguration =
@@ -72,6 +75,7 @@ export function parseYandexDeliveryEnvironment(
       token: result.data.YANDEX_DELIVERY_TOKEN,
       apiBaseUrl: result.data.YANDEX_DELIVERY_API_BASE_URL,
       sourceStationId: result.data.YANDEX_DELIVERY_SOURCE_STATION_ID,
+      pvzPriceRub: result.data.YANDEX_DELIVERY_PVZ_PRICE_RUB,
     },
   };
 }

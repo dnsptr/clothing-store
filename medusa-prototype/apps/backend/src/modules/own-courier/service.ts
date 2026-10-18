@@ -45,7 +45,7 @@ export default class OwnCourierFulfillmentProviderService extends AbstractFulfil
     if (optionData["id"] !== OWN_COURIER_OPTION) throw new OwnCourierUnavailableError();
     const eligible = await ownCourierEligibility(context.shipping_address, this.options);
     if (!eligible.eligible) throw new OwnCourierUnavailableError();
-    return { calculated_amount: 0, is_calculated_price_tax_inclusive: true };
+    return { calculated_amount: this.options.priceRub, is_calculated_price_tax_inclusive: true };
   }
 
   async validateFulfillmentData(

@@ -263,7 +263,7 @@ export function SlideForm({
             <input
               ref={mediaInput}
               type="file"
-              accept={form.media_type === "video" ? "video/*" : "image/*"}
+              accept={form.media_type === "video" ? "video/mp4,video/webm" : "image/jpeg,image/png,image/webp,image/gif"}
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0]
@@ -307,7 +307,7 @@ export function SlideForm({
               <input
                 ref={posterInput}
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0]

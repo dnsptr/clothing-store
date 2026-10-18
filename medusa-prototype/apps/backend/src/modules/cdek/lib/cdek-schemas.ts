@@ -12,12 +12,14 @@ export const supportedTariffCodeSchema = z.union([
 const packageWeightSchema = z.number().finite().positive().max(30_000);
 const dimensionSchema = z.number().finite().positive().max(120);
 
-export const packageSchema = z.object({
+const packageDataSchema = z.object({
   weight: packageWeightSchema,
   length: dimensionSchema,
   width: dimensionSchema,
   height: dimensionSchema,
-}).strict().refine(
+}).strict();
+
+export const packageSchema = packageDataSchema.refine(
   ({ length, width, height }) => length + width + height <= 150,
   "CDEK package dimensions exceed the supported limit",
 );
@@ -85,7 +87,7 @@ export const orderDetailsSchema = z.object({
 }).passthrough();
 
 export const tokenResponseSchema = z.object({
-  access_token: identifierSchema,
+  access_token: z.string().trim().min(1).max(8_192),
   expires_in: z.number().int().positive().max(86_400),
 }).passthrough();
 
@@ -99,7 +101,10 @@ export const errorResponseSchema = z.object({
 
 const phoneSchema = z.string().trim().regex(/^\+[1-9]\d{9,14}$/u);
 const emailSchema = z.string().trim().email().max(320);
-const orderPackageSchema = z.object({ number: identifierSchema }).merge(packageSchema);
+const orderPackageSchema = packageDataSchema.extend({ number: identifierSchema }).refine(
+  ({ length, width, height }) => length + width + height <= 150,
+  "CDEK package dimensions exceed the supported limit",
+);
 const destinationSchema = z.object({
   cityCode: cityCodeSchema,
   address: textSchema,

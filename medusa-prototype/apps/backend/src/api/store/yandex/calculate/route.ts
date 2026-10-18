@@ -4,7 +4,7 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils";
 import { buildPricingParams, YandexFulfillmentDataError } from "../../../../modules/yandex-delivery/fulfillment-data";
 
 import {
-  getPublicYandexClient,
+  getPublicYandexProvider,
   PublicYandexGuardError,
   publicYandexGuard,
 } from "../../../../modules/yandex-delivery/public-api";
@@ -27,13 +27,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
   const bodyResult = calculationSchema.safeParse(req.body);
   if (!bodyResult.success) return res.status(400).json({ message: "Invalid request" });
-  let client;
+  let provider;
   try {
-    client = getPublicYandexClient();
+    provider = getPublicYandexProvider();
   } catch {
     return res.status(503).json({ message: "Delivery service unavailable" });
   }
-  if (client === null) return res.status(503).json({ message: "Delivery service unavailable" });
+  if (provider === null) return res.status(503).json({ message: "Delivery service unavailable" });
+  const { client, pvzPriceRub } = provider;
   try {
     const body = bodyResult.data;
     const query = req.scope.resolve(ContainerRegistrationKeys.QUERY);
@@ -51,8 +52,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     if (!carts[0]) return res.status(400).json({ message: "Invalid cart" });
     const points = await client.getPickupPoints({ geo_id: body.geo_id });
     if (!points.some((point) => point.id === body.platform_station_id &&
-      point.operatorId === "market_l4g" &&
-      (point.address.geo_id === undefined || point.address.geo_id === body.geo_id))) {
+      point.operatorId === "market_l4g")) {
       return res.status(400).json({ message: "Invalid pickup point" });
     }
     const params = buildPricingParams(body.platform_station_id, carts[0].items);
@@ -63,10 +63,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       execute: () => client.calculatePricing(params),
     });
     return res.json({
-      price: result.priceRub,
       ...(result.deliveryDays === undefined ? {} : { delivery_days: result.deliveryDays }),
       currency: result.currency,
-      customer_cost: 0,
+      customer_cost: pvzPriceRub,
     });
   } catch (error) {
     if (error instanceof YandexFulfillmentDataError) {

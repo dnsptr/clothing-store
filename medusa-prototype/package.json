@@ -23,7 +23,7 @@
     }
   },
   "devDependencies": {
-    "@medusajs/eslint-plugin": "2.16.0",
+    "@medusajs/eslint-plugin": "2.21.2",
     "eslint": "^9.39.4",
     "jiti": "^2.7.0",
     "prettier": "^3.2.5",
@@ -34,6 +34,26 @@
     "!apps/backend/.medusa/**"
   ],
   "overrides": {
-    "ajv": "^8.0.0"
+    "ajv": "^8.20.0",
+    "eslint": {
+      "ajv": "^6.14.0"
+    },
+    "@eslint/eslintrc": {
+      "ajv": "^6.14.0"
+    },
+    "axios": "^1.20.0",
+    "compression": "^1.8.2",
+    "fast-uri": "^3.1.8",
+    "lodash": "^4.18.1",
+    "multer": "^2.4.0",
+    "nanoid": "^3.3.18",
+    "postcss": "^8.5.23",
+    "proxy-addr": "^2.0.8",
+    "qs": "^6.16.0",
+    "source-map-js": "^1.2.2",
+    "@grpc/grpc-js": "^1.14.5",
+    "@opentelemetry/core": "^2.9.0",
+    "@opentelemetry/propagator-jaeger": "^2.9.0",
+    "@graphql-tools/utils": "^12.0.3"
   }
 }

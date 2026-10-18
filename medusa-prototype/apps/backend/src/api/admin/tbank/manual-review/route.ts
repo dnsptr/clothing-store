@@ -1,11 +1,15 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { z } from "zod";
 import { TBANK_NOTIFICATION_MODULE } from "../../../../modules/tbank-notifications";
-import { notificationDto } from "./dto";
+import { notificationDto, paymentAttemptDto } from "./dto";
 import { ManualReviewListQuerySchema, type ManualReviewListQuery } from "./validators";
 
 type ManualReviewStore = {
   listAndCountTbankNotifications(
+    filters: Record<string, unknown>,
+    config: { readonly skip: number; readonly take: number; readonly order: Record<string, "ASC" | "DESC"> },
+  ): Promise<[readonly Record<string, unknown>[], number]>;
+  listAndCountTbankPaymentAttempts(
     filters: Record<string, unknown>,
     config: { readonly skip: number; readonly take: number; readonly order: Record<string, "ASC" | "DESC"> },
   ): Promise<[readonly Record<string, unknown>[], number]>;
@@ -29,13 +33,21 @@ export async function GET(
   }
 
   try {
-    const [notifications, count] = await notificationService.listAndCountTbankNotifications(
-      { lifecycle_state: "manual_review" },
-      { skip: query.offset, take: query.limit, order: { manual_review_at: "DESC" } },
-    );
+    const [[notifications, count], [attempts, attemptCount]] = await Promise.all([
+      notificationService.listAndCountTbankNotifications(
+        { lifecycle_state: "manual_review" },
+        { skip: query.offset, take: query.limit, order: { manual_review_at: "DESC" } },
+      ),
+      notificationService.listAndCountTbankPaymentAttempts(
+        { poll_state: "manual_review" },
+        { skip: query.offset, take: query.limit, order: { poll_manual_review_at: "DESC" } },
+      ),
+    ]);
     res.json({
       notifications: notifications.map(notificationDto),
+      attempts: attempts.map(paymentAttemptDto),
       count,
+      attempt_count: attemptCount,
       offset: query.offset,
       limit: query.limit,
     });

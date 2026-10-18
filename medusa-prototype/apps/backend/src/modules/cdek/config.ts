@@ -27,6 +27,8 @@ const CDEK_ENVIRONMENT_SCHEMA = z.object({
     .refine(Number.isSafeInteger, {
       message: "CDEK_FROM_CITY_CODE must be a safe integer",
     }),
+  CDEK_PVZ_PRICE_RUB: z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/).transform(Number).refine(Number.isFinite),
+  CDEK_COURIER_PRICE_RUB: z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/).transform(Number).refine(Number.isFinite),
 });
 
 export type CdekProviderOptions = {
@@ -34,6 +36,8 @@ export type CdekProviderOptions = {
   readonly clientSecret: string;
   readonly apiBaseUrl: string;
   readonly fromCityCode: number;
+  readonly pvzPriceRub: number;
+  readonly courierPriceRub: number;
 };
 
 export type CdekConfiguration =
@@ -91,6 +95,8 @@ export function parseCdekEnvironment(
       clientSecret: result.data.CDEK_CLIENT_SECRET,
       apiBaseUrl: result.data.CDEK_API_BASE_URL.replace(/\/$/, ""),
       fromCityCode: result.data.CDEK_FROM_CITY_CODE,
+      pvzPriceRub: result.data.CDEK_PVZ_PRICE_RUB,
+      courierPriceRub: result.data.CDEK_COURIER_PRICE_RUB,
     },
   };
 }

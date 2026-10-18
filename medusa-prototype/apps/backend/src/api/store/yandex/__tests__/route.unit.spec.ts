@@ -52,7 +52,7 @@ function mockConfirmedPoint() {
     name: "ПВЗ Маркет",
     type: "pickup_point",
     operatorId: "market_l4g",
-    address: { full_address: "Москва, Мира, 1", city: "Москва", geo_id: 213 },
+    address: { full_address: "Москва, Мира, 1", city: "Москва", geo_id: 213001 },
     position: { latitude: 55.7, longitude: 37.6 },
     isFittingAllowed: false,
     isPartialRefuseAllowed: false,
@@ -69,6 +69,7 @@ describe("Yandex Delivery public routes", () => {
       YANDEX_DELIVERY_TOKEN: "test-token",
       YANDEX_DELIVERY_API_BASE_URL: "https://b2b-authproxy.taxi.yandex.net/api/b2b/platform",
       YANDEX_DELIVERY_SOURCE_STATION_ID: "station_source_1",
+      YANDEX_DELIVERY_PVZ_PRICE_RUB: "450",
     };
     _resetPublicYandexForTesting();
   });
@@ -128,8 +129,16 @@ describe("Yandex Delivery public routes", () => {
     expect(response.body).toEqual({ message: "Delivery service unavailable" });
   });
 
+  it("does not offer delivery without an agreed fixed buyer price", async () => {
+    delete process.env.YANDEX_DELIVERY_PVZ_PRICE_RUB;
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION }), response);
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({ message: "Delivery service unavailable" });
+  });
+
   it("rejects a station outside the selected city before pricing", async () => {
-    mockConfirmedPoint();
+    mockConfirmedPoint().mockResolvedValueOnce([]);
     const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing");
     const response = createResponse();
     await calculateYandex(request({ body: { ...VALID_CALCULATION, geo_id: 43 } }), response);
@@ -151,10 +160,10 @@ describe("Yandex Delivery public routes", () => {
     expect(calculate).not.toHaveBeenCalled();
   });
 
-  it("prices measured cart items for a confirmed point while charging the shopper nothing", async () => {
+  it("quotes the buyer's price for a PVZ returned by the selected city despite a different point geo ID", async () => {
     mockConfirmedPoint();
     const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockResolvedValue({
-      priceRub: 310,
+      priceRub: 310.75,
       deliveryDays: 3,
       currency: "RUB",
     });
@@ -162,10 +171,9 @@ describe("Yandex Delivery public routes", () => {
     await calculateYandex(request({ body: VALID_CALCULATION }), response);
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
-      price: 310,
       delivery_days: 3,
       currency: "RUB",
-      customer_cost: 0,
+      customer_cost: 450,
     });
     expect(calculate).toHaveBeenCalledWith({
       destinationStationId: "station_dest_123",
@@ -175,6 +183,30 @@ describe("Yandex Delivery public routes", () => {
       dzCm: 15,
       assessedPriceRub: 3500,
     });
+  });
+
+  it("rejects multiple units without combined parcel measurements before pricing", async () => {
+    mockConfirmedPoint();
+    const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing");
+    const response = createResponse();
+    await calculateYandex(request({
+      body: VALID_CALCULATION,
+      items: [{ ...MEASURED_ITEMS[0], quantity: 2 }],
+    }), response);
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toEqual({ message: "Invalid cart measurements" });
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
+  it("returns a real failure instead of a buyer quote when carrier pricing fails", async () => {
+    mockConfirmedPoint();
+    jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockRejectedValue(
+      new Error("secret upstream pricing response"),
+    );
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION }), response);
+    expect(response.statusCode).toBe(502);
+    expect(response.body).toEqual({ message: "Delivery provider unavailable" });
   });
 
   it("rate limits repeated requests before upstream work", async () => {

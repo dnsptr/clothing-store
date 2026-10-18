@@ -6,6 +6,8 @@ const TEST_OPTIONS: CdekProviderOptions = {
   clientSecret: "mock-client-secret",
   apiBaseUrl: "https://api.edu.cdek.ru/v2",
   fromCityCode: 44,
+  pvzPriceRub: 350,
+  courierPriceRub: 650,
 };
 
 describe("CdekClient", () => {
@@ -23,15 +25,18 @@ describe("CdekClient", () => {
 
   it("obtains and caches OAuth token", async () => {
     let tokenRequests = 0;
-    global.fetch = jest.fn(async (url: RequestInfo | URL) => {
+    const userAgents: string[] = [];
+    const token = "x".repeat(1_426);
+    global.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const urlStr = String(url);
+      userAgents.push(new Headers(init?.headers).get("User-Agent") ?? "");
       if (urlStr.includes("/oauth/token")) {
         tokenRequests++;
         return {
           ok: true,
           status: 200,
-          json: async () => ({ access_token: "mock-token-123", expires_in: 3600 }),
-          text: async () => JSON.stringify({ access_token: "mock-token-123", expires_in: 3600 }),
+          json: async () => ({ access_token: token, expires_in: 3600 }),
+          text: async () => JSON.stringify({ access_token: token, expires_in: 3600 }),
         } as unknown as Response;
       }
       if (urlStr.includes("/location/cities")) {
@@ -57,6 +62,7 @@ describe("CdekClient", () => {
     const cities2 = await client.searchCities("Моск");
     expect(cities2).toHaveLength(1);
     expect(tokenRequests).toBe(1);
+    expect(userAgents).toEqual(Array(3).fill("MarioMikkeStore/1.0"));
   });
 
   it("retries request when token expires with 401", async () => {

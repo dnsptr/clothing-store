@@ -45,6 +45,8 @@ describe("CDEK public route security boundaries", () => {
       CDEK_CLIENT_SECRET: "route-security-secret",
       CDEK_API_BASE_URL: "https://api.edu.cdek.ru/v2",
       CDEK_FROM_CITY_CODE: "44",
+      CDEK_PVZ_PRICE_RUB: "350",
+      CDEK_COURIER_PRICE_RUB: "650",
     };
   });
 
@@ -167,7 +169,8 @@ describe("CDEK public route security boundaries", () => {
     expect(response.body).toEqual({
       pvz: expect.objectContaining({ tariff_code: 136 }),
       courier: null,
-      customer_cost: 0,
+      customer_cost_pvz: 350,
+      customer_cost_courier: null,
     });
   });
 

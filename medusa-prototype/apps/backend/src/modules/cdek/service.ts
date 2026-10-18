@@ -61,6 +61,7 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
       packages: [buildCdekCartPackage(context["items"])],
     });
   }
+
   async getFulfillmentOptions(): Promise<FulfillmentOption[]> {
     return [
       {
@@ -75,7 +76,6 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
         id: CDEK_OPTION_PICKUP,
         name: "Самовывоз из магазина (Москва, бесплатно)",
       },
-
     ];
   }
 
@@ -166,7 +166,7 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
 
     await this.calculateCarrierQuote(optionId, data, context);
     return {
-      calculated_amount: 0,
+      calculated_amount: optionId === CDEK_OPTION_PVZ ? this.options.pvzPriceRub : this.options.courierPriceRub,
       is_calculated_price_tax_inclusive: true,
     };
   }

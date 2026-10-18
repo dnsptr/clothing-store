@@ -18,6 +18,8 @@ const TEST_OPTIONS: CdekProviderOptions = {
   clientSecret: "mock-secret",
   apiBaseUrl: "https://api.edu.cdek.ru/v2",
   fromCityCode: 44,
+  pvzPriceRub: 350,
+  courierPriceRub: 650,
 };
 
 describe("CdekFulfillmentProviderService", () => {
@@ -161,7 +163,7 @@ describe("CdekFulfillmentProviderService", () => {
     expect(price.is_calculated_price_tax_inclusive).toBe(true);
   });
 
-  it("keeps PVZ free for the customer after the carrier tariff succeeds", async () => {
+  it("charges the approved PVZ price after independently checking the carrier tariff", async () => {
     const calculateTariff = jest.spyOn(service.getCdekClient(), "calculateTariff").mockResolvedValue({
       tariff_code: 136,
       tariff_name: "СДЭК — Доставка в пункт выдачи (ПВЗ)",
@@ -172,18 +174,18 @@ describe("CdekFulfillmentProviderService", () => {
     const price = await service.calculatePrice(
       { id: CDEK_OPTION_PVZ },
       { city_code: 44 },
-      { items: [{ id: "item_1", quantity: 2, variant: { weight: 500, length: 20, width: 10, height: 5 } }] },
+      { items: [{ id: "item_1", quantity: 1, variant: { weight: 500, length: 20, width: 10, height: 5 } }] },
     );
     expect(calculateTariff).toHaveBeenCalledWith(expect.objectContaining({
       tariffCode: 136,
       toCityCode: 44,
-      packages: [{ weight: 1000, length: 20, width: 10, height: 5 }],
+      packages: [{ weight: 500, length: 20, width: 10, height: 5 }],
     }));
-    expect(price.calculated_amount).toBe(0);
+    expect(price.calculated_amount).toBe(350);
     expect(price.is_calculated_price_tax_inclusive).toBe(true);
   });
 
-  it("keeps courier delivery free for the customer after the carrier tariff succeeds", async () => {
+  it("charges the approved courier price after independently checking the carrier tariff", async () => {
     const calculateTariff = jest.spyOn(service.getCdekClient(), "calculateTariff").mockResolvedValue({
       tariff_code: 137,
       tariff_name: "СДЭК — Курьерская доставка до двери",
@@ -197,7 +199,16 @@ describe("CdekFulfillmentProviderService", () => {
       { items: [{ id: "item_1", quantity: 1, product: { weight: 700, length: 30, width: 25, height: 10 } }] },
     );
     expect(calculateTariff).toHaveBeenCalledWith(expect.objectContaining({ tariffCode: 137, toCityCode: 137 }));
-    expect(price.calculated_amount).toBe(0);
+    expect(price.calculated_amount).toBe(650);
+  });
+
+  it("refuses to quote two separately packed units as one unit-sized parcel", async () => {
+    const calculateTariff = jest.spyOn(service.getCdekClient(), "calculateTariff");
+    await expect(service.calculatePrice(
+      { id: CDEK_OPTION_PVZ }, { city_code: 44 },
+      { items: [{ id: "item_1", quantity: 2, variant: { weight: 500, length: 20, width: 10, height: 5 } }] },
+    )).rejects.toThrow("combined parcel");
+    expect(calculateTariff).not.toHaveBeenCalled();
   });
 
   it("rejects CDEK pricing before the carrier call when cart data is invalid", async () => {
@@ -336,13 +347,9 @@ describe("CdekFulfillmentProviderService", () => {
     )).rejects.toThrow("order identity");
   });
 
-  it("derives aggregate package data from authoritative order item fields", async () => {
-    const createOrder = jest.spyOn(service.getCdekClient(), "createOrder").mockResolvedValue({
-      entity: { uuid: "cdek-uuid" },
-      requests: [{ request_uuid: "request-uuid", type: "CREATE", state: "ACCEPTED", date_time: "2026-09-21T00:00:00+0000" }],
-    });
-
-    await service.createFulfillment(
+  it("refuses to create a one-parcel CDEK order from only separate item dimensions", async () => {
+    const createOrder = jest.spyOn(service.getCdekClient(), "createOrder");
+    await expect(service.createFulfillment(
       { delivery_mode: CDEK_OPTION_PVZ, city_code: 44, cdek_pvz_code: "MSK65" },
       [{ line_item_id: "item_1", quantity: 2 }, { line_item_id: "item_2", quantity: 1 }],
       { id: "ord_999", shipping_address: { first_name: "Иван", phone: "+79991234567" }, items: [
@@ -350,19 +357,18 @@ describe("CdekFulfillmentProviderService", () => {
         { id: "item_2", variant: { product: { weight: 700, length: 30, width: 25, height: 10 } } },
       ] },
       {},
-    );
-
-    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ packages: [{ number: "1", weight: 1700, length: 30, width: 25, height: 10 }] }));
+    )).rejects.toThrow("combined parcel");
+    expect(createOrder).not.toHaveBeenCalled();
   });
 
-  it("rejects duplicate, unmatched, or oversized fulfillment package data before carrier mutation", async () => {
+  it("rejects duplicate, unmatched, or multi-unit fulfillment before carrier mutation", async () => {
     const createOrder = jest.spyOn(service.getCdekClient(), "createOrder");
     const baseOrder = { id: "ord_999", shipping_address: { first_name: "Иван", phone: "+79991234567" }, items: [{ id: "item_1", variant: { weight: 500, length: 20, width: 10, height: 5 } }] };
     const data = { delivery_mode: CDEK_OPTION_PVZ, city_code: 44, cdek_pvz_code: "MSK65" };
 
     await expect(service.createFulfillment(data, [{ line_item_id: "item_1", quantity: 1 }, { line_item_id: "item_1", quantity: 1 }], baseOrder, {})).rejects.toThrow("fulfillment items");
     await expect(service.createFulfillment(data, [{ line_item_id: "missing", quantity: 1 }], baseOrder, {})).rejects.toThrow("unmatched line item");
-    await expect(service.createFulfillment(data, [{ line_item_id: "item_1", quantity: 100 }], baseOrder, {})).rejects.toThrow("package");
+    await expect(service.createFulfillment(data, [{ line_item_id: "item_1", quantity: 100 }], baseOrder, {})).rejects.toThrow("combined parcel");
     expect(createOrder).not.toHaveBeenCalled();
   });
 

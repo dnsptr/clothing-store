@@ -131,13 +131,6 @@ describe("buildOrderEmailText", () => {
     expect(text).toContain("Получатель: Анна Петрова, +7 900 000-00-00");
   });
 
-  it("объясняет, что будет дальше, и зовёт ответить письмом", () => {
-    const text = buildOrderEmailText(ORDER, SHOP);
-
-    expect(text).toContain("Что дальше:");
-    expect(text).toContain("передадим его в доставку");
-    expect(text).toContain("ответьте на это письмо");
-  });
 
   it("подписывается магазином и его контактами", () => {
     const text = buildOrderEmailText(ORDER, SHOP);

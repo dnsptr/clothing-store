@@ -7,6 +7,8 @@ const VALID_CDEK_ENVIRONMENT = {
   CDEK_CLIENT_SECRET: "test-client-secret",
   CDEK_API_BASE_URL: "https://api.edu.cdek.ru/v2",
   CDEK_FROM_CITY_CODE: "44",
+  CDEK_PVZ_PRICE_RUB: "350",
+  CDEK_COURIER_PRICE_RUB: "650",
 } as const;
 
 describe("parseCdekEnvironment", () => {
@@ -28,6 +30,8 @@ describe("parseCdekEnvironment", () => {
         clientSecret: "test-client-secret",
         apiBaseUrl: "https://api.edu.cdek.ru/v2",
         fromCityCode: 44,
+        pvzPriceRub: 350,
+        courierPriceRub: 650,
       },
     });
   });
@@ -35,6 +39,12 @@ describe("parseCdekEnvironment", () => {
   it("rejects an enabled provider without an explicitly configured origin city", () => {
     const { CDEK_FROM_CITY_CODE: _, ...withoutCity } = VALID_CDEK_ENVIRONMENT;
     expect(() => parseCdekEnvironment(withoutCity)).toThrow(CdekConfigurationError);
+  });
+  it("refuses enabled delivery without both approved buyer prices", () => {
+    const { CDEK_PVZ_PRICE_RUB: _, ...withoutPrice } = VALID_CDEK_ENVIRONMENT;
+    expect(() => parseCdekEnvironment(withoutPrice)).toThrow(CdekConfigurationError);
+    expect(() => parseCdekEnvironment({ ...VALID_CDEK_ENVIRONMENT, CDEK_COURIER_PRICE_RUB: "" })).toThrow(CdekConfigurationError);
+    expect(() => parseCdekEnvironment({ ...VALID_CDEK_ENVIRONMENT, CDEK_PVZ_PRICE_RUB: "-10" })).toThrow(CdekConfigurationError);
   });
 
   it("strips trailing slashes from apiBaseUrl", () => {

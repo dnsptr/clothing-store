@@ -2,6 +2,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import {
   DEFAULT_FIXTURE_URL,
   FIXTURE_RETURN_CARTS,
+  FIXTURE_CART_ACCESS_TOKEN,
 } from "./store-api-fixture";
 
 export const DEFAULT_APP_URL = "http://127.0.0.1:4173";
@@ -50,11 +51,19 @@ export async function seedCart(
   items: readonly object[] = [SAMPLE_CART_ITEM],
 ): Promise<void> {
   await page.addInitScript(
-    ({ id, cartItems }) => {
+    ({ id, cartItems, accessToken }) => {
+      // Playwright reruns init scripts on reload; seed once, then keep real cart/payment mutations.
+      const seedKey = `e2e:seed-cart:${id}`;
+      if (window.sessionStorage.getItem(seedKey)) return;
       window.localStorage.setItem("clothing-store-medusa-cart", id);
       window.localStorage.setItem("clothing-store-cart-medusa", JSON.stringify(cartItems));
+      window.localStorage.setItem("clothing-store-cart-access", JSON.stringify({ [id]: accessToken }));
+      window.sessionStorage.setItem("clothing-store-payment-return", JSON.stringify({
+        cartId: id, cartAccessToken: accessToken, paymentConfirmed: false,
+      }));
+      window.sessionStorage.setItem(seedKey, "true");
     },
-    { id: cartId, cartItems: items },
+    { id: cartId, cartItems: items, accessToken: FIXTURE_CART_ACCESS_TOKEN },
   );
 }
 

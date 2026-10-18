@@ -13,11 +13,17 @@ const TbankPaymentAttempt = model
       order_id: model.text(),
       expected_amount_kopecks: model.number(),
       currency_code: model.text(),
-      poll_state: model.enum(["pending", "leased", "complete", "manual_review"]).default("pending"),
+      poll_state: model.enum(["pending", "leased", "completed", "manual_review"]).default("pending"),
+      poll_count: model.number().default(0),
       poll_next_at: model.dateTime().nullable(),
       poll_lease_token: model.text().nullable(),
       poll_lease_expires_at: model.dateTime().nullable(),
-      poll_consecutive_errors: model.number().default(0),
+      poll_checked_at: model.dateTime().nullable(),
+      poll_payment_id: model.text().nullable(),
+      poll_bank_status: model.text().nullable(),
+      poll_confirmed_at: model.dateTime().nullable(),
+      poll_error: model.text().nullable(),
+      poll_completed_at: model.dateTime().nullable(),
       poll_manual_review_at: model.dateTime().nullable(),
       notifications: model.hasMany(() => TbankNotification, { mappedBy: "payment_attempt" }),
     },
@@ -25,7 +31,7 @@ const TbankPaymentAttempt = model
   .indexes([
     { on: ["payment_session_id"], unique: true },
     { on: ["order_id"], unique: true },
-    { on: ["terminal_key", "poll_state", "poll_next_at"] },
+    { on: ["poll_state", "poll_next_at", "poll_lease_expires_at"] },
   ]);
 
 export default TbankPaymentAttempt;

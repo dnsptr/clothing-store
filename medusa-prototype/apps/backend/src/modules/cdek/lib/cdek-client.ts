@@ -111,7 +111,7 @@ export class CdekClient {
         });
         const response = await fetch(`${this.options.apiBaseUrl}/oauth/token`, {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "MarioMikkeStore/1.0" },
           body: body.toString(),
           signal: AbortSignal.timeout(15_000),
         });
@@ -145,6 +145,7 @@ export class CdekClient {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Content-Type", "application/json");
+    headers.set("User-Agent", "MarioMikkeStore/1.0");
     let response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(15_000) });
     if (response.status === 401) {
       this.cachedToken = null;

@@ -204,6 +204,11 @@ export function buildCdekCartPackage(items: unknown) {
   const cartItems = parseWithSchema(z.array(orderItemSchema.extend({
     quantity: z.number().int().positive().max(1_000),
   })).min(1).max(100), items, "cart items");
+  // Item dimensions describe one separately packed unit, not the parcel that
+  // contains several units. Never quote or ship a made-up combined box.
+  if (cartItems.length !== 1 || cartItems[0].quantity !== 1) {
+    throw new CdekFulfillmentDataError("measured combined parcel is required");
+  }
   const measured = cartItems.map((item) => {
     const physical = parseWithSchema(physicalAttributesSchema, {
       weight: item.variant?.weight ?? item.variant?.product?.weight ?? item.product?.weight,
@@ -224,6 +229,9 @@ export function buildCdekCartPackage(items: unknown) {
 export function buildCdekPackage(items: unknown[], order: Record<string, unknown> | undefined) {
   const parsedOrder = parseWithSchema(orderSchema, order ?? {}, "order items");
   const fulfillmentItems = parseWithSchema(fulfillmentItemsSchema, items, "fulfillment items");
+  if (fulfillmentItems.length !== 1 || fulfillmentItems[0].quantity !== 1) {
+    throw new CdekFulfillmentDataError("measured combined parcel is required");
+  }
   const matchedItems = fulfillmentItems.map((fulfillmentItem) => {
     const orderItem = parsedOrder.items.find((candidate) => candidate.id === fulfillmentItem.line_item_id);
     if (!orderItem) throw new CdekFulfillmentDataError(`unmatched line item ${fulfillmentItem.line_item_id}`);

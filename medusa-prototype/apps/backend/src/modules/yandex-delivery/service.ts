@@ -25,10 +25,12 @@ import {
 export default class YandexDeliveryFulfillmentProviderService extends AbstractFulfillmentProviderService {
   static identifier = YANDEX_DELIVERY_PROVIDER_IDENTIFIER;
   private readonly client: YandexDeliveryClient;
+  private readonly pvzPriceRub: number;
 
   constructor(_container: unknown, options: YandexDeliveryProviderOptions) {
     super();
     this.client = new YandexDeliveryClient(options);
+    this.pvzPriceRub = options.pvzPriceRub;
   }
 
   getYandexClient(): YandexDeliveryClient {
@@ -80,7 +82,7 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     const points = await this.client.getPickupPoints({ geo_id: selection.geo_id });
     const verified = confirmPvzSelection(data, points);
     await this.client.calculatePricing(buildPricingParams(verified.platform_station_id, context["items"]));
-    return { calculated_amount: 0, is_calculated_price_tax_inclusive: true };
+    return { calculated_amount: this.pvzPriceRub, is_calculated_price_tax_inclusive: true };
   }
 
   async createFulfillment(

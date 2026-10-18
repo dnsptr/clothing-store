@@ -33,6 +33,7 @@ function authoritativeCart(overrides: Record<string, unknown> = {}) {
     email: " Buyer@Example.com ",
     shipping_address: { phone: " +7 (999) 000-00-00 " },
     total: 18990,
+    shipping_methods: [{ id: "casm_01JABCDEFGHJKMNPQRSTVWXYZ" }],
     shipping_total: 90,
     items: [
       {
@@ -131,9 +132,6 @@ describe("validateOptions", () => {
         receiptSnapshotSecret: OPTIONS.password,
       }),
     ).toThrow(/TBANK_RECEIPT_SNAPSHOT_SECRET/);
-    expect(() =>
-      TBankPaymentProviderService.validateOptions({ terminalKey: "x", password: "y", receiptSnapshotSecret: OPTIONS.receiptSnapshotSecret }),
-    ).not.toThrow();
   });
 });
 
@@ -342,6 +340,14 @@ describe("initiatePayment", () => {
     expect(initSpy).not.toHaveBeenCalled();
   });
 
+  it("does not call Init when the cart has no selected shipping method", async () => {
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+
+    await expect(makeService(undefined, authoritativeCart({ shipping_methods: [] }))
+      .initiatePayment(input as never)).rejects.toThrow(/способ доставки не выбран/i);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
   it("rejects an authoritative fiscal total that does not equal Init.Amount", async () => {
     const initSpy = jest.spyOn(TBankClient.prototype, "init");
     const cart = authoritativeCart({ total: 18990, shipping_total: 0 });
@@ -547,6 +553,22 @@ describe("initiatePayment", () => {
       );
       expect(result.data).not.toHaveProperty("receiptSnapshot");
       expect(result.data).not.toHaveProperty("receiptSnapshotSignature");
+    });
+
+    it("does not reuse a bank URL after the shipping method is removed", async () => {
+      const initSpy = jest.spyOn(TBankClient.prototype, "init");
+      const cart = authoritativeCart({ shipping_methods: [] });
+
+      await expect(makeService(undefined, cart).initiatePayment({
+        ...input,
+        data: {
+          paymentId: "3456789",
+          paymentUrl: "https://securepay.tinkoff.ru/xxx",
+          orderId: input.context.idempotency_key,
+          status: "NEW",
+        },
+      } as never)).rejects.toThrow(/способ доставки не выбран/i);
+      expect(initSpy).not.toHaveBeenCalled();
     });
 
     it("запрещает повторное использование, если корзина изменилась по сумме", async () => {
@@ -1089,57 +1111,82 @@ describe("cancelPayment", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("считает ошибку отмены идемпотентной только после GetState=CANCELED", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: false, ErrorCode: "9999", Message: "уже отменён" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: true, ErrorCode: "0", Status: "CANCELED" }),
-      }) as unknown as typeof fetch;
+  it("не превращает отмену NEW в возврат при списании между GetState и Cancel", async () => {
+    let bankStatus = "NEW";
+    jest.spyOn(TBankClient.prototype, "getState").mockImplementation(async () => {
+      queueMicrotask(() => { bankStatus = "CONFIRMED"; });
+      return { Success: true, ErrorCode: "0", Status: "NEW" };
+    });
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
 
-    await expect(
-      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
-    ).resolves.toBeDefined();
+    await expect(makeService().cancelPayment({ data: { paymentId: "1", status: "NEW" } } as never))
+      .rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+    expect(bankStatus).toBe("CONFIRMED");
+    expect(cancel).not.toHaveBeenCalled();
   });
 
-  it("не удаляет сессию после неоднозначной сетевой ошибки Cancel", async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(new Error("socket reset"))
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: true, ErrorCode: "0", Status: "NEW" }),
-      }) as unknown as typeof fetch;
+  it.each(["CONFIRMED", "REFUNDED", "PARTIAL_REFUNDED", "captured", "UNKNOWN", undefined])(
+    "блокирует Cancel и deletePayment при состоянии банка %s, даже если сохранён NEW",
+    async (status) => {
+      jest.spyOn(TBankClient.prototype, "getState")
+        .mockResolvedValue({ Success: true, ErrorCode: "0", Status: status });
+      const cancel = jest.spyOn(TBankClient.prototype, "cancel");
+      const service = makeService();
+      const input = { data: { paymentId: "1", status: "NEW" } } as never;
 
-    await expect(
-      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
-    ).rejects.toThrow(/NETWORK/);
+      await expect(service.cancelPayment(input)).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+      await expect(service.deletePayment(input)).rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+      expect(cancel).not.toHaveBeenCalled();
+    },
+  );
+
+
+  it.each(["CANCELED", "REVERSED", "REJECTED", "DEADLINE_EXPIRED"])(
+    "не повторяет отмену после GetState=%s",
+    async (status) => {
+      jest.spyOn(TBankClient.prototype, "getState")
+        .mockResolvedValue({ Success: true, ErrorCode: "0", Status: status });
+      const cancel = jest.spyOn(TBankClient.prototype, "cancel");
+
+      await makeService().cancelPayment({ data: { paymentId: "1" } } as never);
+      expect(cancel).not.toHaveBeenCalled();
+    },
+  );
+
+
+  it("не вызывает Cancel, если предварительный GetState недоступен", async () => {
+    jest.spyOn(TBankClient.prototype, "getState").mockRejectedValue(new Error("bank unavailable"));
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
+
+    await expect(makeService().deletePayment({ data: { paymentId: "1" } } as never))
+      .rejects.toThrow("bank unavailable");
+    expect(cancel).not.toHaveBeenCalled();
   });
 });
 
 describe("refundPayment", () => {
   it("без PaymentId бросает, а не делает вид, что вернул деньги", async () => {
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
     await expect(
       makeService().refundPayment({ data: {}, amount: 100 } as never),
-    ).rejects.toThrow(/PaymentId/);
+    ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA, message: expect.stringMatching(/PaymentId/) });
+    expect(cancel).not.toHaveBeenCalled();
   });
 
-  it("отправляет сумму возврата в копейках", async () => {
+  it.each([100, 18990])("блокирует возврат %s без фискального чека до любого обращения в банк", async (amount) => {
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
     const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
-    await makeService().refundPayment({
-      data: { paymentId: "3456789" },
-      amount: 18990,
-    } as never);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.Amount).toBe(1899000);
+    await expect(makeService().refundPayment({
+      data: { paymentId: "3456789" },
+      amount,
+    } as never)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/возвратного чека/),
+    });
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

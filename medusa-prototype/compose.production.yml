@@ -63,15 +63,23 @@ services:
       CDEK_CLIENT_ID: ${CDEK_CLIENT_ID:-}
       CDEK_CLIENT_SECRET: ${CDEK_CLIENT_SECRET:-}
       CDEK_FROM_CITY_CODE: ${CDEK_FROM_CITY_CODE:-}
+      CDEK_PVZ_PRICE_RUB: ${CDEK_PVZ_PRICE_RUB:-}
+      CDEK_COURIER_PRICE_RUB: ${CDEK_COURIER_PRICE_RUB:-}
       YANDEX_DELIVERY_ENABLED: ${YANDEX_DELIVERY_ENABLED:-false}
       YANDEX_DELIVERY_TOKEN: ${YANDEX_DELIVERY_TOKEN:-}
       YANDEX_DELIVERY_API_BASE_URL: ${YANDEX_DELIVERY_API_BASE_URL:-}
       YANDEX_DELIVERY_SOURCE_STATION_ID: ${YANDEX_DELIVERY_SOURCE_STATION_ID:-}
+      YANDEX_DELIVERY_PVZ_PRICE_RUB: ${YANDEX_DELIVERY_PVZ_PRICE_RUB:-}
       POCHTA_ENABLED: ${POCHTA_ENABLED:-false}
       POCHTA_ACCESS_TOKEN: ${POCHTA_ACCESS_TOKEN:-}
       POCHTA_USER_KEY: ${POCHTA_USER_KEY:-}
       POCHTA_API_BASE_URL: ${POCHTA_API_BASE_URL:-}
       POCHTA_FROM_INDEX: ${POCHTA_FROM_INDEX:-}
+      # Credentials alone must not activate an unapproved courier tariff.
+      OWN_COURIER_ENABLED: ${OWN_COURIER_ENABLED:-false}
+      OWN_COURIER_PRICE_RUB: ${OWN_COURIER_PRICE_RUB:-}
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
+      DADATA_SECRET_KEY: ${DADATA_SECRET_KEY:-}
       TBANK_ENABLED: ${TBANK_ENABLED:-false}
       TBANK_PAYMENT_PROVIDER_ID: ${TBANK_PAYMENT_PROVIDER_ID:-}
       TBANK_TERMINAL_KEY: ${TBANK_TERMINAL_KEY:-}
@@ -81,6 +89,18 @@ services:
       TBANK_SUCCESS_URL: ${TBANK_SUCCESS_URL:-}
       TBANK_FAIL_URL: ${TBANK_FAIL_URL:-}
       TBANK_NOTIFICATION_URL: ${TBANK_NOTIFICATION_URL:-}
+      # The notification module needs the bot token; the order subscriber
+      # needs the staff chat ID. Keep both unset to disable Telegram.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Compose's --env-file is only used for interpolation; explicitly pass
+      # SMTP settings to Medusa or the email channel stays on notification-local.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       MEDUSA_ADMIN_ONBOARDING_TYPE: default
       MEDUSA_WORKER_MODE: shared
       MEDUSA_DISABLE_TELEMETRY: "true"
@@ -106,6 +126,7 @@ services:
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
       ADMIN_BASIC_AUTH_HASH: ${ADMIN_BASIC_AUTH_HASH:?ADMIN_BASIC_AUTH_HASH is required}
+      HTTPS_PROXY_CIDRS: ${HTTPS_PROXY_CIDRS:?Verified HTTPS load-balancer source CIDRs are required}
     network_mode: host
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

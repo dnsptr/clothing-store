@@ -35,7 +35,7 @@ async function paymentObservations(request: Parameters<typeof resetFixture>[0]) 
 
 async function configureScenario(
   request: Parameters<typeof resetFixture>[0],
-  scenario: "valid" | "malformed" | "missing" | "insecure" | "wrong_provider" | "unapproved" | "credentials",
+  scenario: "valid" | "malformed" | "missing" | "insecure" | "wrong_provider" | "unapproved" | "credentials" | "alternate_port",
 ): Promise<void> {
   const response = await request.post(`${FIXTURE_URL}/__control/scenario`, { data: { scenario } });
   expect(response.ok()).toBe(true);
@@ -109,7 +109,7 @@ test.describe("Payment-session replay safety", () => {
     });
   }
 
-  for (const scenario of ["missing", "malformed", "insecure", "unapproved", "credentials"] as const) {
+  for (const scenario of ["missing", "malformed", "insecure", "unapproved", "credentials", "alternate_port"] as const) {
     test(`fails closed for a reused ${scenario} payment URL`, async ({ page, request }) => {
       // Given: an active T-Bank session has unusable persisted payment data.
       await configureScenario(request, scenario);

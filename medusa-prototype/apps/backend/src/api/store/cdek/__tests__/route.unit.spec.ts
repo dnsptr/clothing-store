@@ -31,6 +31,8 @@ describe("CDEK Store API Routes", () => {
     process.env.CDEK_CLIENT_SECRET = "test_secret";
     process.env.CDEK_API_BASE_URL = "https://api.edu.cdek.ru/v2";
     process.env.CDEK_FROM_CITY_CODE = "44";
+    process.env.CDEK_PVZ_PRICE_RUB = "350";
+    process.env.CDEK_COURIER_PRICE_RUB = "650";
   };
 
   const setCdekDisabledEnv = () => {
@@ -200,7 +202,7 @@ describe("CDEK Store API Routes", () => {
       expect(res.statusCode).toBe(503);
     });
 
-    it("calculates PVZ and courier tariffs with 0 customer_cost", async () => {
+    it("reports approved buyer prices separately from both carrier tariffs", async () => {
       setCdekEnabledEnv();
 
       jest.spyOn(CdekClient.prototype, "calculateTariff").mockImplementation(async ({ tariffCode }) => {
@@ -219,7 +221,8 @@ describe("CDEK Store API Routes", () => {
       expect(res.body).toEqual({
         pvz: expect.objectContaining({ delivery_sum: 250 }),
         courier: expect.objectContaining({ delivery_sum: 450 }),
-        customer_cost: 0,
+        customer_cost_pvz: 350,
+        customer_cost_courier: 650,
       });
     });
   });

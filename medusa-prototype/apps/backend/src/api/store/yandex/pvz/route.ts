@@ -2,7 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { z } from "zod";
 
 import {
-  getPublicYandexClient,
+  getPublicYandexProvider,
   PublicYandexGuardError,
   publicYandexGuard,
 } from "../../../../modules/yandex-delivery/public-api";
@@ -27,15 +27,16 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   if (!queryResult.success) {
     return res.status(400).json({ message: "Invalid request", points: [] });
   }
-  let client;
+  let provider;
   try {
-    client = getPublicYandexClient();
+    provider = getPublicYandexProvider();
   } catch {
     return res.status(503).json({ message: "Delivery service unavailable", points: [] });
   }
-  if (client === null) {
+  if (provider === null) {
     return res.status(503).json({ message: "Delivery service unavailable", points: [] });
   }
+  const { client } = provider;
   try {
     const { city, geo_id } = queryResult.data;
     const cacheKey = geo_id

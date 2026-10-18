@@ -1,4 +1,5 @@
 import {
+  authenticate,
   defineMiddlewares,
   validateAndTransformBody,
   validateAndTransformQuery,
@@ -16,6 +17,7 @@ import {
 } from "./admin/tbank/manual-review/validators";
 
 import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
+import { requireCheckoutAccess, requireInlineCartAddresses } from "./store/checkout-access-guard";
 
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
@@ -35,6 +37,34 @@ import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
  */
 export default defineMiddlewares({
   routes: [
+    { matcher: "/store/carts", method: "POST", middlewares: [requireInlineCartAddresses] },
+    { matcher: "/store/carts/:id", method: "POST", middlewares: [requireInlineCartAddresses] },
+    { matcher: "/store/carts/*", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/payment-status/*", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/payment-collections", method: "POST", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/payment-collections/*", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/shipping-options", method: "GET", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/yandex/calculate", method: "POST", middlewares: [requireCheckoutAccess] },
+    {
+      matcher: "/store/orders/:id",
+      method: "GET",
+      middlewares: [authenticate("customer", ["session", "bearer"], { allowUnauthenticated: true }), requireCheckoutAccess],
+    },
+    {
+      matcher: "/store/orders/:id/transfer/request",
+      method: "POST",
+      middlewares: [authenticate("customer", ["session", "bearer"], { allowUnauthenticated: true }), requireCheckoutAccess],
+    },
+    {
+      matcher: "/store/orders/:id/transfer/cancel",
+      method: "POST",
+      middlewares: [authenticate("customer", ["session", "bearer"], { allowUnauthenticated: true }), requireCheckoutAccess],
+    },
+    {
+      matcher: "/store/payment-collections/:id/payment-sessions",
+      method: "POST",
+      middlewares: [requirePaidPaymentProvider],
+    },
     {
       matcher: "/store/payment-collections/:id/payment-sessions",
       method: "POST",

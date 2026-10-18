@@ -40,6 +40,7 @@ const CART_FIELDS = [
   "total",
   "subtotal",
   "discount_total",
+  "shipping_methods.id",
   "shipping_total",
   "shipping_methods.amount",
   "shipping_methods.is_tax_inclusive",
@@ -120,6 +121,27 @@ export class TBankReceiptSource {
 
   async resolve(request: ReceiptRequest): Promise<ReceiptResolution> {
     const cartId = await this.cartIdForSession(request.sessionId);
+
+    const carts = await this.query.graph<ReceiptCart>({
+      entity: "cart",
+      fields: CART_FIELDS,
+      filters: { id: cartId },
+    });
+    const matchingCarts = carts.data.filter((candidate) => candidate.id === cartId);
+    if (matchingCarts.length !== 1) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "tbank: однозначная корзина для построения чека не найдена",
+      );
+    }
+    const cart = matchingCarts[0];
+    if (!cart) throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: корзина не найдена");
+    if (!cart.shipping_methods?.some((method) => typeof method.id === "string")) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "tbank: способ доставки не выбран — платёж нельзя создать",
+      );
+    }
     if (request.existingSnapshotEnvelope) {
       const snapshot = this.snapshotCodec.open(request.existingSnapshotEnvelope);
       if (snapshot.payload.sessionId !== request.sessionId || snapshot.payload.cartId !== cartId) {
@@ -141,20 +163,6 @@ export class TBankReceiptSource {
       };
     }
 
-    const carts = await this.query.graph<ReceiptCart>({
-      entity: "cart",
-      fields: CART_FIELDS,
-      filters: { id: cartId },
-    });
-    const matchingCarts = carts.data.filter((candidate) => candidate.id === cartId);
-    if (matchingCarts.length !== 1) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        "tbank: однозначная корзина для построения чека не найдена",
-      );
-    }
-    const cart = matchingCarts[0];
-    if (!cart) throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: корзина не найдена");
     const receipt = buildReceipt(cart, request.paymentAmountKopecks);
     return {
       cartId,

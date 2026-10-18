@@ -7,6 +7,7 @@ ENV_FILE="${PROJECT_DIR}/.env.production"
 BACKEND_HOST="${BACKEND_HOST:?BACKEND_HOST is required, e.g. api.example.com}"
 PUBLIC_BACKEND_URL="${PUBLIC_BACKEND_URL:-https://${BACKEND_HOST}}"
 STOREFRONT_URL="${STOREFRONT_URL:?STOREFRONT_URL is required, e.g. https://your-storefront.vercel.app}"
+HTTPS_PROXY_CIDRS="${HTTPS_PROXY_CIDRS:?Verified HTTPS load-balancer source CIDRs are required}"
 
 cd "${PROJECT_DIR}"
 
@@ -16,6 +17,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 BACKEND_HOST=${BACKEND_HOST}
 PUBLIC_BACKEND_URL=${PUBLIC_BACKEND_URL}
 STOREFRONT_URL=${STOREFRONT_URL}
+HTTPS_PROXY_CIDRS=${HTTPS_PROXY_CIDRS}
 
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 REDIS_PASSWORD=$(openssl rand -hex 24)
@@ -27,6 +29,10 @@ STORE_CORS=${STOREFRONT_URL}
 ADMIN_CORS=${PUBLIC_BACKEND_URL}
 AUTH_CORS=${STOREFRONT_URL},${PUBLIC_BACKEND_URL}
 EOF
+fi
+
+if ! grep -q '^HTTPS_PROXY_CIDRS=' "${ENV_FILE}"; then
+  printf '\nHTTPS_PROXY_CIDRS=%s\n' "${HTTPS_PROXY_CIDRS}" >> "${ENV_FILE}"
 fi
 
 if ! grep -q '^STOREFRONT_URL=' "${ENV_FILE}"; then

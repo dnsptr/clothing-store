@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { OwnCourierOptions } from "./config";
 
+// The agreed free-delivery promotion ends at midnight Moscow time.
+const FREE_DELIVERY_ENDS_AT = Date.UTC(2026, 11, 31, 21);
+
 const cleanedAddressSchema = z.tuple([z.object({
   result: z.string().trim().min(1),
   beltway_hit: z.literal("IN_MKAD"),
@@ -29,6 +32,10 @@ export async function ownCourierEligibility(
   address: CartAddress | null | undefined,
   options: OwnCourierOptions,
 ): Promise<OwnCourierEligibility> {
+  if (options.priceRub === 0 && Date.now() >= FREE_DELIVERY_ENDS_AT) {
+    return { eligible: false };
+  }
+
   if (!address?.address_1?.trim() || address.country_code?.toLowerCase() !== "ru") {
     return { eligible: false };
   }

@@ -8,6 +8,7 @@ const TEST_OPTIONS: YandexDeliveryProviderOptions = {
   token: "test_oauth_token",
   apiBaseUrl: "https://b2b-authproxy.taxi.yandex.net/api/b2b/platform",
   sourceStationId: "station_mario_mikke_moscow",
+  pvzPriceRub: 450,
 };
 
 describe("YandexDeliveryClient", () => {

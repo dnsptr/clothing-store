@@ -108,19 +108,35 @@ afterAll(() => {
 });
 
 describe("подписчик на новый заказ", () => {
-  it("читает заказ с суммами", async () => {
-    const { orderService, container } = makeContainer();
+
+  it("передаёт сотрудникам выбранный магазин и отправляет письмо покупателю самовывоза", async () => {
+    const pickup = {
+      ...ORDER,
+      shipping_total: 0,
+      total: ORDER.item_total,
+      shipping_methods: [{ name: "Самовывоз из магазина (Москва, бесплатно)" }],
+      shipping_address: {
+        ...ORDER.shipping_address,
+        postal_code: "",
+        address_1: "ТЦ «Небо», г. Москва, ул. Авиаторов, д. 3А",
+      },
+    };
+    const { notificationService, container } = makeContainer({
+      retrieveOrder: jest.fn().mockResolvedValue(pickup),
+    });
 
     await handler(makeArgs(container));
 
-    const [, config] = orderService.retrieveOrder.mock.calls[0];
-    // Без полей сумм в `select` модуль заказов не считает тоталы вообще, и в
-    // письме покупателю на месте итога стоял бы прочерк.
-    expect(config.select).toEqual(expect.arrayContaining(["total", "item_total", "shipping_total"]));
-    expect(config.relations).toEqual(
-      expect.arrayContaining(["items", "shipping_address", "shipping_methods"]),
-    );
+    expect(notificationService.createNotifications).toHaveBeenCalledTimes(2);
+    const staff = notificationFor(notificationService.createNotifications, "telegram");
+    expect(staff?.to).toBe("-1001234567890");
+    expect(staff?.content?.text).toContain("ТЦ «Небо», г. Москва, ул. Авиаторов, д. 3А");
+    expect(staff?.content?.text).toContain("Телефон: +7 900 000-00-00");
+
+    const customer = notificationFor(notificationService.createNotifications, "email");
+    expect(customer?.to).toBe(pickup.email);
   });
+
 
   it("шлёт сообщение сотрудникам и письмо покупателю", async () => {
     const { notificationService, container } = makeContainer();

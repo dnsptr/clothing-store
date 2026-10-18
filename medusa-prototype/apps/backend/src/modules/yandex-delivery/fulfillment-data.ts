@@ -89,8 +89,7 @@ export function confirmPvzSelection(data: Record<string, unknown>, points: reado
   if (!point || point.operatorId !== "market_l4g" || !["pickup_point", "terminal"].includes(point.type) ||
     !same(selection.pvz_name, point.name) ||
     !same(selection.pvz_address, point.address.full_address) ||
-    !same(selection.city, point.address.city) ||
-    (point.address.geo_id !== undefined && selection.geo_id !== point.address.geo_id)) {
+    !same(selection.city, point.address.city)) {
     throw new YandexFulfillmentDataError("unverified PVZ selection");
   }
   return {
@@ -106,6 +105,11 @@ export function confirmPvzSelection(data: Record<string, unknown>, points: reado
 
 export function buildCartPackage(items: unknown) {
   const parsedItems = parse(z.array(measuredItemSchema).min(1).max(100), items, "cart items");
+  // Individual package dimensions cannot describe one parcel containing
+  // several separately packed units; do not charge for an invented box.
+  if (parsedItems.length !== 1 || parsedItems[0].quantity !== 1) {
+    throw new YandexFulfillmentDataError("measured combined parcel is required");
+  }
   const measured = parsedItems.map((item) => {
     const physical = parse(dimensionsSchema, {
       weight: item.variant?.weight ?? item.variant?.product?.weight ?? item.product?.weight,

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { CdekPackage, CdekTariffResult } from "../../../../modules/cdek/lib/cdek-client";
 import { CDEK_TARIFF_COURIER, CDEK_TARIFF_PVZ } from "../../../../modules/cdek/provider-id";
+import { parseCdekEnvironment } from "../../../../modules/cdek/config";
 import {
   getPublicCdekClient,
   PublicCdekGuardError,
@@ -78,10 +79,13 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     });
 
+    const configuration = parseCdekEnvironment(process.env);
+    if (!configuration.enabled) return res.status(503).json({ message: "Delivery service unavailable" });
     return res.json({
       pvz: tariffs.pvz,
       courier: tariffs.courier,
-      customer_cost: 0,
+      customer_cost_pvz: tariffs.pvz ? configuration.options.pvzPriceRub : null,
+      customer_cost_courier: tariffs.courier ? configuration.options.courierPriceRub : null,
     });
   } catch (error) {
     if (error instanceof PublicCdekGuardError) {

@@ -36,8 +36,8 @@ if (!environment || typeof environment !== "object" || Array.isArray(environment
 const names = Object.keys(environment)
   .filter((name) => name.startsWith("TBANK_"))
   .sort();
-if (names.length !== 8) {
-  process.stderr.write(`Expected 8 TBANK variables, received ${names.length}\n`);
+if (names.length !== 9) {
+  process.stderr.write(`Expected 9 TBANK variables, received ${names.length}\n`);
   process.exit(1);
 }
 

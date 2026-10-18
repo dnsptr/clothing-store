@@ -5,6 +5,7 @@ import {
   isCheckoutEnabledForConfiguration,
   SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID,
 } from "./payment-config";
+import { getCartAccessToken, rememberCartAccessToken } from "./cartAccess";
 
 export { SYSTEM_DEFAULT_PAYMENT_PROVIDER_ID, TBANK_PAYMENT_PROVIDER_ID } from "./payment-config";
 
@@ -102,6 +103,7 @@ interface MedusaRegionsResponse {
 
 export interface MedusaCart {
   id: string;
+  currency_code?: string;
   total?: number | null;
   subtotal?: number | null;
   tax_total?: number | null;
@@ -158,6 +160,8 @@ export interface MedusaPaymentSession {
   id: string;
   provider_id: string;
   status: string;
+  amount: number;
+  currency_code: string;
   data: Record<string, unknown>;
 }
 
@@ -768,6 +772,8 @@ export async function medusaRequest<T>(
     signal?: AbortSignal;
     parse?: (data: unknown, endpoint: string) => T;
     revalidate?: number;
+    cartId?: string;
+    cartAccessToken?: string;
   } = {},
 ): Promise<T> {
   if (!backendUrl || !publishableKey) {
@@ -775,6 +781,14 @@ export async function medusaRequest<T>(
   }
 
   const endpoint = path.split("?")[0];
+  const cartPath = /^\/store\/(?:carts|payment-status)\/([^/?]+)/.exec(endpoint);
+  const queryCart = new URL(path, "http://store.local").searchParams.get("cart_id");
+  const bodyCart = isRecord(options.body) && typeof options.body.cart_id === "string" ? options.body.cart_id : null;
+  const cartId = options.cartId ?? cartPath?.[1] ?? queryCart ?? bodyCart;
+  const cartAccessToken = cartId ? options.cartAccessToken ?? getCartAccessToken(cartId) : null;
+  if (cartId && !cartAccessToken) {
+    throw new MedusaRequestError(endpoint, "Ключ доступа к корзине отсутствует. Создайте новую корзину.", 403);
+  }
 
   let response: Response;
   try {
@@ -783,6 +797,7 @@ export async function medusaRequest<T>(
       headers: {
         "x-publishable-api-key": publishableKey,
         ...(options.body ? { "content-type": "application/json" } : {}),
+        ...(cartAccessToken ? { "x-cart-access-token": cartAccessToken } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
@@ -995,8 +1010,14 @@ export async function createMedusaCart() {
   const response = await medusaRequest("/store/carts", {
     method: "POST",
     body: regionId ? { region_id: regionId } : {},
-    parse: parseCartResponse,
+    parse: (data, endpoint) => {
+      const root = expectRecord(data, endpoint, "$");
+      const token = expectString(root.cart_access_token, endpoint, "cart_access_token");
+      if (!/^[a-f0-9]{64}$/.test(token)) throw new MedusaContractError(endpoint, "cart_access_token", "is invalid");
+      return { ...parseCartResponse(data, endpoint), cart_access_token: token };
+    },
   });
+  rememberCartAccessToken(response.cart.id, response.cart_access_token);
   return response.cart;
 }
 
@@ -1042,10 +1063,6 @@ export async function updateMedusaCart(cartId: string, body: Record<string, unkn
   return response.cart;
 }
 
-/** Машинный идентификатор MVP-опции доставки (type.code в Medusa). Витрина
- * выбирает опцию по нему, а не по отображаемому имени: имя редактируется в
- * Admin и не является контрактом. Код проставляется скриптом импорта каталога. */
-export const MVP_SHIPPING_OPTION_CODE = "mvp-ru";
 
 export async function listMedusaShippingOptions(cartId: string) {
   // `amount` нужен, чтобы показать цену доставки ДО того, как способ выбран и
@@ -1058,10 +1075,14 @@ export async function listMedusaShippingOptions(cartId: string) {
   return response.shipping_options || [];
 }
 
-export async function addMedusaCartShippingMethod(cartId: string, optionId: string) {
+export async function addMedusaCartShippingMethod(
+  cartId: string,
+  optionId: string,
+  data: Readonly<Record<string, unknown>>,
+) {
   const response = await medusaRequest(`/store/carts/${cartId}/shipping-methods`, {
     method: "POST",
-    body: { option_id: optionId },
+    body: { option_id: optionId, data },
     parse: parseCartResponse,
   });
   return response.cart;
@@ -1081,7 +1102,7 @@ export async function createMedusaPaymentCollection(cartId: string) {
  * доходить нечему, но если UI-гейт когда-нибудь обойдут, отказ произойдёт
  * здесь, а не в виде неоплаченного заказа в админке.
  */
-export async function initializeMedusaPaymentSession(paymentCollectionId: string) {
+export async function initializeMedusaPaymentSession(paymentCollectionId: string, cartId: string) {
   if (!isCheckoutEnabled) {
     throw new Error(
       "Оплата не настроена: NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID не задан " +
@@ -1092,6 +1113,7 @@ export async function initializeMedusaPaymentSession(paymentCollectionId: string
   const endpoint = `/store/payment-collections/${paymentCollectionId}/payment-sessions`;
   const response = await medusaRequest(endpoint, {
     method: "POST",
+    cartId,
     body: { provider_id: medusaPaymentProviderId },
     parse: parseInitializedPaymentCollectionResponse,
   });
@@ -1125,11 +1147,13 @@ export type MedusaPaymentStatus =
 export async function getMedusaPaymentStatus(
   cartId: string,
   signal?: AbortSignal,
+  cartAccessToken?: string,
 ): Promise<MedusaPaymentStatus | null> {
   const endpoint = `/store/payment-status/${encodeURIComponent(cartId)}`;
   try {
     return await medusaRequest<MedusaPaymentStatus>(endpoint, {
       signal,
+      cartAccessToken,
       parse: parsePaymentStatusResponse,
     });
   } catch (error) {

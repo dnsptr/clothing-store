@@ -30,14 +30,16 @@ import {
   resolveDeliveryShippingOptions,
 } from "../modules/cdek/shipping-options";
 import { parseCdekEnvironment } from "../modules/cdek/config";
+import { CDEK_OPTION_COURIER, CDEK_OPTION_PVZ } from "../modules/cdek/provider-id";
 import { parsePochtaEnvironment } from "../modules/pochta/config";
 import { parseYandexDeliveryEnvironment } from "../modules/yandex-delivery/config";
+import { YANDEX_OPTION_PVZ } from "../modules/yandex-delivery/provider-id";
 import { parseOwnCourierEnvironment } from "../modules/own-courier/config";
 import { OWN_COURIER_OPTION, OWN_COURIER_RULE } from "../modules/own-courier/provider-id";
 
 const IMPORT_SOURCE = "mario-mikke-demo";
-// Поля варианта с весом и габаритами упаковки: по ним агрегатор доставки
-// считает тариф (справочник — в data/mario-mikke-catalog.ts).
+// Размеры упакованного товара берутся только из замера конкретного товара.
+// Null удаляет прежние категорийные оценки из существующих вариантов.
 const PACKAGING_FIELDS = ["weight", "length", "width", "height"] as const;
 const STARTER_HANDLES = new Set([
   "t-shirt",
@@ -46,14 +48,13 @@ const STARTER_HANDLES = new Set([
   "shorts",
 ]);
 
-// Вес и габариты лежат в колонках `real`, но в базах, поднятых до миграции
-// Medusa 20260301002050, это был `numeric`, а его драйвер отдаёт строкой.
-// Сравниваем через Number(), иначе на таких базах "1500" !== 1500, и импорт
-// на каждом прогоне переписывал бы те же самые цифры.
-const isSameMeasure = (existingValue: unknown, desiredValue: number): boolean =>
-  existingValue !== null &&
-  existingValue !== undefined &&
-  Number(existingValue) === desiredValue;
+// Старые базы могут отдавать numeric-колонки строками.
+const isSameMeasure = (existingValue: unknown, desiredValue: number | null): boolean =>
+  desiredValue === null
+    ? existingValue === null || existingValue === undefined
+    : existingValue !== null &&
+      existingValue !== undefined &&
+      Number(existingValue) === desiredValue;
 
 // Что мы читаем о существующем варианте, чтобы сверить упаковку. Меры —
 // unknown: query.graph отдаёт их из базы, а тип колонки за время жизни проекта
@@ -67,14 +68,8 @@ type ExistingVariantSnapshot = {
 };
 
 /**
- * Поля упаковки для обновления существующего варианта — или пустой объект,
- * если в базе уже те же цифры.
- *
- * Вес и габариты принадлежат каталогу: справочник упаковки — их единственный
- * источник истины, поэтому расхождение мы исправляем, а не сохраняем (правку
- * через Admin прогон перетрёт; уточнённые заказчиком цифры заводятся в
- * справочник). Но повторный импорт с тем же справочником не должен слать в БД
- * запись, которая ничего не меняет, — отсюда проверка на совпадение.
+ * Синхронизирует полный набор размеров. Для товара без замера очищает
+ * оценки из старого импорта, а не оставляет правдоподобный фиктивный тариф.
  */
 export function packagingFieldsToUpdate(
   existingVariant: Partial<Record<keyof VariantPackagingFields, unknown>>,
@@ -275,63 +270,31 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     fields: ["id", "name", "service_zone_id", "type.code"],
   });
 
-  // Сначала по машинному коду: display name редактируется в Admin, и поиск
-  // только по нему после переименования создал бы дубликат опции с тем же
-  // type.code (витрина выбирает по коду и могла бы молча получить дубль).
-  const ruShippingOption =
-    shippingOptions.find((option) => option.type?.code === "mvp-ru") ??
-    shippingOptions.find((option) => option.name === "MVP доставка по России");
-
-  if (!ruShippingOption) {
-    await createShippingOptionsWorkflow(container).run({
-      input: [
-        {
-          name: "MVP доставка по России",
-          price_type: "flat",
-          provider_id: "manual_manual",
-          service_zone_id: ruServiceZoneId,
-          shipping_profile_id: shippingProfile.id,
-          type: {
-            label: "MVP доставка",
-            description: "Тестовая доставка для локального MVP.",
-            code: "mvp-ru",
-          },
-          prices: [{ currency_code: "rub", amount: 0 }],
-          rules: [
-            { attribute: "enabled_in_store", value: "true", operator: "eq" },
-            { attribute: "is_return", value: "false", operator: "eq" },
-          ],
-        },
-      ],
-    });
-  } else {
-    // Идемпотентный upsert атрибутов существующей опции. type.code = "mvp-ru" —
-    // машинный идентификатор, по которому витрина выбирает опцию доставки
-    // (display name редактируется в Admin и контрактом не является); базы,
-    // засеянные до появления кода, получают его здесь.
-    const optionUpdate: {
-      service_zone_id?: string;
-      type?: { label: string; description: string; code: string };
-    } = {};
-    if (ruShippingOption.service_zone_id !== ruServiceZoneId) {
-      optionUpdate.service_zone_id = ruServiceZoneId;
-    }
-    if (ruShippingOption.type?.code !== "mvp-ru") {
-      optionUpdate.type = {
-        label: "MVP доставка",
-        description: "Тестовая доставка для локального MVP.",
-        code: "mvp-ru",
-      };
-    }
-    if (Object.keys(optionUpdate).length > 0) {
-      await fulfillmentModuleService.updateShippingOptions(
-        ruShippingOption.id,
-        optionUpdate,
-      );
+  // Старый тестовый бесплатный тариф и выключенные перевозчики должны
+  // исчезнуть из списка способов доставки. Исторические заказы сохраняем.
+  const activeCodes = new Set(deliveryOptionsToEnsure.map((option) => option.code));
+  const knownOptions = resolveDeliveryShippingOptions({
+    cdekEnabled: true, yandexEnabled: true, pochtaEnabled: true, ownCourierEnabled: true,
+  });
+  for (const existing of shippingOptions) {
+    if (
+      existing.type?.code === "mvp-ru" || existing.name === "MVP доставка по России" ||
+      knownOptions.some((option) =>
+        !activeCodes.has(option.code) && (existing.type?.code === option.code || existing.name === option.name))
+    ) {
+      await fulfillmentModuleService.updateShippingOptions(existing.id, {
+        rules: [
+          { attribute: "enabled_in_store", value: "false", operator: "eq" },
+          { attribute: "is_return", value: "false", operator: "eq" },
+        ],
+      });
     }
   }
 
 
+  const calculatedDeliveryCodes = new Set<string>([
+    CDEK_OPTION_PVZ, CDEK_OPTION_COURIER, YANDEX_OPTION_PVZ, OWN_COURIER_OPTION,
+  ]);
   for (const opt of deliveryOptionsToEnsure) {
     const existing = shippingOptions.find(
       (option) => option.type?.code === opt.code || option.name === opt.name,
@@ -341,7 +304,9 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
         input: [
           {
             name: opt.name,
-            price_type: "flat",
+            ...(calculatedDeliveryCodes.has(opt.code)
+              ? { price_type: "calculated" as const }
+              : { price_type: "flat" as const, prices: [{ currency_code: "rub", amount: 0 }] }),
             provider_id: opt.providerId,
             service_zone_id: ruServiceZoneId,
             shipping_profile_id: shippingProfile.id,
@@ -351,7 +316,7 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
               code: opt.code,
             },
             data: { id: opt.code },
-            prices: [{ currency_code: "rub", amount: 0 }],
+
             rules: [
               { attribute: "enabled_in_store", value: "true", operator: "eq" },
               { attribute: "is_return", value: "false", operator: "eq" },
@@ -364,14 +329,14 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
       });
     } else {
       await fulfillmentModuleService.updateShippingOptions(existing.id, {
-        ...(opt.code === OWN_COURIER_OPTION ? {
-          price_type: "flat" as const,
-          rules: [
-            { attribute: "enabled_in_store", value: "true", operator: "eq" as const },
-            { attribute: "is_return", value: "false", operator: "eq" as const },
-            { attribute: OWN_COURIER_RULE, value: "true", operator: "eq" as const },
-          ],
-        } : {}),
+        price_type: calculatedDeliveryCodes.has(opt.code) ? "calculated" : "flat",
+        rules: [
+          { attribute: "enabled_in_store", value: "true", operator: "eq" },
+          { attribute: "is_return", value: "false", operator: "eq" },
+          ...(opt.code === OWN_COURIER_OPTION
+            ? [{ attribute: OWN_COURIER_RULE, value: "true", operator: "eq" as const }]
+            : []),
+        ],
         provider_id: opt.providerId,
         service_zone_id: ruServiceZoneId,
         type: {
@@ -567,9 +532,8 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
       { title: "Размер", values: sizes },
       { title: "Цвет", values: colorNames },
     ];
-    // Упаковка одинакова для всех вариантов товара: размер и цвет на вес
-    // отправления влияют слабее, чем точность самих оценок в справочнике.
-    // Разнести по размерам можно будет, когда заказчик пришлёт замеры.
+    // Пока упаковка не измерена, не переносим оценку категории в вариант:
+    // провайдер доставки отвергнет отсутствующие физические атрибуты.
     const variantPackaging = resolveVariantPackaging(product);
     const variants = sizes.flatMap((size) =>
       product.colors.map((color, colorIndex) => ({
@@ -582,9 +546,7 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
         prices: [{ amount: product.price, currency_code: "rub" }],
         manage_inventory: true,
         allow_backorder: false,
-        // Вес (граммы) и габариты (сантиметры) упакованной вещи — по ним
-        // агрегатор доставки считает тариф. Без них расчёт уезжает на дефолты
-        // плагина (10×10×10 см, 20 г), то есть на заведомо неверную цену.
+        // Только измеренная упаковка; null сохраняет невозможность расчёта.
         ...variantPackaging,
       })),
     );
@@ -749,8 +711,8 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
     // Prices upsert into the variant's existing price set, so re-runs do not
     // create duplicate prices.
     //
-    // Вес и габариты — такое же поле каталога (см. packagingFieldsToUpdate):
-    // расхождение с базой исправляем, совпадение не трогаем.
+    // Фактические измерения (либо null) принадлежат этому каталогу;
+    // старые категорийные оценки удаляем при согласованном повторном импорте.
     type ExistingVariantSnapshot = {
       id: string;
       weight: unknown;
@@ -796,7 +758,7 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
             prices: variant.prices,
             manage_inventory: true,
             allow_backorder: false,
-            // Новый вариант существующего товара тоже уезжает в расчёт тарифа.
+            // Не создаём выдуманные габариты нового варианта.
             ...product.variantPackaging,
           }))
       : [];

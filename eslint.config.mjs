@@ -13,6 +13,17 @@ const eslintConfig = defineConfig([
     "build/**",
     "medusa-prototype/**",
     "next-env.d.ts",
+    // Local worktrees and tool output are not application source.
+    ".slim/**",
+    ".claude/worktrees/**",
+    ".omo/**",
+    ".opencode/**",
+    ".npm-cache/**",
+    ".playwright-mcp/**",
+    ".vercel/**",
+    "coverage/**",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 
