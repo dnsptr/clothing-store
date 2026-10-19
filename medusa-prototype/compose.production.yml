@@ -113,12 +113,12 @@ services:
     network_mode: host
     volumes:
       # Everything the client uploads through the admin lands here (the local
-      # file provider writes to <cwd>/static, and the image WORKDIR is /app).
+      # file provider writes to <cwd>/static, under the backend workspace).
       # Without this bind mount the entire media library is destroyed by the
       # next `deploy.sh`, because that rebuilds the image and recreates the
       # container. Bound to the host rather than a named volume so the files can
       # be copied off-site alongside ./backups.
-      - ./static:/app/static
+      - ./static:/app/apps/backend/static
 
   caddy:
     image: caddy:2-alpine

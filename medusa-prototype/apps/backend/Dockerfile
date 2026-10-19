@@ -1,4 +1,5 @@
-FROM node:22.14.0-bookworm-slim AS builder
+ARG NODE_VERSION=22.23.2
+FROM node:${NODE_VERSION}-bookworm-slim AS builder
 
 WORKDIR /workspace
 
@@ -8,18 +9,25 @@ RUN npm config set maxsockets 5 \
   && npm ci --no-audit --no-fund
 
 COPY apps/backend apps/backend
-RUN npm --workspace @dtc/backend run build
+RUN NODE_ENV=production npm --workspace @dtc/backend run build
 
-# The generated server package is an independent npm root. Preserve the
-# security overrides there and lock the production install before copying it.
-RUN node -e 'const fs = require("node:fs"); const path = "apps/backend/.medusa/server/package.json"; const pkg = JSON.parse(fs.readFileSync(path, "utf8")); pkg.overrides = require("./package.json").overrides; fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");' \
-  && npm --prefix apps/backend/.medusa/server install \
-    --package-lock-only --ignore-scripts --workspaces=false --no-audit --no-fund
-
-FROM node:22.14.0-bookworm-slim AS runner
+FROM node:${NODE_VERSION}-bookworm-slim AS production-deps
 
 ENV NODE_ENV=production
-WORKDIR /app
+WORKDIR /workspace
+# Reuse the reviewed workspace lock and its security overrides. Resolving a
+# second standalone lock during the build can produce a tree npm ci rejects.
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json apps/backend/package.json
+RUN npm config set maxsockets 5 \
+  && npm ci --omit=dev --no-audit --no-fund \
+  && npm cache clean --force
+COPY --from=builder /workspace/apps/backend/.medusa/server ./apps/backend
+
+FROM node:${NODE_VERSION}-bookworm-slim AS runner
+
+ENV NODE_ENV=production
+WORKDIR /app/apps/backend
 
 COPY apps/backend/certificates/ /usr/local/share/ca-certificates/
 RUN apt-get update \
@@ -28,10 +36,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
-COPY --from=builder /workspace/apps/backend/.medusa/server ./
-RUN npm ci --omit=dev --no-audit --no-fund \
-  && npm cache clean --force \
-  && chown -R node:node /app
+COPY --chown=node:node --from=production-deps /workspace/apps/backend ./
+COPY --chown=node:node --from=production-deps /workspace/package.json /workspace/package-lock.json /app/
+COPY --chown=node:node --from=production-deps /workspace/node_modules /app/node_modules
+RUN mkdir -p /app/apps/backend/static \
+  && chown node:node /app/apps/backend /app/apps/backend/static
 
 # Процесс не должен быть root: на этом хосте контейнер работает в
 # `network_mode: host` и рядом лежат `.env.production` с секретами и каталог с

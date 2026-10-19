@@ -62,10 +62,12 @@
   и поддельного PNG, HTTPS-редирект до Basic auth, `401` для панели без
   Basic auth и `413` для слишком большой загрузки.
 - Next.js обновлён до `16.4.0`, Playwright до `1.64.0`; обновлены уязвимые
-  backend-зависимости. Docker build переносит npm overrides в отдельный
-  compiled-server package и фиксирует его установку через lockfile/`npm ci`.
-  Сборка backend и админки прошла; полный Docker image не собирался —
-  локальный Docker daemon недоступен.
+  backend-зависимости. 19 октября полный Docker image собран и запущен:
+  Node `22.23.2`, Admin с `NODE_ENV=production`, runtime-зависимости через
+  `npm ci --omit=dev` из корневого workspace lockfile с security-overrides.
+  Проверены PostgreSQL 15, Redis 7, checkout, Caddy и сохранность заказа/медиа
+  после пересоздания контейнера. Подробности —
+  [в Docker-отчёте](DEPLOYMENT_2026-09-05.md#полный-docker-image--19-октября-2026).
 - Аудит зависимостей **не нулевой**: остаются advisory в транзитивных
   инструментах и админке Medusa. Перечень и границы проверки —
   [в deployment guide](../medusa-prototype/DEPLOYMENT.md).

@@ -470,19 +470,41 @@ suite passed all 37 scenarios, including confirmed-payment reload with a
 
 ## Dependency security policy and residual advisories
 
-The monorepo `overrides` also apply to the generated production server:
-the Docker builder copies that policy into its package, generates its own
-lockfile, and the runner uses `npm ci --omit=dev`. Do not replace that step
-with an unconstrained install; the generated package is a separate npm root.
+Production dependencies are installed in the original workspace layout with
+`npm ci --omit=dev`, using the repository's root `package-lock.json` and
+security `overrides`. Do not generate a second standalone server lock during
+the image build: npm produced a `picomatch` tree that its own `ci` rejected.
+The final image retains both the root dependency tree and any backend-local
+dependencies, alongside the compiled server and Admin assets.
 
 The 12 October isolated check passed backend/admin compilation, storefront
 and backend typechecks, five PostgreSQL checkout/access/upload regressions
 and three delivery-quote/payment-session policy tests. The browser exercised
 checkout with an offline bank `Init`, rejected an unsigned success claim,
 then displayed the paid order and cleared the cart after a signed webhook.
-No real payment or shipment was made. The complete Docker image was not
-built: the local Docker daemon was unavailable; the generated-server policy
-command and its independently resolved runtime lock were exercised.
+No real payment or shipment was made. At that 12 October check, the complete
+Docker image was not built because the local daemon was unavailable.
+The full-image verification on 19 October supersedes that packaging limitation.
+
+The Dockerfile now pins Node `22.23.2` and explicitly sets `NODE_ENV=production`
+for `medusa build`: this CLI otherwise defaults the build environment to
+development. Setting it only in the runner does not fix already-built Admin
+assets. The final Admin login was checked in Chromium; the previous React
+development/i18next debug console output was absent.
+
+The runtime working directory is `/app/apps/backend`. The matching production
+Compose mounts the existing host `./static` at `/app/apps/backend/static`;
+the host media directory and its UID 1000 ownership policy are unchanged.
+Release or roll back the Dockerfile/image and Compose volume mapping together.
+
+The final local image `mm-backend-smoke:796c1c8-dockerfix`
+(`sha256:d691a9e9989daf94b18930ac5ff3ccaccd8b35bf89d09c2e945d4ce8225c9a0d`)
+passed compiled migrations and a repeat migration, HTTP checkout with an
+offline bank, access/upload/refund guards, container recreation with persisted
+order/media, and the actual Caddy ingress checks. Production Compose also
+passed `config --quiet` using synthetic environment values.
+See the [full Docker verification report](../docs/DEPLOYMENT_2026-09-05.md#полный-docker-image--19-октября-2026)
+for evidence and limits; this was not a production deployment or a live charge.
 
 Registry advisory lookup is **not clean**. These packages remain in the
 resolved Medusa runtime tree; inclusion alone does not prove a reachable
