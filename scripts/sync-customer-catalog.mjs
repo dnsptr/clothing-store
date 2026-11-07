@@ -126,7 +126,6 @@ if (home) {
     await request(existing?`/admin/content/slides/${existing.id}`:"/admin/content/slides",body);
   }
   for (const existing of owned.filter(s=>!slides.some(d=>d.section===s.section&&d.rank===s.rank))) await request(`/admin/content/slides/${existing.id}`,{is_active:false});
-  for (const existing of slideData.slides.filter(s=>s.section==="store" && /^(Магазин 0\d|Онлайн)$/.test(s.title))) await request(`/admin/content/slides/${existing.id}`,{is_active:false});
   console.log(`HOME ${slides.length} slides updated`);
 }
 console.log(JSON.stringify({updated,mode:publish?"preview":"stage",inventorySeeded:false}));
