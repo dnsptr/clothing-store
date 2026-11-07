@@ -159,12 +159,14 @@
 
 .colorList {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
 
 .colorDot {
   position: relative;
+  flex: 0 0 34px;
   width: 34px;
   height: 34px;
   border: 1px solid rgba(79, 62, 53, 0.14);

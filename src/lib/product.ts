@@ -38,5 +38,6 @@ export interface Product {
   variants: ProductVariant[];
   available: boolean;
   isNew?: boolean;
+  isPreview?: boolean;
   isSoldOut?: boolean;
 }

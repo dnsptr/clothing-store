@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse, MedusaNextFunction } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
-import { profileProblems, readProfile } from "../../lib/catalog-profile"
+import { publicationProfileProblems, readProfile } from "../../lib/catalog-profile"
 import { measurementProblems } from "../../lib/catalog-quality"
 
 // Legacy cards can still be edited, but explicit publication requires a profile.
@@ -23,11 +23,13 @@ export async function catalogProfileGuard(req: MedusaRequest, res: MedusaRespons
     res.status(400).json({ message: "Поле карточки превышает 4000 символов" }); return
   }
   if ((body.status ?? current?.status) !== "published") { next(); return }
-  const missing = profileProblems(profile)
+  const isPreview = (body.metadata?.storefront_preview ?? current?.metadata?.storefront_preview) === true
+  const missing = publicationProfileProblems(profile, isPreview)
   if (!(body.title ?? current?.title)?.trim()) missing.push("Наименование")
   if (!(body.images ?? current?.images)?.length) missing.push("Фото товара")
   if (!(body.categories ?? current?.categories)?.length) missing.push("Категория")
   const variants = body.variants ?? current?.variants ?? []
+  if (isPreview && variants.some((variant: any) => variant.manage_inventory !== true || variant.allow_backorder === true)) missing.push("Предпросмотр: включите учёт остатков и запретите предзаказ")
   if (!variants.length) missing.push("Варианты, размеры и цены")
   if (variants.some((variant: any) => !(variant.prices ?? variant.price_set?.prices)?.some((price: any) => price.currency_code === "rub" && Number(price.amount) > 0))) missing.push("Рублёвая цена вариантов")
   if (missing.length) { res.status(400).json({ message: `Карточка не готова к публикации: ${missing.join(", ")}` }); return }

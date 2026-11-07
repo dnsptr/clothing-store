@@ -58,6 +58,15 @@ test('measurements expose only valid product data', async () => {
   assert.equal(JSON.stringify(product.measurements), JSON.stringify([{ size: 'ONE SIZE', label: 'Length', value: '65.5' }]));
 });
 
+test('preview products remain visible but none of their variants can be purchased', async () => {
+  const { api } = client([fixture({ metadata: { storefront_preview: true } })]);
+  const product = await api.fetchMedusaProductByFrontendId('prod_admin');
+  assert.equal(product.isPreview, true);
+  assert.equal(product.price, 1500);
+  assert.equal(product.available, false);
+  assert.ok(product.variants.every(variant => variant.available === false));
+});
+
 test('admin-created product resolves by id, not a fabricated handle', async () => {
   const { api, requests } = client();
   const product = await api.fetchMedusaProductByFrontendId('prod_admin');

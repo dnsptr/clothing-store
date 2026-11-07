@@ -62,6 +62,7 @@ export default function ProductCard({
           <Link href={productHref}>{product.name}</Link>
         </Heading>
         <span className={styles.price}>{formatPrice(product.price)}</span>
+        {product.isPreview && <span className={styles.previewNote}>Скоро в продаже</span>}
 
         {product.colors.length > 0 && (
           <div className={styles.colors}>

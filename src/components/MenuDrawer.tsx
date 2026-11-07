@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "../context/CartContext";
-import { MOCK_OUTFITS } from "../data/mockData";
+import { STOREFRONT_OUTFITS } from "../lib/collections";
+import { storefrontDataMode } from "../lib/medusa";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import {
@@ -93,7 +94,7 @@ export default function MenuDrawer() {
                 <span>{CATALOG_SECTIONS.new.label}</span>
               </li>
 
-              <li
+              {storefrontDataMode === "mock" && <li
                 className={`${styles.menuItem} ${styles.menuItemSale} ${
                   activeSubMenu === "sale" ? styles.menuItemActive : ""
                 }`}
@@ -102,7 +103,7 @@ export default function MenuDrawer() {
               >
                 <span>Sale</span>
                 <Chevron />
-              </li>
+              </li>}
 
               <li
                 className={`${styles.menuItem} ${activeSubMenu === "clothing" ? styles.menuItemActive : ""}`}
@@ -113,22 +114,22 @@ export default function MenuDrawer() {
                 <Chevron />
               </li>
 
-              <li
+              {storefrontDataMode === "mock" && <li
                 className={`${styles.menuItem} ${activeSubMenu === "shoes" ? styles.menuItemActive : ""}`}
                 onMouseEnter={() => setActiveSubMenu("shoes")}
                 onClick={() => setActiveSubMenu("shoes")}
               >
                 <span>{CATALOG_SECTIONS.shoes.label}</span>
                 <Chevron />
-              </li>
+              </li>}
 
-              <li
+              {storefrontDataMode === "mock" && <li
                 className={styles.menuItem}
                 onMouseEnter={() => setActiveSubMenu(null)}
                 onClick={() => go(CATALOG_SECTIONS.accessories.href)}
               >
                 <span>{CATALOG_SECTIONS.accessories.label}</span>
-              </li>
+              </li>}
 
               <li
                 className={`${styles.menuItem} ${activeSubMenu === "materials" ? styles.menuItemActive : ""}`}
@@ -141,7 +142,7 @@ export default function MenuDrawer() {
 
               <li className={styles.menuDivider} />
 
-              {MOCK_OUTFITS.map((outfit) => (
+              {STOREFRONT_OUTFITS.map((outfit) => (
                 <li
                   key={outfit.id}
                   className={`${styles.menuItem} ${styles.menuItemCollection}`}

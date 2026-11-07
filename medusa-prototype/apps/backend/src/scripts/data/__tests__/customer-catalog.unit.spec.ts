@@ -7,11 +7,11 @@ describe("customer catalog source", () => {
     expect(CUSTOMER_CATALOG.find(row => row.article === "1453-1")).toBeDefined()
     expect(CUSTOMER_CATALOG.find(row => row.article === "1857-1")).toBeDefined()
   })
-  it("keeps missing customer data missing", () => {
-    expect(CUSTOMER_CATALOG.filter(row => row.price === undefined).map(row => row.article)).toEqual(["2018", "4262", "2014"])
-    const incomplete = CUSTOMER_CATALOG.find(row => row.article === "1760")
-    expect(incomplete?.colors).toBeUndefined()
-    expect(incomplete?.composition).toBeUndefined()
+  it("includes the prices and characteristics supplied in the updated workbook", () => {
+    expect(CUSTOMER_CATALOG.every(row => row.price && row.price > 0)).toBe(true)
+    expect(CUSTOMER_CATALOG.find(row => row.article === "2018")?.price).toBe(6400)
+    expect(parseCustomerColors(CUSTOMER_CATALOG.find(row => row.article === "1760")?.colors)).toHaveLength(2)
+    expect(CUSTOMER_CATALOG.find(row => row.article === "1760")?.composition).toBe("70% шерсть, 30% акрил")
   })
   it("splits punctuation-delimited colors without duplicates", () => {
     expect(parseCustomerColors("хаки. Черный, хаки")).toEqual(["хаки", "Черный"])

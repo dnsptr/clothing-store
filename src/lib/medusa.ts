@@ -408,7 +408,7 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
       sku: variant.sku ?? null,
       options: getVariantOptions(variant, optionTitlesById),
       price,
-      available: isVariantAvailable(variant),
+      available: metadata.storefront_preview !== true && isVariantAvailable(variant),
     }];
   });
   const options = (product.options || []).flatMap((option) => {
@@ -477,6 +477,7 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
     variants,
     available,
     isNew: Boolean(metadata.is_new),
+    isPreview: metadata.storefront_preview === true,
     isSoldOut: !available,
   };
 }

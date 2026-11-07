@@ -10,6 +10,17 @@ async function check(body: Record<string, unknown>, current?: Record<string, unk
 }
 
 describe("publication guard", () => {
+  it("permits incomplete legal fields only in a non-purchasable preview", async () => {
+    const profile = Object.fromEntries(PROFILE_FIELDS.map(([key]) => [key, "filled"]))
+    profile.manufactured_at = ""; profile.registry_url = ""
+    const body = { status: "published", title: "Product", metadata: { storefront_preview: true, catalog_profile: profile },
+      images: [{ url: "https://example.org/photo.jpg" }], categories: [{ id: "pcat_1" }],
+      variants: [{ manage_inventory: true, allow_backorder: false, prices: [{ currency_code: "rub", amount: 1990 }] }],
+    }
+    expect((await check(body)).next).toHaveBeenCalled()
+    expect((await check({ ...body, metadata: { ...body.metadata, storefront_preview: false } })).res.status).toHaveBeenCalledWith(400)
+    expect((await check({ ...body, variants: [{ ...body.variants[0], allow_backorder: true }] })).res.status).toHaveBeenCalledWith(400)
+  })
   it("rejects invalid measurements even on drafts", async () => {
     const result = await check({ status: "draft", metadata: { catalog_profile: { measurements: [{ size: "S", label: "Length", value: "-5" }] } } })
     expect(result.res.status).toHaveBeenCalledWith(400)
