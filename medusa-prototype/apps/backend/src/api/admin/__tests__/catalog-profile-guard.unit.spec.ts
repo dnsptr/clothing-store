@@ -10,7 +10,7 @@ async function check(body: Record<string, unknown>, current?: Record<string, unk
 }
 
 describe("publication guard", () => {
-  it("permits incomplete legal fields only in a non-purchasable preview", async () => {
+  it("permits missing legal fields in ordinary publication as well as preview", async () => {
     const profile = Object.fromEntries(PROFILE_FIELDS.map(([key]) => [key, "filled"]))
     profile.manufactured_at = ""; profile.registry_url = ""
     const body = { status: "published", title: "Product", metadata: { storefront_preview: true, catalog_profile: profile },
@@ -18,7 +18,7 @@ describe("publication guard", () => {
       variants: [{ manage_inventory: true, allow_backorder: false, prices: [{ currency_code: "rub", amount: 1990 }] }],
     }
     expect((await check(body)).next).toHaveBeenCalled()
-    expect((await check({ ...body, metadata: { ...body.metadata, storefront_preview: false } })).res.status).toHaveBeenCalledWith(400)
+    expect((await check({ ...body, metadata: { ...body.metadata, storefront_preview: false } })).next).toHaveBeenCalled()
     expect((await check({ ...body, variants: [{ ...body.variants[0], allow_backorder: true }] })).res.status).toHaveBeenCalledWith(400)
   })
   it("rejects invalid measurements even on drafts", async () => {
@@ -46,8 +46,18 @@ describe("publication guard", () => {
   it("does not block ordinary legacy edits without a managed profile", async () => {
     expect((await check({ title: "Changed" }, { status: "published" })).next).toHaveBeenCalled()
   })
-  it("requires the template for explicit publication from native admin", async () => {
+  it("requires the basic product data for explicit publication from native admin", async () => {
     expect((await check({ status: "published" })).res.status).toHaveBeenCalledWith(400)
+  })
+  it("allows empty descriptive fields but still rejects missing prices", async () => {
+    const body = { status: "published", title: "Product", metadata: { catalog_profile: {} },
+      images: [{ url: "https://example.org/photo.jpg" }], categories: [{ id: "pcat_1" }],
+      variants: [{ manage_inventory: false, prices: [{ currency_code: "rub", amount: 1990 }] }],
+    }
+    expect((await check(body)).next).toHaveBeenCalled()
+    expect((await check({ ...body, variants: [{ manage_inventory: false, prices: [] }] })).res.status).toHaveBeenCalledWith(400)
+    expect((await check({ ...body, metadata: { catalog_profile: { registry_url: "javascript:alert(1)" } } })).res.status).toHaveBeenCalledWith(400)
+    expect((await check({ ...body, metadata: { catalog_profile: { manufactured_at: "13.2026" } } })).res.status).toHaveBeenCalledWith(400)
   })
   it("prevents clearing metadata to bypass the guard", async () => {
     const result = await check({ metadata: null }, { metadata: { catalog_profile: {} }, status: "published" })

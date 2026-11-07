@@ -63,6 +63,8 @@ for (const row of rows) {
   const product = byHandle.get(`mario-mikke-${row.article.toLowerCase()}`);
   if (!product) throw new Error(`Expected existing customer draft ${row.article}`);
   if (product.metadata?.import_source !== "mario-mikke-customer-sheet") throw new Error(`Unexpected owner: ${row.article}`);
+  const preview = publish || product.metadata?.storefront_preview === true;
+  const untracked = !preview && product.metadata?.catalog_inventory_mode === "untracked_until_1c";
   const colors = parseCustomerColors(row.colors);
   const oldOptions = new Map(product.options.map(o=>[o.title,o]));
   for (const [title,desired] of [["Размер",["ONE SIZE"]],["Цвет",colors]]) {
@@ -76,7 +78,7 @@ for (const row of rows) {
   for (const [index,color] of colors.entries()) {
     const sku = customerVariantSku(row.article,index);
     const existing=oldVariants.get(sku);
-    const variant = {title:`ONE SIZE / ${color}`,manage_inventory:true,allow_backorder:false,prices:[...(existing?.prices ?? []).filter(p=>p.currency_code!=="rub").map(p=>({currency_code:p.currency_code,amount:p.amount})),{currency_code:"rub",amount:row.price}]};
+    const variant = {title:`ONE SIZE / ${color}`,manage_inventory:preview?true:untracked?false:existing?.manage_inventory??true,allow_backorder:preview?false:existing?.allow_backorder??false,prices:[...(existing?.prices ?? []).filter(p=>p.currency_code!=="rub").map(p=>({currency_code:p.currency_code,amount:p.amount})),{currency_code:"rub",amount:row.price}]};
     if (existing) update.push({id:existing.id,...variant});
     else create.push({...variant,sku,options:{Размер:"ONE SIZE",Цвет:color}});
   }
@@ -91,7 +93,7 @@ for (const row of rows) {
     title:`${row.name} ${row.article}`, status:publish?"published":product.status,
     ...dimensions,images:images.map(url=>({url})),thumbnail:images[0],collection_id:collection.id,
     categories:[{id:categories.get(row.category).id},...(cardigan?[{id:categories.get("cardigans").id}]:[])],
-    metadata:{...product.metadata,catalog_profile:profile,storefront_preview:true,uses_placeholder_image:!photos.has(row.article.split("-")[0]),import_source_date:"2026-11-07",is_new:true,material_slugs:[...(row.composition?.includes("шерсть")?["wool"]:[]),...(row.composition?.includes("хлопок")?["cotton"]:[]),...(row.composition?.includes("вискоза")?["viscose"]:[])],colors:colors.map(name=>({name,hex:hex(name.split("/")[0])}))},
+    metadata:{...product.metadata,catalog_profile:profile,storefront_preview:preview,uses_placeholder_image:!photos.has(row.article.split("-")[0]),import_source_date:"2026-11-07",is_new:true,material_slugs:[...(row.composition?.includes("шерсть")?["wool"]:[]),...(row.composition?.includes("хлопок")?["cotton"]:[]),...(row.composition?.includes("вискоза")?["viscose"]:[])],colors:colors.map(name=>({name,hex:hex(name.split("/")[0])}))},
   });
   console.log(`UPDATED ${row.article} (${++updated}/${rows.length})`);
 }

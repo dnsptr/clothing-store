@@ -39,7 +39,6 @@ export function profileProblems(profile: CatalogProfile): string[] {
 
 export const normalizeSize = (value: string) => /^(os|one\s*size)$/i.test(value.trim()) ? "ONE SIZE" : value.trim()
 
-export function publicationProfileProblems(profile: CatalogProfile, preview: boolean): string[] {
-  const previewOptional = ["Дата изготовления (ММ.ГГГГ)", "Ссылка на запись в реестре"]
-  return profileProblems(profile).filter(problem => !preview || !previewOptional.includes(problem))
+export function publicationProfileProblems(profile: CatalogProfile): string[] {
+  return profileProblems(profile).filter(problem => !PROFILE_FIELDS.some(([, label]) => label === problem))
 }

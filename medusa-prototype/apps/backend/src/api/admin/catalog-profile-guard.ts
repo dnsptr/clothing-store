@@ -3,7 +3,7 @@ import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { publicationProfileProblems, readProfile } from "../../lib/catalog-profile"
 import { measurementProblems } from "../../lib/catalog-quality"
 
-// Legacy cards can still be edited, but explicit publication requires a profile.
+// Publication requires sellable variants; missing descriptive fields are warnings.
 export async function catalogProfileGuard(req: MedusaRequest, res: MedusaResponse, next: MedusaNextFunction) {
   const body = (req.body ?? {}) as Record<string, any>
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
@@ -24,7 +24,7 @@ export async function catalogProfileGuard(req: MedusaRequest, res: MedusaRespons
   }
   if ((body.status ?? current?.status) !== "published") { next(); return }
   const isPreview = (body.metadata?.storefront_preview ?? current?.metadata?.storefront_preview) === true
-  const missing = publicationProfileProblems(profile, isPreview)
+  const missing = publicationProfileProblems(profile)
   if (!(body.title ?? current?.title)?.trim()) missing.push("Наименование")
   if (!(body.images ?? current?.images)?.length) missing.push("Фото товара")
   if (!(body.categories ?? current?.categories)?.length) missing.push("Категория")

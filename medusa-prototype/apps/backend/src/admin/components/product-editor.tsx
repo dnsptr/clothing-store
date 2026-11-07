@@ -4,7 +4,7 @@ import { ArrowUpMini, ArrowDownMini, Trash } from "@medusajs/icons"
 import { Badge, Button, Heading, Input, Label, Textarea, toast } from "@medusajs/ui"
 import { sdk } from "../lib/sdk"
 import { resolveMediaPreviewUrl } from "../lib/media"
-import { PROFILE_FIELDS, publicationProfileProblems, readProfile, type CatalogProfile } from "../../lib/catalog-profile"
+import { PROFILE_FIELDS, profileProblems, publicationProfileProblems, readProfile, type CatalogProfile } from "../../lib/catalog-profile"
 import { applyProfileTemplate, readMeasurements, measurementProblems, type Measurement } from "../../lib/catalog-quality"
 
 interface ProductRow {
@@ -77,11 +77,12 @@ export const ProductEditor = ({ id }: { id: string }) => {
   }
   const missing = [
     ...measurementProblems(measurements),
-    ...(!title.trim() ? ["Наименование"] : []), ...publicationProfileProblems(profile, preview),
+    ...(!title.trim() ? ["Наименование"] : []), ...publicationProfileProblems(profile),
     ...(!images.length ? ["Фото товара"] : []), ...(!categoryIds.length ? ["Категория"] : []),
     ...(!product?.variants?.length ? ["Варианты, размеры и цены"] : []),
     ...(product?.variants?.some((variant) => !variant.prices?.some((price) => price.currency_code === "rub" && price.amount > 0)) ? ["Рублёвая цена для каждого варианта"] : []),
   ]
+  const incompleteDetails = profileProblems(profile).filter(problem => !missing.includes(problem))
 
   async function save(status: "draft" | "published") {
     if (!product) return
@@ -230,6 +231,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
     </div>
     <div className="border-ui-border-base space-y-3 border-t pt-4">
       {!!missing.length && <details><summary>Не заполнено: {missing.length}</summary><ul className="list-disc pl-5 text-sm">{missing.map((item) => <li key={item}>{item}</li>)}</ul></details>}
+      {!!incompleteDetails.length && <details><summary>Дополнительные сведения не заполнены: {incompleteDetails.length}</summary><ul className="list-disc pl-5 text-sm">{incompleteDetails.map(item => <li key={item}>{item}</li>)}</ul></details>}
       {!labels.length && <p className="text-ui-fg-subtle text-sm">Фото ярлыков ещё не добавлены.</p>}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={busy} onClick={() => void save("draft")}>{product.status === "published" ? "Снять с публикации и сохранить" : "Сохранить черновик"}</Button><Button disabled={busy || missing.length > 0} onClick={() => void save("published")}>{product.status === "published" ? "Сохранить опубликованным" : "Опубликовать"}</Button>{dirty && <Badge>Есть несохранённые изменения</Badge>}</div>
     </div>
