@@ -993,6 +993,15 @@ export async function fetchMedusaCollections(signal?: AbortSignal): Promise<{ id
 
 export async function createMedusaCart() {
   const regionId = await getRussianRegionId();
+  if (typeof window !== "undefined") {
+    const response = await fetch("/api/account/cart", {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(regionId ? { region_id: regionId } : {}),
+    });
+    if (!response.ok) throw new MedusaRequestError("/api/account/cart", "Не удалось создать корзину. Если сессия истекла, войдите ещё раз.", response.status);
+    return parseCartResponse(await response.json(), "/api/account/cart").cart;
+  }
   const response = await medusaRequest("/store/carts", {
     method: "POST",
     body: regionId ? { region_id: regionId } : {},

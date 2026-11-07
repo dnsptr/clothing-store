@@ -8,11 +8,11 @@
   display: flex;
   justify-content: center;
   min-height: 650px;
-  padding: 210px 20px 120px;
+  padding: 96px 20px;
 }
 
 .authPanel {
-  width: min(100%, 320px);
+  width: min(100%, 380px);
   text-align: center;
 }
 
@@ -29,6 +29,35 @@
   flex-direction: column;
   margin-top: 18px;
 }
+
+.authModes { display: grid; grid-template-columns: 1fr 1fr; margin-top: 24px; border-bottom: 1px solid var(--border-light); }
+.authModes button { min-height: 44px; border-bottom: 1px solid transparent; color: var(--text-secondary); font-size: 13px; }
+.authModes button[aria-pressed="true"] { border-bottom-color: var(--text-primary); color: var(--text-primary); }
+.fields { display: grid; gap: 14px; min-width: 0; border: 0; }
+.field { display: grid; gap: 6px; text-align: left; font-size: 12px; line-height: 18px; letter-spacing: 0; }
+.consent { display: flex; align-items: flex-start; gap: 10px; text-align: left; font-size: 11px; line-height: 18px; letter-spacing: 0; }
+.consent input { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; }
+.consent a { text-decoration: underline; text-underline-offset: 2px; }
+.accountShell { max-width: 1200px; margin: 0 auto; padding: 64px 24px 96px; }
+.accountHeading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding-bottom: 32px; border-bottom: 1px solid var(--border-light); }
+.accountHeading h1 { font-family: var(--font-sans); font-size: 24px; font-weight: 400; line-height: 32px; }
+.accountHeading p { margin-top: 8px; color: var(--text-secondary); overflow-wrap: anywhere; letter-spacing: 0; }
+.logoutButton { min-height: 36px; flex: 0 0 auto; text-decoration: underline; text-underline-offset: 4px; }
+.accountBody { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 64px; padding-top: 40px; }
+.navigation { display: flex; flex-direction: column; align-items: flex-start; gap: 22px; }
+.navigation button, .navigation a { font-size: 13px; line-height: 20px; text-align: left; letter-spacing: 0; }
+.navigation button[aria-current="page"] { text-decoration: underline; text-underline-offset: 5px; }
+.profile { width: min(100%, 440px); }
+.profile h2, .orders h2 { font-family: var(--font-sans); font-size: 18px; font-weight: 400; line-height: 26px; letter-spacing: 0; }
+.empty { padding: 40px 0; }
+.orders { min-width: 0; }
+.order { padding: 24px 0; border-bottom: 1px solid var(--border-light); }
+.order summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; cursor: pointer; font-size: 13px; line-height: 20px; letter-spacing: 0; }
+.order summary small { display: block; margin-top: 4px; color: var(--text-secondary); }
+.order ul { display: grid; gap: 16px; margin-top: 24px; list-style: none; }
+.order li { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 20px; letter-spacing: 0; }
+.order li span:first-child { overflow-wrap: anywhere; }
+.order li span:last-child { flex: 0 0 auto; }
 
 .phoneInput,
 .input {
@@ -144,6 +173,12 @@
 
   .loginZone {
     min-height: 500px;
-    padding-top: 144px;
+    padding-top: 64px;
   }
+  .accountShell { padding: 40px 20px 64px; }
+  .accountHeading h1 { font-size: 21px; line-height: 28px; }
+  .accountBody { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .navigation { flex-direction: row; flex-wrap: wrap; gap: 16px 24px; }
+  .order summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .order summary > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; color: var(--text-secondary); }
 }
