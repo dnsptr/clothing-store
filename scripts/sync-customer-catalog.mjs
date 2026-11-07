@@ -112,9 +112,9 @@ if (cleanup) {
 }
 if (home) {
   const slides = [
-    {section:"hero",rank:0,title:"MARIO MIKKE",eyebrow:"Новая коллекция",media_url:media("2015-1.webp"),href:"/catalog?section=new",alt:"Кардиган Mario Mikke",object_position:"50% 35%"},
-    {section:"hero",rank:1,title:"Трикотаж",eyebrow:"На каждый день",media_url:media("1351-1.webp"),href:"/collection/everyday-knitwear",alt:"Трикотаж Mario Mikke",object_position:"50% 30%"},
-    {section:"hero",rank:2,title:"Юбки",eyebrow:"Новая коллекция",media_url:media("1916-2.webp"),href:"/collection/skirts",alt:"Трикотажная юбка Mario Mikke",object_position:"50% 60%"},
+    {section:"hero",rank:0,title:"MARIO MIKKE",eyebrow:"Новая коллекция",media_type:"video",media_url:"/hero/new-arrivals.mp4",poster_url:"/images/collection-women.png",href:"/catalog?section=new",alt:"Новая коллекция женской одежды",object_position:"50% 50%"},
+    {section:"hero",rank:1,title:"Трикотаж",eyebrow:"На каждый день",media_url:"/images/collection-women.png",href:"/collection/everyday-knitwear",alt:"Женская коллекция одежды",object_position:"50% 40%"},
+    {section:"hero",rank:2,title:"Юбки",eyebrow:"Новая коллекция",media_url:"/hero/sale-campaign.png",href:"/collection/skirts",alt:"Женские образы из специальной подборки",object_position:"50% 50%"},
     ...[["Трикотаж","1351","/catalog?category=knitwear"],["Кардиганы","2015","/catalog?category=cardigans"],["Юбки","1916","/catalog?category=skirts"],["Новинки","1647","/catalog?section=new"]].map(([title,article,href],rank)=>({section:"shortcut",rank,title,eyebrow:"Каталог",media_url:media(`${article}-1.webp`),href,alt:title})),
     ...[["Шерсть","1999","wool"],["Хлопок","1603","cotton"],["Вискоза","4262","viscose"]].map(([title,article,slug],rank)=>({section:"material",rank,title,eyebrow:"Материалы в деталях",media_url:media(`${article}-1.webp`),href:`/catalog?material=${slug}`,alt:title})),
     {section:"promo",rank:0,title:"Кардиганы",eyebrow:"MARIO MIKKE",media_url:media("2014-2.webp"),href:"/collection/cardigans",cta_label:"Смотреть",alt:"Длинный кардиган Mario Mikke",object_position:"50% 35%"},
@@ -122,7 +122,7 @@ if (home) {
   const owned=slideData.slides.filter(s=>["hero","shortcut","material","promo"].includes(s.section));
   for (const definition of slides) {
     const existing=owned.find(s=>s.section===definition.section && s.rank===definition.rank);
-    const body={...definition,is_active:true,media_type:"image",poster_url:null,poster_key:null,media_key:null,duration_ms:6500};
+    const body={is_active:true,media_type:"image",poster_url:null,poster_key:null,media_key:null,duration_ms:6500,...definition};
     await request(existing?`/admin/content/slides/${existing.id}`:"/admin/content/slides",body);
   }
   for (const existing of owned.filter(s=>!slides.some(d=>d.section===s.section&&d.rank===s.rank))) await request(`/admin/content/slides/${existing.id}`,{is_active:false});
