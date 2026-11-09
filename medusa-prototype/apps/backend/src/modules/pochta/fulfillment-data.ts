@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import type { PochtaOrderParams } from "./lib/pochta-client";
 import { POCHTA_OPTION_COURIER, POCHTA_OPTION_PARCEL } from "./provider-id";

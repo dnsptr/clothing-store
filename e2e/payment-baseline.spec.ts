@@ -298,10 +298,28 @@ test("Yandex checkout requires a chosen city and point, ignores a late old-city 
     return route.fulfill({ headers: cors, json: { customer_cost: 310.75, currency: "RUB" } });
   });
   let actualShippingAmount = 300;
+  let shippingApplied = false;
+  // The isolated API must retain the delivery total across cart reloads and
+  // payment collection creation, just like the real Medusa backend.
+  await page.route(/\/store\/(?:carts\/cart_baseline(?:\?|$)|payment-collections(?:\/|$))/, async (route) => {
+    if (route.request().method() === "OPTIONS") return route.continue();
+    const response = await route.fetch();
+    const payload = await response.json();
+    if (shippingApplied && payload.cart) {
+      payload.cart.shipping_total = actualShippingAmount;
+      payload.cart.total = 1899 + actualShippingAmount;
+    }
+    if (shippingApplied && payload.payment_collection) {
+      payload.payment_collection.amount = 1899 + actualShippingAmount;
+      for (const session of payload.payment_collection.payment_sessions ?? []) session.amount = 1899 + actualShippingAmount;
+    }
+    await route.fulfill({ response, json: payload });
+  });
   await page.route("**/store/carts/cart_baseline/shipping-methods", async (route) => {
     shippingRequests.push(route.request().postDataJSON());
     const original = await route.fetch();
     const payload = await original.json();
+    shippingApplied = true;
     await route.fulfill({
       response: original,
       json: { cart: { ...payload.cart, shipping_total: actualShippingAmount, total: 1899 + actualShippingAmount } },
@@ -360,15 +378,17 @@ test("Yandex checkout requires a chosen city and point, ignores a late old-city 
   await expect(page.getByText("Пункт Арбат", { exact: true })).toBeVisible();
   await expect(page.getByText("310,75 ₽")).toHaveCount(2);
   await page.getByRole("button", { name: "Подтвердить заказ" }).click();
-  await expect(page.getByText("Стоимость доставки изменилась. Выберите пункт выдачи ещё раз.")).toBeVisible();
+  await expect(page).toHaveURL(`${APP_URL}/checkout`);
+  expect((await observations(request)).observations.some(({ path }) => path.endsWith("/payment-sessions"))).toBe(false);
   expect(shippingRequests).toHaveLength(1);
   actualShippingAmount = 310.75;
   await page.getByRole("button", { name: "Изменить" }).click();
   await page.getByText("Москва, Тверская, 7").click();
   await expect(page.getByText("310,75 ₽")).toHaveCount(2);
   await page.getByRole("button", { name: "Подтвердить заказ" }).click();
+  await expect(page).toHaveURL(`${APP_URL}/checkout`);
+  await page.getByRole("button", { name: "Перейти к оплате" }).click();
   await expect(page).toHaveURL(BANK_PAYMENT_URL);
-  expect(shippingRequests).toHaveLength(2);
   expect(shippingRequests[1]).toEqual({
     option_id: "so_yandex_fixture",
     data: {
@@ -436,4 +456,50 @@ test("Yandex checkout drops a chosen point on reload and distinguishes unavailab
   await submitCheckout(page);
   await expect(page.getByText("Выберите пункт выдачи Яндекс Маркет")).toBeVisible();
   expect(shippingRequests).toHaveLength(0);
+});
+
+test("checkout excludes legacy Russian Post options returned by the backend", async ({ page, request }) => {
+  await configureScenario(request, "valid");
+  await page.route("**/store/shipping-options?**", route => route.fulfill({
+    headers: { "access-control-allow-origin": "*" },
+    json: { shipping_options: [
+      { id: "shipping_postal_legacy", name: "Почта России", type: { code: "pochta-parcel" }, amount: 350 },
+      { id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: 0 },
+    ] },
+  }));
+  await openCheckout(page);
+  await expect(page.getByRole("tab", { name: /почта/i })).toHaveCount(0);
+});
+
+test("checkout requires renewed consent when preparation changes the displayed pickup total", async ({ page, request }) => {
+  await configureScenario(request, "valid");
+  let changedPrice = false;
+  await page.route("**/store/**", async route => {
+    if (route.request().method() === "OPTIONS") return route.continue();
+    if (route.request().method() === "POST" && new URL(route.request().url()).pathname.endsWith("/shipping-methods")) {
+      changedPrice = true;
+    }
+    const response = await route.fetch();
+    const body = await response.json();
+    if (changedPrice && body.cart) {
+      body.cart.total = 2499;
+      body.cart.subtotal = 2499;
+      body.cart.items = body.cart.items.map((item: Record<string, unknown>) => ({ ...item, unit_price: 2499, total: 2499 }));
+    }
+    if (changedPrice && body.payment_collection) {
+      body.payment_collection.amount = 2499;
+      for (const session of body.payment_collection.payment_sessions ?? []) session.amount = 2499;
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(BANK_PAYMENT_URL, route => route.fulfill({
+    contentType: "text/html", body: "<title>Bank fixture</title><main>Bank payment boundary</main>",
+  }));
+  await openCheckout(page);
+  await submitCheckout(page);
+  await expect(page).toHaveURL(`${APP_URL}/checkout`);
+  expect((await observations(request)).observations.some(({ path }) => path.endsWith("/payment-sessions"))).toBe(false);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(BANK_PAYMENT_URL);
+  await expectNoCartCompletion(request);
 });

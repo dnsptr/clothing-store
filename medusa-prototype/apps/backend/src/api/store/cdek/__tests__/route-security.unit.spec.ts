@@ -126,13 +126,17 @@ describe("CDEK public route security boundaries", () => {
   });
 
   it.each([
-    ["unsupported tariff", { to_city_code: 44, tariff_code: 999 }],
-    ["missing package", { to_city_code: 44 }],
-    ["infinite weight", { to_city_code: 44, weight: Number.POSITIVE_INFINITY }],
-    ["excessive weight", { to_city_code: 44, weight: 30_001 }],
-    ["zero dimension", { to_city_code: 44, length: 0, width: 20, height: 10 }],
-    ["excessive side", { to_city_code: 44, length: 121, width: 10, height: 10 }],
-    ["excessive dimension sum", { to_city_code: 44, length: 60, width: 60, height: 31 }],
+    ["unsupported tariff", { to_city_code: 44, tariff_code: 999, packages: [{ weight: 700, length: 30, width: 25, height: 10 }] }],
+    ["missing packages", { to_city_code: 44 }],
+    ["singular package", { to_city_code: 44, weight: 700, length: 30, width: 25, height: 10 }],
+    ["empty packages", { to_city_code: 44, packages: [] }],
+    ["infinite weight", { to_city_code: 44, packages: [{ weight: Number.POSITIVE_INFINITY, length: 30, width: 25, height: 10 }] }],
+    ["excessive weight", { to_city_code: 44, packages: [{ weight: 30_001, length: 30, width: 25, height: 10 }] }],
+    ["zero dimension", { to_city_code: 44, packages: [{ weight: 700, length: 0, width: 20, height: 10 }] }],
+    ["excessive side", { to_city_code: 44, packages: [{ weight: 700, length: 121, width: 10, height: 10 }] }],
+    ["excessive dimension sum", { to_city_code: 44, packages: [{ weight: 700, length: 60, width: 60, height: 31 }] }],
+    ["too many places", { to_city_code: 44, packages: Array.from({ length: 101 }, () => ({ weight: 700, length: 30, width: 25, height: 10 })) }],
+    ["invalid last place", { to_city_code: 44, packages: [{ weight: 700, length: 30, width: 25, height: 10 }, { weight: 0, length: 30, width: 25, height: 10 }] }],
   ])("returns 400 for %s", async (_caseName, body) => {
     const calculate = jest.spyOn(CdekClient.prototype, "calculateTariff");
     const response = createResponse();
@@ -155,7 +159,7 @@ describe("CDEK public route security boundaries", () => {
     const response = createResponse();
 
     await calculateCdek(request({
-      body: { to_city_code: 44, tariff_code: 136, weight: 1200, length: 30, width: 20, height: 10 },
+      body: { to_city_code: 44, tariff_code: 136, packages: [{ weight: 1200, length: 30, width: 20, height: 10 }] },
       ip: "192.0.2.136",
     }), response);
 
@@ -180,9 +184,31 @@ describe("CDEK public route security boundaries", () => {
     );
     const response = createResponse();
 
-    await calculateCdek(request({ body: { to_city_code: 137, weight: 1200, length: 30, width: 20, height: 10 }, ip: "192.0.2.137" }), response);
+    await calculateCdek(request({ body: { to_city_code: 137, packages: [{ weight: 1200, length: 30, width: 20, height: 10 }] }, ip: "192.0.2.137" }), response);
 
     expect(response.statusCode).toBe(502);
     expect(response.body).toEqual({ message: "Delivery provider unavailable" });
+  });
+
+  it("keeps every place in the quote and cache identity", async () => {
+    const calculate = jest.spyOn(CdekClient.prototype, "calculateTariff").mockResolvedValue({
+      tariff_code: 136, tariff_name: "PVZ", delivery_sum: 750, period_min: 1, period_max: 3,
+    });
+    const packages = [
+      { weight: 500, length: 20, width: 10, height: 5 },
+      { weight: 500, length: 20, width: 10, height: 5 },
+      { weight: 1200, length: 30, width: 20, height: 10 },
+    ];
+    const first = createResponse();
+    await calculateCdek(request({ body: { to_city_code: 44, tariff_code: 136, packages }, ip: "192.0.2.140" }), first);
+    const changed = packages.map((place, index) => index === 2 ? { ...place, height: 11 } : place);
+    const second = createResponse();
+    await calculateCdek(request({ body: { to_city_code: 44, tariff_code: 136, packages: changed }, ip: "192.0.2.141" }), second);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(calculate).toHaveBeenCalledTimes(2);
+    expect(calculate).toHaveBeenNthCalledWith(1, { toCityCode: 44, tariffCode: 136, packages });
+    expect(calculate).toHaveBeenNthCalledWith(2, { toCityCode: 44, tariffCode: 136, packages: changed });
+    expect(first.body).toMatchObject({ customer_cost_pvz: 350 });
   });
 });

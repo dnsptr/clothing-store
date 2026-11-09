@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import type { CdekProviderOptions } from "../config";
 import {
@@ -24,6 +24,7 @@ import type {
   CdekCity,
   CdekDeliveryPoint,
   CdekOrderResponse,
+  CdekOrderPackage,
   CdekPackage,
 } from "./cdek-schemas";
 
@@ -53,8 +54,9 @@ export interface CdekRecipient {
 export interface CdekOrderParams {
   orderNumber: string;
   tariffCode: number;
+  shipmentPoint: string;
   recipient: CdekRecipient;
-  packages: Array<CdekPackage & { number: string }>;
+  packages: CdekOrderPackage[];
   deliveryPoint?: string;
   toAddress?: { cityCode: number; address: string };
   comment?: string;
@@ -180,6 +182,19 @@ export class CdekClient {
     return parseCarrierResponse(z.array(deliveryPointSchema).max(1_000), await this.request(`/deliverypoints?${params.toString()}`), "delivery point search");
   }
 
+  async getReceptionPoints(cityCode: number, pointCode: string): Promise<CdekDeliveryPoint[]> {
+    const city = parseCarrierInput(cityCodeSchema, cityCode, "reception point search");
+    const code = parseCarrierInput(identifierSchema, pointCode, "reception point search");
+    const params = new URLSearchParams({
+      city_code: String(city), code, type: "PVZ", is_reception: "true", lang: "rus",
+    });
+    return parseCarrierResponse(
+      z.array(deliveryPointSchema).max(1_000),
+      await this.request(`/deliverypoints?${params.toString()}`),
+      "reception point search",
+    );
+  }
+
   async calculateTariff(params: { toCityCode: number; tariffCode: number; fromCityCode?: number; packages: CdekPackage[] }): Promise<CdekTariffResult> {
     const toCityCode = parseCarrierInput(cityCodeSchema, params.toCityCode, "tariff");
     const fromCityCode = parseCarrierInput(cityCodeSchema, params.fromCityCode ?? this.options.fromCityCode, "tariff");
@@ -206,6 +221,8 @@ export class CdekClient {
         type: 1,
         number: order.orderNumber,
         tariff_code: order.tariffCode,
+        shipment_point: order.shipmentPoint,
+        delivery_recipient_cost: { value: 0 },
         sender: { name: "ИП Заманов Рауф Рафикович" },
         recipient: order.recipient,
         packages: order.packages,

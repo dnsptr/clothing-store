@@ -1102,7 +1102,7 @@ export async function createMedusaPaymentCollection(cartId: string) {
  * доходить нечему, но если UI-гейт когда-нибудь обойдут, отказ произойдёт
  * здесь, а не в виде неоплаченного заказа в админке.
  */
-export async function initializeMedusaPaymentSession(paymentCollectionId: string, cartId: string) {
+export async function initializeMedusaPaymentSession(paymentCollectionId: string, cartId: string, expectedTotal: number) {
   if (!isCheckoutEnabled) {
     throw new Error(
       "Оплата не настроена: NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID не задан " +
@@ -1114,7 +1114,7 @@ export async function initializeMedusaPaymentSession(paymentCollectionId: string
   const response = await medusaRequest(endpoint, {
     method: "POST",
     cartId,
-    body: { provider_id: medusaPaymentProviderId },
+    body: { provider_id: medusaPaymentProviderId, data: { expected_total: expectedTotal } },
     parse: parseInitializedPaymentCollectionResponse,
   });
   const session = response.payment_collection.payment_sessions?.find(

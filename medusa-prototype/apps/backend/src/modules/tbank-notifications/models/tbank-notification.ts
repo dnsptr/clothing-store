@@ -39,6 +39,7 @@ const TbankNotification = model
        * расчётов. Любая конверсия здесь потеряла бы то, что реально пришло.
        */
       amount_kopecks: model.number(),
+      amount_provided: model.boolean().default(true),
       currency_code: model.text(),
       success: model.boolean(),
       error_code: model.text().nullable(),

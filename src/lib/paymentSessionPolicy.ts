@@ -3,6 +3,7 @@ import type { MedusaPaymentSession } from "./medusa";
 const APPROVED_TBANK_PAYMENT_HOSTNAMES = new Set([
   "securepay.tinkoff.ru",
   "rest-api-test.tinkoff.ru",
+  "pay.tbank-online.com",
 ]);
 
 const REPLACEABLE_TBANK_SESSION_STATUSES = new Set(["error", "canceled"]);
@@ -82,6 +83,15 @@ export function decideTbankSession(
     return {
       kind: "reject",
       message: "Сумма или валюта платёжной сессии не соответствует корзине. Оплата не начата.",
+    };
+  }
+  const deadline = session.data.paymentExpiresAt;
+  const deadlineTime = typeof deadline === "string" ? Date.parse(deadline) : NaN;
+  if (deadline !== undefined &&
+      (!Number.isFinite(deadlineTime) || deadlineTime <= Date.now())) {
+    return {
+      kind: "reject",
+      message: "Срок ссылки на оплату истёк. Дождитесь проверки результата банком и повторите оформление.",
     };
   }
   if (!REDIRECTABLE_TBANK_SESSION_STATUSES.has(session.status)) {

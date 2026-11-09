@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { medusaIntegrationTestRunner } from "@medusajs/test-utils";
 import { ContainerRegistrationKeys, generateJwtToken, Modules, ProductStatus } from "@medusajs/framework/utils";
-import type { ConfigModule, IUserModuleService } from "@medusajs/framework/types";
+import type { ConfigModule, IInventoryService, IOrderModuleService, IUserModuleService } from "@medusajs/framework/types";
 import {
   createProductsWorkflow,
   createShippingOptionsWorkflow,
@@ -11,6 +11,10 @@ import {
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import { TBANK_NOTIFICATION_MODULE } from "../../src/modules/tbank-notifications";
 import { generateToken } from "../../src/modules/tbank/lib/token";
+import { CHECKOUT_HOLD_MODULE } from "../../src/modules/checkout-holds/contracts";
+import type CheckoutHoldModuleService from "../../src/modules/checkout-holds/service";
+import { buildCdekCartPackages, buildCdekPackages, buildCdekOrderPackages, validateCdekPackages } from "../../src/modules/cdek/fulfillment-data";
+import { buildCartPackages, buildOfferParams } from "../../src/modules/yandex-delivery/fulfillment-data";
 
 jest.setTimeout(300000);
 
@@ -169,18 +173,25 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
                 title: "M",
                 sku: "offline-checkout-fixture",
                 options: { Размер: "M" },
+                weight: 700, length: 30, width: 25, height: 10,
                 prices: [{ currency_code: "rub", amount: 1899 }],
-                manage_inventory: false,
+                manage_inventory: true,
               }],
             }],
           },
         });
         const { data: [storedProduct] } = await query.graph({
           entity: "product",
-          fields: ["variants.id"],
+          fields: ["variants.id", "variants.inventory_items.inventory_item_id"],
           filters: { id: product.id },
         });
         const variantId = storedProduct.variants[0].id;
+        const { data: [stockLocation] } = await query.graph({ entity: "stock_location", fields: ["id"] });
+        const inventory = container.resolve<IInventoryService>(Modules.INVENTORY);
+        await inventory.createInventoryLevels({
+          inventory_item_id: storedProduct.variants[0].inventory_items[0].inventory_item_id,
+          location_id: stockLocation.id, stocked_quantity: 1,
+        });
 
         const { result: [shippingOption] } = await createShippingOptionsWorkflow(container).run({
           input: [{
@@ -189,8 +200,8 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
             provider_id: "manual_manual",
             service_zone_id: fulfillmentSet.service_zones[0].id,
             shipping_profile_id: shippingProfile.id,
-            type: { label: "Тестовая доставка", description: "Только для изолированной БД", code: "checkout-fixture" },
-            prices: [{ currency_code: "rub", amount: 250 }],
+            type: { label: "СДЭК ПВЗ", description: "Изолированный транспорт для проверки оплаты", code: "cdek-pvz" },
+            prices: [{ currency_code: "rub", amount: 350 }],
             rules: [
               { attribute: "enabled_in_store", value: "true", operator: "eq" },
               { attribute: "is_return", value: "false", operator: "eq" },
@@ -200,6 +211,8 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
 
         let bankStatus = "NEW";
         const bankPaymentId = "3456789";
+        let bankOrderId = "";
+        let bankAmount = 0;
         const bankRequest = jest.spyOn(global, "fetch").mockImplementation(async (url, options) => {
           const requestUrl = String(url);
           if (!requestUrl.startsWith("https://rest-api-test.tinkoff.ru/v2/")) {
@@ -207,6 +220,10 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           }
           const request = JSON.parse(String(options?.body)) as { Amount?: number; OrderId?: string };
           const method = requestUrl.slice(requestUrl.lastIndexOf("/") + 1);
+          if (method === "Init") {
+            bankOrderId = request.OrderId ?? "";
+            bankAmount = request.Amount ?? 0;
+          }
           if (method !== "Init" && method !== "GetState") {
             throw new Error(`Unexpected bank operation: ${method}`);
           }
@@ -219,8 +236,9 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
               PaymentId: bankPaymentId,
               PaymentURL: "https://rest-api-test.tinkoff.ru/offline-checkout",
               Status: bankStatus,
-              ...(request.Amount === undefined ? {} : { Amount: request.Amount }),
-              ...(request.OrderId === undefined ? {} : { OrderId: request.OrderId }),
+              TerminalKey: "TinkoffBankTest",
+              Amount: bankAmount,
+              OrderId: bankOrderId,
             }),
           } as Response;
         });
@@ -231,16 +249,22 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           await api.post(`/store/carts/${cartId}/line-items`, { variant_id: variantId, quantity: 1 }, { headers });
           await api.post(`/store/carts/${cartId}`, {
             email: "checkout@example.test",
+            metadata: { delivery_type: "cdek-pvz", delivery_reference: "preserve-after-payment" },
             shipping_address: {
               first_name: "Тест", last_name: "Покупатель", address_1: "Тестовая, 1",
               city: "Москва", postal_code: "101000", country_code: "ru", phone: "+79991234567",
             },
           }, { headers });
           const shipped = await api.post(`/store/carts/${cartId}/shipping-methods`, {
-            option_id: shippingOption.id,
+            option_id: shippingOption.id, data: { shipment_reference: "preserve-after-payment" },
           }, { headers });
           const amountKopecks = Math.round(Number(shipped.data.cart.total) * 100);
-          expect(Number(shipped.data.cart.shipping_total)).toBe(250);
+          expect(Number(shipped.data.cart.shipping_total)).toBe(350);
+          const { data: [shippingCart] } = await query.graph({
+            entity: "cart", fields: ["items.*", "items.variant.*"], filters: { id: cartId },
+          });
+          const cdekManifest = buildCdekCartPackages(shippingCart.items);
+          const yandexPackages = buildCartPackages(shippingCart.items);
           const collection = await api.post("/store/payment-collections", { cart_id: cartId }, { headers });
           const paymentCollectionId = collection.data.payment_collection.id as string;
           const freePayment = await api.post(
@@ -251,18 +275,69 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           expect(freePayment.status).toBe(400);
           const initiated = await api.post(
             `/store/payment-collections/${paymentCollectionId}/payment-sessions`,
-            { provider_id: "pp_tbank_tbank" },
+            { provider_id: "pp_tbank_tbank", data: { expected_total: amountKopecks / 100 } },
             { headers },
           );
           const session = initiated.data.payment_collection.payment_sessions.find(
             (item: { provider_id: string }) => item.provider_id === "pp_tbank_tbank",
           );
           expect(session.data.paymentUrl).toBe("https://rest-api-test.tinkoff.ru/offline-checkout");
-          const completed = await api.post(`/store/carts/${cartId}/complete`, {}, { headers });
-          expect(completed.data.order.id).toBeTruthy();
+          const changedRecipient = await api.post(`/store/carts/${cartId}`, { email: "changed@example.test" }, {
+            headers, validateStatus: () => true,
+          });
+          expect(changedRecipient.status).toBe(409);
+          const changedDelivery = await api.post(`/store/carts/${cartId}/shipping-methods`, {
+            option_id: shippingOption.id, data: { delivery_address: "Другой адрес" },
+          }, { headers, validateStatus: () => true });
+          expect(changedDelivery.status).toBe(409);
+          const changedAddress = await api.post(`/store/carts/${cartId}`, { shipping_address: { address_1: "Новый адрес" } }, {
+            headers, validateStatus: () => true,
+          });
+          expect(changedAddress.status).toBe(409);
+          const removedItem = await api.delete(`/store/carts/${cartId}/line-items/${shipped.data.cart.items[0].id}`, {
+            headers, validateStatus: () => true,
+          });
+          expect(removedItem.status).toBe(409);
+          const replayedCart = await api.post(`/store/carts/${cartId}`, {
+            email: "checkout@example.test", metadata: { delivery_type: "cdek-pvz" },
+            shipping_address: { address_1: "Тестовая, 1", country_code: "ru" },
+          }, { headers });
+          expect(replayedCart.data.cart.shipping_address).toEqual(shipped.data.cart.shipping_address);
+          expect(replayedCart.data.cart.metadata).toEqual(shipped.data.cart.metadata);
+          const replayedShipping = await api.post(`/store/carts/${cartId}/shipping-methods`, {
+            option_id: shippingOption.id, data: {},
+          }, { headers });
+          expect(replayedShipping.data.cart.shipping_methods[0].data).toEqual(shipped.data.cart.shipping_methods[0].data);
+          const holdStore = container.resolve<CheckoutHoldModuleService>(CHECKOUT_HOLD_MODULE);
+          const held = await holdStore.findPaymentHold(session.id);
+          expect(held?.state).toBe("active");
+          expect(new Date(held!.expires_at).getTime() - Date.now()).toBeGreaterThan(9 * 60_000);
+          expect(new Date(held!.expires_at).getTime() - Date.now()).toBeLessThanOrEqual(10 * 60_000);
+          const premature = await api.post(`/store/carts/${cartId}/complete`, {}, { headers, validateStatus: () => true });
+          expect(premature.status).toBe(409);
           const pendingStatus = await api.get(`/store/payment-status/${cartId}`, { headers });
           expect(pendingStatus.data).toEqual({ payment: "pending", order: "pending" });
-          expect(completed.data.type).toBe("order");
+          const { data: prematureOrders } = await query.graph({
+            entity: "order_cart", fields: ["order_id"], filters: { cart_id: cartId },
+          });
+          expect(prematureOrders).toEqual([]);
+          await holdStore.updateCheckoutHolds({ id: held!.id, expires_at: new Date(0) });
+          await holdStore.expirePaymentHolds();
+          const expired = await holdStore.claimExpiredPaymentHolds();
+          expect(expired.find(row => row.payment_session_id === session.id)?.state).toBe("expired");
+          const competing = await api.post("/store/carts", { region_id: region.id, email: "competing@example.test" }, {
+            headers: { "x-publishable-api-key": key.token },
+          });
+          const competingId = competing.data.cart.id;
+          const competingHeaders = { "x-publishable-api-key": key.token, "x-cart-access-token": competing.data.cart_access_token };
+          await api.post(`/store/carts/${competingId}/line-items`, { variant_id: variantId, quantity: 1 }, { headers: competingHeaders });
+          await api.post(`/store/carts/${competingId}/shipping-methods`, { option_id: shippingOption.id }, { headers: competingHeaders });
+          const competingCollection = await api.post("/store/payment-collections", { cart_id: competingId }, { headers: competingHeaders });
+          const competingInit = await api.post(`/store/payment-collections/${competingCollection.data.payment_collection.id}/payment-sessions`, {
+            provider_id: "pp_tbank_tbank", data: { expected_total: amountKopecks / 100 },
+          }, { headers: competingHeaders, validateStatus: () => true });
+          expect(competingInit.status).toBeGreaterThanOrEqual(400);
+          expect(competingInit.status).toBeLessThan(500);
 
           bankStatus = "CONFIRMED";
           const notification: Record<string, unknown> = {
@@ -306,7 +381,7 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           expect(attempts).toHaveLength(1);
           expect(attempts[0].expected_amount_kopecks).toBe(amountKopecks);
           expect(orders).toHaveLength(1);
-          expect(orders[0].order_id).toBe(completed.data.order.id);
+          expect((await holdStore.findPaymentHold(session.id))?.state).toBe("consumed");
           expect(payments).toHaveLength(1);
           expect(payments[0].captured_at).toBeTruthy();
           expect(status.data).toEqual({ payment: "confirmed", order: "ready" });
@@ -322,6 +397,54 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           }
           const ownedOrder = await api.get(`/store/orders/${orders[0].order_id}`, { headers });
           expect(ownedOrder.data.order.email).toBe("checkout@example.test");
+          // Native completion generates new order line IDs. A paid package must
+          // still match its real variant, unit price, measurements and quantity.
+          const { data: [carrierOrder] } = await query.graph({
+            entity: "order", fields: ["id", "display_id", "currency_code", "email", "shipping_address.*",
+              "items.*", "items.variant.*"], filters: { id: orders[0].order_id },
+          });
+          const carrierItems = carrierOrder.items.map((item: { id: string; quantity: number }) => ({
+            line_item_id: item.id, quantity: item.quantity,
+          }));
+          const cdekPackages = buildCdekPackages(carrierItems, carrierOrder);
+          validateCdekPackages({ validated_packages: cdekManifest }, cdekPackages);
+          expect(cdekPackages).toEqual(cdekManifest);
+          const cdekBookingPackages = buildCdekOrderPackages(cdekPackages, carrierOrder);
+          expect(cdekBookingPackages[0].items[0].cost).toBe(1899);
+          expect(cdekBookingPackages[0].items[0].amount).toBe(1);
+          const yandexOffer = buildOfferParams({
+            delivery_mode: "yandex-pvz", platform_station_id: "offline-station",
+            pvz_name: "Тестовый ПВЗ", pvz_address: "Москва, Тестовая, 1", city: "Москва", geo_id: 213,
+            package_manifest: yandexPackages.manifest,
+            carrier_quote_amount: 350, carrier_quote_currency: "RUB",
+          }, carrierItems, carrierOrder, "offline-source-station");
+          expect(yandexOffer.places).toEqual(yandexPackages.places);
+          const config = container.resolve<ConfigModule>(ContainerRegistrationKeys.CONFIG_MODULE);
+          const users = container.resolve<IUserModuleService>(Modules.USER);
+          const admin = await users.createUsers({ email: "fulfillment-checkout@example.test" });
+          const token = generateJwtToken({
+            actor_id: admin.id, actor_type: "user", auth_identity_id: "fulfillment-checkout-fixture",
+          }, { secret: config.projectConfig.http.jwtSecret, expiresIn: "5m" });
+          const adminHeaders = { authorization: `Bearer ${token}` };
+          const orderService = container.resolve<IOrderModuleService>(Modules.ORDER);
+          const unpaid = await orderService.createOrders({
+            currency_code: "rub", email: "unpaid@example.test",
+            items: [{ title: "Неоплаченный товар", quantity: 1, unit_price: 100 }],
+          });
+          const deniedFulfillment = await api.post(`/admin/orders/${unpaid.id}/fulfillments`, {
+            items: [{ id: unpaid.items![0].id, quantity: 1 }], location_id: stockLocation.id,
+          }, { headers: adminHeaders, validateStatus: () => true });
+          expect(deniedFulfillment.status).toBe(409);
+          await api.post(`/admin/orders/${orders[0].order_id}/fulfillments`, {
+            items: [{ id: ownedOrder.data.order.items[0].id, quantity: 1 }],
+            location_id: stockLocation.id, shipping_option_id: shippingOption.id, no_notification: true,
+          }, { headers: adminHeaders });
+          const { data: fulfilledOrders } = await query.graph({
+            entity: "order", fields: ["id", "fulfillments.id", "fulfillments.items.quantity"],
+            filters: { id: orders[0].order_id },
+          });
+          expect(fulfilledOrders[0].fulfillments).toHaveLength(1);
+          expect(fulfilledOrders[0].fulfillments[0].items[0].quantity).toBe(1);
           const deniedSession = await api.post(`/store/payment-collections/${paymentCollectionId}/payment-sessions`, {
             provider_id: "pp_tbank_tbank",
           }, { headers: foreignHeaders, validateStatus: () => true });
@@ -337,7 +460,7 @@ describeTbank("T-Bank checkout with PostgreSQL (offline bank)", () => {
           expect(request.Receipt.Taxation).toBe("usn_income");
           expect(request.Receipt.Items.reduce((sum, item) => sum + item.Amount, 0)).toBe(amountKopecks);
           expect(request.Receipt.Items).toEqual(expect.arrayContaining([
-            expect.objectContaining({ Name: "Доставка", Amount: 25_000, PaymentObject: "service" }),
+            expect.objectContaining({ Name: "Доставка", Amount: 35_000, PaymentObject: "service" }),
           ]));
         } finally {
           bankRequest.mockRestore();

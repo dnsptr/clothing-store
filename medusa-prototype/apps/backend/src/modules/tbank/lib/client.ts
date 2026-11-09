@@ -181,19 +181,20 @@ export class TBankClient {
     successUrl?: string;
     failUrl?: string;
     notificationUrl?: string;
+    redirectDueDate?: string;
     receipt?: TBankReceipt;
     data?: Record<string, string>;
   }): Promise<TBankInitResult> {
     return this.call<TBankInitResult>("Init", {
       Amount: params.amountKopecks,
       OrderId: params.orderId,
-      // Одностадийная оплата (§3): резерв ставится в Medusa до оплаты, второй
-      // стадии нечего проверять.
+      // One-stage acquiring: only CONFIRMED, not AUTHORIZED, proves capture.
       PayType: "O",
       ...(params.description ? { Description: params.description } : {}),
       ...(params.successUrl ? { SuccessURL: params.successUrl } : {}),
       ...(params.failUrl ? { FailURL: params.failUrl } : {}),
       ...(params.notificationUrl ? { NotificationURL: params.notificationUrl } : {}),
+      ...(params.redirectDueDate ? { RedirectDueDate: params.redirectDueDate } : {}),
       ...(params.receipt ? { Receipt: params.receipt } : {}),
       ...(params.data ? { DATA: params.data } : {}),
     });

@@ -31,7 +31,6 @@ import {
 } from "../modules/cdek/shipping-options";
 import { parseCdekEnvironment } from "../modules/cdek/config";
 import { CDEK_OPTION_COURIER, CDEK_OPTION_PVZ } from "../modules/cdek/provider-id";
-import { parsePochtaEnvironment } from "../modules/pochta/config";
 import { parseYandexDeliveryEnvironment } from "../modules/yandex-delivery/config";
 import { YANDEX_OPTION_PVZ } from "../modules/yandex-delivery/provider-id";
 import { parseOwnCourierEnvironment } from "../modules/own-courier/config";
@@ -214,7 +213,6 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
   const deliveryOptionsToEnsure = resolveDeliveryShippingOptions({
     cdekEnabled: parseCdekEnvironment(process.env).enabled,
     yandexEnabled: parseYandexDeliveryEnvironment(process.env).enabled,
-    pochtaEnabled: parsePochtaEnvironment(process.env).enabled,
     ownCourierEnabled: parseOwnCourierEnvironment(process.env).enabled,
   });
   const linkedProviderIds = new Set(
@@ -274,11 +272,14 @@ export default async function importMarioMikkeCatalog({ container }: ExecArgs) {
   // исчезнуть из списка способов доставки. Исторические заказы сохраняем.
   const activeCodes = new Set(deliveryOptionsToEnsure.map((option) => option.code));
   const knownOptions = resolveDeliveryShippingOptions({
-    cdekEnabled: true, yandexEnabled: true, pochtaEnabled: true, ownCourierEnabled: true,
+    cdekEnabled: true, yandexEnabled: true, ownCourierEnabled: true,
   });
   for (const existing of shippingOptions) {
     if (
       existing.type?.code === "mvp-ru" || existing.name === "MVP доставка по России" ||
+      existing.type?.code === "pochta-parcel" || existing.type?.code === "pochta-courier" ||
+      existing.name === "Почта России — Посылка в отделение" ||
+      existing.name === "Почта России — Курьерская доставка" ||
       knownOptions.some((option) =>
         !activeCodes.has(option.code) && (existing.type?.code === option.code || existing.name === option.name))
     ) {

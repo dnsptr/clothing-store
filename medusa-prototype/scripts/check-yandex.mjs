@@ -8,7 +8,8 @@ const required = (name) => {
 
 const baseUrl = (process.env.YANDEX_DELIVERY_API_BASE_URL || "https://b2b-authproxy.taxi.yandex.net/api/b2b/platform").replace(/\/$/, "");
 const token = required("YANDEX_DELIVERY_TOKEN");
-const sourceStationId = required("YANDEX_DELIVERY_SOURCE_STATION_ID");
+// Diagnostic input only; checkout and booking select a native stock-location origin.
+const sourceStationId = required("YANDEX_CHECK_SOURCE_STATION_ID");
 
 async function postJson(endpoint, body, label) {
   const response = await fetch(`${baseUrl}${endpoint}`, {

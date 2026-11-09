@@ -30,12 +30,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit all frontend dependencies
+        run: npm audit --include=dev --include=optional --include=peer --audit-level=low
 
       - name: Lint
         run: npm run lint
@@ -43,8 +46,8 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Catalog regression tests
-        run: npm run test:catalog
+      - name: Catalog and delivery regression tests
+        run: npm test
 
       # Two deployable artifacts exist, so CI builds both. Neither is allowed to
       # rot behind the other: the server build is what Vercel ships, the export
@@ -72,12 +75,20 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: medusa-prototype/package-lock.json
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: medusa-prototype
+
+      # Preserve the full report, including Low findings. The registry still
+      # reports deepmerge CVE-2026-93753, rejected by its CNA on 2026-11-02:
+      # https://cveawg.mitre.org/api/cve/CVE-2026-93753
+      # Moderate and higher findings must block the backend build.
+      - name: Audit all backend dependencies
+        run: npm audit --include=dev --include=optional --include=peer --audit-level=moderate
         working-directory: medusa-prototype
 
       # `npm run build` -> `turbo build` -> `medusa build`. This compiles the
@@ -126,7 +137,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: medusa-prototype/package-lock.json
 

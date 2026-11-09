@@ -65,13 +65,14 @@ export default async function orderPlacedHandler({
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return;
+    throw error;
   }
 
   // Чат сотрудников задаётся переменной: список получателей — эксплуатационная
   // настройка, а не код. Пока он не задан, сообщение в Telegram не уходит —
   // это рабочее состояние для разработки и CI.
   const staffChatId = process.env.TELEGRAM_CHAT_ID?.trim();
+  let deliveryFailure: Error | undefined;
   if (staffChatId) {
     try {
       await notificationService.createNotifications({
@@ -94,6 +95,7 @@ export default async function orderPlacedHandler({
 
       logger.info(`tbank.order.paid: уведомление о заказе ${orderNumber(order)} передано провайдеру`);
     } catch (error) {
+      deliveryFailure = error instanceof Error ? error : new Error(String(error));
       logger.error(
         `tbank.order.paid: не отправлено уведомление о заказе ${orderId}: ${
           error instanceof Error ? error.message : String(error)
@@ -107,6 +109,7 @@ export default async function orderPlacedHandler({
     // Заказ без почты — не ошибка обработчика: писать некому, и сказать об
     // этом можно только в лог.
     logger.warn(`tbank.order.paid: у заказа ${orderId} нет почты, письмо не отправлено`);
+    if (deliveryFailure) throw deliveryFailure;
     return;
   }
 
@@ -141,12 +144,16 @@ export default async function orderPlacedHandler({
 
     logger.info(`tbank.order.paid: письмо о заказе ${orderNumber(order)} передано провайдеру`);
   } catch (error) {
+    deliveryFailure ??= error instanceof Error ? error : new Error(String(error));
     logger.error(
       `tbank.order.paid: не отправлено письмо о заказе ${orderId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
+  // Let the event bus retry failed channels. Medusa's idempotency key skips
+  // successful notifications and resends existing FAILURE records.
+  if (deliveryFailure) throw deliveryFailure;
 }
 
 export const config: SubscriberConfig = {

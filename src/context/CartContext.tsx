@@ -56,14 +56,12 @@ export interface CheckoutDetails {
    */
   shippingOptionId: string;
   comment: string;
-  deliveryType: "cdek-pvz" | "cdek-courier" | "pickup-store" | "pochta-parcel" | "pochta-courier" | "own-courier-mkad" | "yandex-pvz";
+  deliveryType: "cdek-pvz" | "cdek-courier" | "pickup-store" | "own-courier-mkad" | "yandex-pvz";
   cdekPvzCode?: string;
   cdekPvzAddress?: string;
   cdekCityCode?: number;
   pickupStoreId?: string;
   pickupStoreName?: string;
-  pochtaOfficeIndex?: string;
-  pochtaOfficeAddress?: string;
   yandexPvzId?: string;
   yandexPvzName?: string;
   yandexPvzAddress?: string;
@@ -94,7 +92,7 @@ interface CartContextType {
   checkOwnCourierAvailability: (address: OwnCourierAvailabilityAddress) => Promise<MedusaShippingOption[]>;
   getShippingOptions: () => Promise<MedusaShippingOption[]>;
   getYandexDeliveryQuote: (stationId: string, geoId: number) => Promise<number>;
-  completeCheckout: () => Promise<CheckoutCompletion>;
+  completeCheckout: (expectedTotal: number) => Promise<CheckoutCompletion>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
@@ -579,12 +577,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (details.pickupStoreName) {
       metadata.pickup_store_name = details.pickupStoreName;
     }
-    if (details.pochtaOfficeIndex) {
-      metadata.pochta_office_index = details.pochtaOfficeIndex;
-    }
-    if (details.pochtaOfficeAddress) {
-      metadata.pochta_office_address = details.pochtaOfficeAddress;
-    }
     if (details.yandexPvzId) {
       metadata.yandex_pvz_id = details.yandexPvzId;
     }
@@ -640,12 +632,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       fulfillmentData.delivery_address = deliveryAddress;
     } else if (details.deliveryType === "pickup-store") {
       fulfillmentData.pickup_store_id = details.pickupStoreId;
-    } else if (details.deliveryType === "pochta-parcel") {
-      fulfillmentData.postal_code = details.pochtaOfficeIndex;
-      fulfillmentData.post_office_address = details.pochtaOfficeAddress;
-    } else if (details.deliveryType === "pochta-courier") {
-      fulfillmentData.postal_code = details.zip;
-      fulfillmentData.delivery_address = deliveryAddress;
     } else if (details.deliveryType === "yandex-pvz") {
       fulfillmentData.platform_station_id = details.yandexPvzId;
       fulfillmentData.pvz_name = details.yandexPvzName;
@@ -695,34 +681,37 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return fetchYandexDeliveryQuote(await getMedusaCartId(), stationId, geoId);
   };
 
-  const completeCheckout = () => enqueueCartMutation<CheckoutCompletion>(async () => {
+  const completeCheckout = (expectedTotal: number) => enqueueCartMutation<CheckoutCompletion>(async () => {
     if (!isMedusaConfigured) {
       throw new Error("Checkout requires Medusa mode with a configured Store API.");
     }
 
     const cartId = await getMedusaCartId();
-    const paymentCollection = await createMedusaPaymentCollection(cartId);
     const currentCart = await retrieveMedusaCart(cartId);
     const cartAccessToken = getCartAccessToken(cartId);
     if (!cartAccessToken || currentCart.currency_code !== "rub" ||
-        typeof currentCart.total !== "number" || !Number.isFinite(currentCart.total) || currentCart.total <= 0) {
-      throw new Error("Не удалось подтвердить сумму и доступ к корзине.");
+        !Number.isFinite(expectedTotal) || expectedTotal <= 0 ||
+        typeof currentCart.total !== "number" || !Number.isFinite(currentCart.total) ||
+        Math.round(currentCart.total * 100) !== Math.round(expectedTotal * 100)) {
+      syncRemoteCart(currentCart);
+      throw new Error("Итог заказа изменился. Проверьте сумму и подтвердите заказ ещё раз.");
     }
+    const paymentCollection = await createMedusaPaymentCollection(cartId);
     let paymentSession: MedusaPaymentSession;
     if (medusaPaymentProviderId === "pp_system_default") {
-      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id, cartId);
+      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id, cartId, expectedTotal);
     } else {
       const decision = decideTbankSession(
         paymentCollection.payment_sessions,
         medusaPaymentProviderId,
-        currentCart.total,
+        expectedTotal,
         currentCart.currency_code,
       );
       if (decision.kind === "redirect") {
         return { type: "redirect", paymentUrl: decision.paymentUrl, cartId, cartAccessToken };
       }
       if (decision.kind === "reject") throw new Error(decision.message);
-      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id, cartId);
+      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id, cartId, expectedTotal);
     }
 
     // Встроенный провайдер оставлен только для локального/e2e escape hatch.
@@ -734,7 +723,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           `Платёжный провайдер вернул неожиданное состояние: ${paymentSession.status}.`,
         );
       }
-      const decision = decideTbankSession([paymentSession], medusaPaymentProviderId, currentCart.total, currentCart.currency_code);
+      const decision = decideTbankSession([paymentSession], medusaPaymentProviderId, expectedTotal, currentCart.currency_code);
       if (decision.kind !== "redirect") throw new Error(decision.kind === "reject" ? decision.message : "Платёжная сессия отсутствует.");
       return { type: "redirect", paymentUrl: decision.paymentUrl, cartId, cartAccessToken };
     }

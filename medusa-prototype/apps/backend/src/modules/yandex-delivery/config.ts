@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import { YANDEX_DELIVERY_PROVIDER_IDENTIFIER } from "./provider-id";
 
@@ -20,7 +20,6 @@ const YANDEX_ENVIRONMENT_SCHEMA = z.object({
     .refine((v) => /^https?:\/\/.+/u.test(v), {
       message: "YANDEX_DELIVERY_API_BASE_URL must be a valid URL",
     }),
-  YANDEX_DELIVERY_SOURCE_STATION_ID: z.string().trim().min(1).max(200),
   YANDEX_DELIVERY_PVZ_PRICE_RUB: z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/u)
     .transform(Number).refine((value) => Number.isFinite(value) && value > 0),
 });
@@ -28,7 +27,6 @@ const YANDEX_ENVIRONMENT_SCHEMA = z.object({
 export type YandexDeliveryProviderOptions = {
   readonly token: string;
   readonly apiBaseUrl: string;
-  readonly sourceStationId: string;
   readonly pvzPriceRub: number;
 };
 
@@ -74,7 +72,6 @@ export function parseYandexDeliveryEnvironment(
     options: {
       token: result.data.YANDEX_DELIVERY_TOKEN,
       apiBaseUrl: result.data.YANDEX_DELIVERY_API_BASE_URL,
-      sourceStationId: result.data.YANDEX_DELIVERY_SOURCE_STATION_ID,
       pvzPriceRub: result.data.YANDEX_DELIVERY_PVZ_PRICE_RUB,
     },
   };

@@ -83,9 +83,21 @@ export async function reconcileMissingWebhook(
     assertLease(await store.observePaymentAttemptPoll({ ...input(), paymentId, status: state.Status! }));
     if (state.Status !== "CONFIRMED") {
       if (state.Status === "REJECTED" || state.Status === "DEADLINE_EXPIRED" ||
-          state.Status === "CANCELED" || state.Status === "REVERSED" ||
-          state.Status === "REFUNDED" || state.Status === "PARTIAL_REFUNDED") {
-        return finish("manual_review", `GetState returned ${state.Status}; payment was not projected`);
+          state.Status === "CANCELED" || state.Status === "REVERSED") {
+        const linkage = await checkDurableLinkage(services, session);
+        if (linkage.paymentCaptured || linkage.orderLinked) {
+          return finish("manual_review", `GetState returned ${state.Status} for a captured or linked order`);
+        }
+        await around(() => services.payment.updatePaymentSession({
+          id: session.id, amount: session.amount, currency_code: session.currency_code,
+          data: { ...(session.data ?? {}), status: state.Status },
+          status: state.Status === "CANCELED" || state.Status === "REVERSED" ? "canceled" : "error",
+        }));
+        await around(() => services.holds?.releasePaymentHold(session.id) ?? Promise.resolve());
+        return finish("completed", `GetState verified ${state.Status}`);
+      }
+      if (state.Status === "REFUNDED" || state.Status === "PARTIAL_REFUNDED") {
+        return finish("manual_review", `GetState returned ${state.Status}; refund reconciliation requires fiscal review`);
       }
       // AUTHORIZED (and all intermediate states) is not captured and must not create an order.
       return finish("retry", `GetState returned ${state.Status}; awaiting CONFIRMED`);
@@ -94,6 +106,7 @@ export async function reconcileMissingWebhook(
     if (before.paymentCaptured && !before.orderLinked) {
       return finish("retry", "Captured payment has no durable created-order linkage");
     }
+    await around(() => services.holds?.settlePaymentHold(session.id) ?? Promise.resolve());
     if (!before.paymentCaptured) {
       const latestSession = await services.payment.retrievePaymentSession(attempt.payment_session_id);
       if (!correlateAttempt(attempt, latestSession, services.expectedTerminalKey) ||
@@ -112,6 +125,7 @@ export async function reconcileMissingWebhook(
     if (!after.paymentCaptured || !after.orderLinked || !after.orderId) {
       return finish("retry", "Confirmed capture and created-order linkage are not durable");
     }
+    await around(() => services.holds?.consumePaymentHold(session.id) ?? Promise.resolve());
     await around(() => services.events!.emit({ name: "tbank.order.paid", data: { id: after.orderId! } }));
     return finish("completed");
   } catch (error) {

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { Modules } from "@medusajs/framework/utils";
 
 import { TBANK_NOTIFICATION_MODULE } from "../../tbank-notifications";
+import { CHECKOUT_HOLD_MODULE, type PaymentCheckoutHolds } from "../../checkout-holds/contracts";
 import { parseTbankEnvironment } from "../config";
 import { TBankClient } from "../lib/client";
 import {
@@ -64,6 +65,7 @@ export class PaymentReconcilerService {
     const query = dependencies.query ??
       container?.resolve<QueryService>("query", { allowUnregistered: true });
     const events = dependencies.events ?? container?.resolve<PaidOrderEvents>("event_bus");
+    const holds = dependencies.holds ?? container?.resolve<PaymentCheckoutHolds>(CHECKOUT_HOLD_MODULE);
     if (!logger) throw new PaymentReconcilerConfigurationError("logger");
     if (!notifications) throw new PaymentReconcilerConfigurationError("TbankNotificationModuleService");
     if (!payment) throw new PaymentReconcilerConfigurationError("PaymentModuleService");
@@ -79,6 +81,7 @@ export class PaymentReconcilerService {
       ...(dependencies.durableLinkageChecker ? { linkageChecker: dependencies.durableLinkageChecker } : {}),
       ...(events ? { events } : {}),
       ...(query ? { query } : {}),
+      ...(holds ? { holds } : {}),
       ...(container ? { container } : {}),
     };
   }

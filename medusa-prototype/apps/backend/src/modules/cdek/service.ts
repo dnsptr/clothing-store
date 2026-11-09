@@ -1,26 +1,36 @@
-import { AbstractFulfillmentProviderService } from "@medusajs/framework/utils";
+import { AbstractFulfillmentProviderService, MedusaError } from "@medusajs/framework/utils";
 import type {
   CalculatedShippingOptionPrice,
   CreateFulfillmentResult,
   FulfillmentOption,
   ValidateFulfillmentDataContext,
 } from "@medusajs/types";
+import {
+  selectCheckoutHandoff,
+  selectFulfillmentHandoff,
+  selectHandoffPoint,
+  type HandoffOrigin,
+} from "../../lib/carrier-handoff";
 
 import type { CdekProviderOptions } from "./config";
 import {
   CdekFulfillmentDataError,
   MOSCOW_PICKUP_STORES,
-  buildCdekCartPackage,
-  buildCdekPackage,
+  buildCdekCartPackages,
+  buildCdekPackages,
+  buildCdekOrderPackages,
+  cdekTariffPackages,
   parseCourierSelection,
   parseDeliveryMode,
   parseDestinationCityCode,
   parsePvzSelection,
   requireText,
   resolvePickupStore,
+  validateCdekPackages,
   UnsupportedCdekCancellationError,
   UnsupportedCdekReturnError,
 } from "./fulfillment-data";
+import type { CdekPackageManifest } from "./fulfillment-data";
 import { CdekClient } from "./lib/cdek-client";
 import {
   CDEK_OPTION_COURIER,
@@ -53,13 +63,32 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
   private async calculateCarrierQuote(
     optionId: typeof CDEK_OPTION_PVZ | typeof CDEK_OPTION_COURIER,
     data: Record<string, unknown>,
-    context: Record<string, unknown>,
+    origin: HandoffOrigin,
+    packages: CdekPackageManifest,
   ) {
-    return this.client.calculateTariff({
-      toCityCode: parseDestinationCityCode(data["city_code"]),
+    if (origin.city_code === undefined) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "У пункта передачи СДЭК не указан код города.");
+    }
+    const toCityCode = parseDestinationCityCode(data["city_code"]);
+    const points = await this.client.getReceptionPoints(origin.city_code, origin.id);
+    if (!points.some((point) =>
+      point.code === origin.id &&
+      point.type === "PVZ" &&
+      point.is_reception === true &&
+      point.location.city_code === origin.city_code
+    )) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "Выбранный пункт СДЭК не принимает отправления или не соответствует городу отправки.",
+      );
+    }
+    const quote = await this.client.calculateTariff({
+      fromCityCode: origin.city_code,
+      toCityCode,
       tariffCode: optionId === CDEK_OPTION_COURIER ? CDEK_TARIFF_COURIER : CDEK_TARIFF_PVZ,
-      packages: [buildCdekCartPackage(context["items"])],
+      packages: cdekTariffPackages(packages),
     });
+    return { packages, quote };
   }
 
   async getFulfillmentOptions(): Promise<FulfillmentOption[]> {
@@ -96,7 +125,9 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
     const optionId = String(optionData?.id || "");
 
     if (optionId === CDEK_OPTION_PVZ) {
+      const origin = selectHandoffPoint(context.from_location, "cdek");
       const selection = parsePvzSelection(data);
+      const packages = buildCdekCartPackages(context["items"]);
       const points = await this.client.getDeliveryPoints(selection.city_code);
       const point = points.find(
         (candidate) =>
@@ -108,9 +139,10 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
           `PVZ ${selection.cdek_pvz_code} is not available in city ${selection.city_code}`,
         );
       }
-      const quote = await this.calculateCarrierQuote(CDEK_OPTION_PVZ, data, context);
+      const { quote } = await this.calculateCarrierQuote(CDEK_OPTION_PVZ, data, origin, packages);
       return {
-        ...data,
+        handoff_origin: origin,
+        validated_packages: packages,
         delivery_mode: CDEK_OPTION_PVZ,
         city_code: selection.city_code,
         cdek_pvz_code: point.code,
@@ -125,7 +157,6 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
     if (optionId === CDEK_OPTION_PICKUP) {
       const store = resolvePickupStore(data);
       return {
-        ...data,
         delivery_mode: CDEK_OPTION_PICKUP,
         pickup_store_id: store.id,
         pickup_store_name: store.name,
@@ -135,9 +166,12 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
 
     if (optionId === CDEK_OPTION_COURIER) {
       const selection = parseCourierSelection(data);
-      const quote = await this.calculateCarrierQuote(CDEK_OPTION_COURIER, data, context);
+      const origin = selectHandoffPoint(context.from_location, "cdek");
+      const packages = buildCdekCartPackages(context["items"]);
+      const { quote } = await this.calculateCarrierQuote(CDEK_OPTION_COURIER, data, origin, packages);
       return {
-        ...data,
+        handoff_origin: origin,
+        validated_packages: packages,
         delivery_mode: CDEK_OPTION_COURIER,
         city_code: selection.city_code,
         delivery_address: selection.delivery_address,
@@ -164,7 +198,8 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
       throw new CdekFulfillmentDataError("option");
     }
 
-    await this.calculateCarrierQuote(optionId, data, context);
+    const origin = selectCheckoutHandoff(context.from_location, "cdek", data);
+    await this.calculateCarrierQuote(optionId, data, origin, buildCdekCartPackages(context["items"]));
     return {
       calculated_amount: optionId === CDEK_OPTION_PVZ ? this.options.pvzPriceRub : this.options.courierPriceRub,
       is_calculated_price_tax_inclusive: true,
@@ -176,6 +211,7 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
     items: unknown[],
     order: Record<string, unknown> | undefined,
     fulfillment: Record<string, unknown>,
+    additionalData?: Record<string, unknown>,
   ): Promise<CreateFulfillmentResult> {
     const optionId = parseDeliveryMode(data);
 
@@ -192,6 +228,7 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
       };
     }
 
+    const origin = selectFulfillmentHandoff(fulfillment, "cdek", data, additionalData);
     const orderNumber = requireText(
       String(order?.display_id ?? order?.id ?? ""),
       "order identity",
@@ -215,11 +252,22 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
         }
       : undefined;
 
-    const packageData = buildCdekPackage(items, order);
+    const packages = buildCdekPackages(items, order);
+    validateCdekPackages(data, packages);
+    const orderPackages = buildCdekOrderPackages(packages, order);
+    if (pvzSelection) {
+      const points = await this.client.getDeliveryPoints(pvzSelection.city_code);
+      if (!points.some((point) => point.code === pvzSelection.cdek_pvz_code &&
+        point.location.city_code === pvzSelection.city_code)) {
+        throw new CdekFulfillmentDataError("PVZ is no longer available");
+      }
+    }
 
+    const { quote } = await this.calculateCarrierQuote(optionId, data, origin, packages);
     const cdekOrder = await this.client.createOrder({
       orderNumber,
       tariffCode,
+      shipmentPoint: origin.id,
       recipient: {
         name: recipientName,
         phones: [{ number: recipientPhone }],
@@ -227,28 +275,25 @@ export default class CdekFulfillmentProviderService extends AbstractFulfillmentP
       },
       deliveryPoint: pvzSelection?.cdek_pvz_code,
       toAddress,
-      packages: [
-        {
-          number: "1",
-          ...packageData,
-        },
-      ],
+      packages: orderPackages,
     });
 
     const uuid = cdekOrder.entity.uuid;
     return {
       data: {
+        delivery_mode: optionId,
+        handoff_origin: origin,
+        carrier_quote_amount: quote.delivery_sum,
+        carrier_quote_currency: "RUB",
+        carrier_quote_provider: "cdek",
+        carrier_quote_tariff_code: quote.tariff_code,
         cdek_uuid: uuid,
         tariff_code: tariffCode,
         pvz_code: pvzSelection?.cdek_pvz_code,
+        validated_packages: packages,
       },
-      labels: [
-        {
-          tracking_number: uuid,
-          tracking_url: `https://www.cdek.ru/ru/tracking?order_id=${uuid}`,
-          label_url: "",
-        },
-      ],
+      // CDEK's asynchronous entity UUID is not a waybill number or label.
+      labels: [],
     };
   }
 

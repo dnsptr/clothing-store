@@ -1,27 +1,9 @@
 /**
- * Отображение статусов Т-Банка на состояния Medusa.
- *
- * Здесь сосредоточена самая дорогая ошибка всей интеграции, поэтому правила
- * зафиксированы в проектном решении (docs/design/
- * tbank-payments-and-fiscalization.md, §4) и повторены здесь как код.
- *
- * Ключевой факт, из-за которого таблица выглядит именно так: штатный
- * сабскрайбер Medusa (`payment-webhook`) делает ранний `return` на пяти
- * значениях `PaymentActions` из восьми, а `processPaymentWorkflow` в последней
- * ветке `when` **не проверяет action вообще** — любой дошедший до воркфлоу
- * action при связанной корзине и отсутствующем заказе завершает корзину и
- * создаёт заказ.
- *
- * Отсюда правило §4.2: всё, что не является терминальным исходом платежа,
- * возвращается как `not_supported` — единственное значение, гарантированно не
- * имеющее сайд-эффектов. Смапить `NEW`/`FORM_SHOWED` в `pending` означало бы
- * создавать заказ по неоплаченной корзине в тот момент, когда покупатель лишь
- * открыл платёжную форму.
+ * Bank state descriptions and strict notification parsing.
+ * Durable inbox reconciliation, not generic Medusa webhook actions, owns
+ * payment transitions and order creation.
  */
-
-import type { PaymentActions, PaymentSessionStatus } from "@medusajs/types";
-
-import { kopecksToRubles } from "./money";
+import type { PaymentSessionStatus } from "@medusajs/types";
 
 /**
  * Статусы Т-Банка, встречающиеся в нотификациях одностадийной оплаты
@@ -52,48 +34,6 @@ export function isTBankStatus(value: unknown): value is TBankStatus {
   );
 }
 
-/**
- * Таблица §4.3 — статус Т-Банка → команда фреймворку.
- *
- * `pending` не встречается в таблице намеренно (§4.2), `pending_authorization`
- * — тоже: как action он no-op, а как *статус сессии* осмыслен и живёт в
- * `toSessionStatus` ниже.
- */
-const ACTION_BY_STATUS: Record<TBankStatus, PaymentActions> = {
-  // Покупатель ещё ничего не оплатил — фреймворк не должен делать ничего.
-  NEW: "not_supported",
-  FORM_SHOWED: "not_supported",
-  AUTHORIZING: "not_supported",
-  "3DS_CHECKING": "not_supported",
-
-  // Терминальные успешные исходы — единственные, что доезжают до воркфлоу.
-  AUTHORIZED: "authorized",
-  CONFIRMED: "captured",
-
-  // Штатный путь эти значения отбрасывает; их обрабатывает собственный
-  // сабскрайбер (§4.4). Возвращать их всё равно правильно: это честное
-  // описание произошедшего, и именно на них подписан наш обработчик.
-  REJECTED: "failed",
-  DEADLINE_EXPIRED: "failed",
-  CANCELED: "canceled",
-  REVERSED: "canceled",
-
-  // Возвраты — отдельный контур (§8), через webhook action не проводятся.
-  REFUNDED: "not_supported",
-  PARTIAL_REFUNDED: "not_supported",
-};
-
-/**
- * Статус Т-Банка → команда Medusa. Неизвестный статус — `not_supported`.
- *
- * Консервативный дефолт здесь принципиален: банк может ввести новый статус
- * раньше, чем мы обновим код, и цена ошибки несимметрична. Лишний
- * `not_supported` означает «Medusa ничего не сделала», лишний `authorized` —
- * «создан заказ по неоплаченной корзине».
- */
-export function toWebhookAction(status: string): PaymentActions {
-  return isTBankStatus(status) ? ACTION_BY_STATUS[status] : "not_supported";
-}
 
 /**
  * Статус Т-Банка → состояние платёжной сессии Medusa.
@@ -112,7 +52,8 @@ const SESSION_STATUS_BY_STATUS: Record<TBankStatus, PaymentSessionStatus> = {
   AUTHORIZING: "pending_authorization",
   "3DS_CHECKING": "pending_authorization",
 
-  AUTHORIZED: "authorized",
+  // A bank hold must not authorize Medusa order creation before CONFIRMED.
+  AUTHORIZED: "pending_authorization",
   CONFIRMED: "captured",
 
   REJECTED: "error",
@@ -257,24 +198,3 @@ export function parseNotification(
   };
 }
 
-/**
- * Нотификация → результат для `getWebhookActionAndData` (§4.5).
- *
- * `session_id` берётся из `OrderId` — по §5.3 туда кладётся идентификатор
- * платёжной сессии Medusa, а не корзины. `amount` конвертируется в рубли
- * единственной функцией конверсии: это значение уходит в
- * `capturePaymentWorkflow` как сумма списания, поэтому ошибка масштаба здесь —
- * это списание в сто раз больше или меньше.
- */
-export function toWebhookActionAndData(notification: TBankNotification): {
-  action: PaymentActions;
-  data: { session_id: string; amount: string };
-} {
-  return {
-    action: toWebhookAction(notification.status),
-    data: {
-      session_id: notification.orderId,
-      amount: kopecksToRubles(notification.amountKopecks),
-    },
-  };
-}

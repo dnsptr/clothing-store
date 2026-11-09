@@ -22,20 +22,22 @@
     "integrations:check:pochta": "node --env-file=medusa-prototype/apps/backend/.env.integrations.local medusa-prototype/scripts/check-pochta.mjs"
   },
   "dependencies": {
-    "next": "16.4.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "next": "16.4.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.0",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.0",
-    "typescript": "^5"
+    "@playwright/test": "1.65.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.4.5",
+    "typescript": "~6.0.3"
   },
   "overrides": {
-    "sharp": "^0.35.5"
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.5"
+    }
   }
 }

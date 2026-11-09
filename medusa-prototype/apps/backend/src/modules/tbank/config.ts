@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import {
   TBANK_PAYMENT_PROVIDER_ID,

@@ -1,7 +1,8 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
-import type { CdekPackage, CdekTariffResult } from "../../../../modules/cdek/lib/cdek-client";
+import type { CdekTariffResult } from "../../../../modules/cdek/lib/cdek-client";
+import { packageSchema } from "../../../../modules/cdek/lib/cdek-schemas";
 import { CDEK_TARIFF_COURIER, CDEK_TARIFF_PVZ } from "../../../../modules/cdek/provider-id";
 import { parseCdekEnvironment } from "../../../../modules/cdek/config";
 import {
@@ -10,15 +11,11 @@ import {
   publicCdekGuard,
 } from "../../../../modules/cdek/public-api";
 
-const DIMENSION_SCHEMA = z.number().finite().positive().max(120);
 const CALCULATION_SCHEMA = z.object({
   to_city_code: z.number().int().min(1).max(10_000_000),
   tariff_code: z.union([z.literal(CDEK_TARIFF_PVZ), z.literal(CDEK_TARIFF_COURIER)]).optional(),
-  weight: z.number().finite().positive().max(30_000),
-  length: DIMENSION_SCHEMA,
-  width: DIMENSION_SCHEMA,
-  height: DIMENSION_SCHEMA,
-}).refine(({ length, width, height }) => length + width + height <= 150);
+  packages: z.array(packageSchema).min(1).max(100),
+}).strict();
 
 type CalculationResult = {
   readonly pvz: CdekTariffResult | null;
@@ -52,28 +49,22 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   try {
     const body = bodyResult.data;
-    const parcel: CdekPackage = {
-      weight: body.weight,
-      length: body.length,
-      width: body.width,
-      height: body.height,
-    };
-    const cacheKey = [body.to_city_code, body.tariff_code ?? "both", body.weight, body.length, body.width, body.height].join(":");
+    const cacheKey = JSON.stringify([body.to_city_code, body.tariff_code ?? "both", body.packages]);
     const tariffs = await publicCdekGuard.run<CalculationResult>({
       key: `calculate:${cacheKey}`,
       cacheTtlMs: 30_000,
       execute: async () => {
         if (body.tariff_code === CDEK_TARIFF_PVZ) {
-          const pvz = await client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_PVZ, packages: [parcel] });
+          const pvz = await client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_PVZ, packages: body.packages });
           return { pvz, courier: null };
         }
         if (body.tariff_code === CDEK_TARIFF_COURIER) {
-          const courier = await client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_COURIER, packages: [parcel] });
+          const courier = await client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_COURIER, packages: body.packages });
           return { pvz: null, courier };
         }
         const [pvz, courier] = await Promise.all([
-          client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_PVZ, packages: [parcel] }),
-          client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_COURIER, packages: [parcel] }),
+          client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_PVZ, packages: body.packages }),
+          client.calculateTariff({ toCityCode: body.to_city_code, tariffCode: CDEK_TARIFF_COURIER, packages: body.packages }),
         ]);
         return { pvz, courier };
       },

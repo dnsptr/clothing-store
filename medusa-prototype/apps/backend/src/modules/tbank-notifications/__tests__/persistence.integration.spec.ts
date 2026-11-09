@@ -4,6 +4,7 @@ import { Migration20260726153050 } from "../migrations/Migration20260726153050";
 import { Migration20260909120000 } from "../migrations/Migration20260909120000";
 import { Migration20260926150000 } from "../migrations/Migration20260926150000";
 import { Migration20261011100000 } from "../migrations/Migration20261011100000";
+import { Migration20261107120000 } from "../migrations/Migration20261107120000";
 import TbankNotificationModuleService from "../service";
 
 const DATABASE_URL = process.env.TBANK_INBOX_TEST_DATABASE_URL;
@@ -25,7 +26,7 @@ function queryManager(client: Client) {
 
 async function applyQueries(
   client: Client,
-  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20261011100000,
+  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20261011100000 | Migration20261107120000,
 ): Promise<void> {
   for (const query of migration.getQueries()) {
     if (typeof query !== "string") throw new TypeError("Test migration contains a non-string query");
@@ -56,6 +57,9 @@ async function rebuildSchema(client: Client): Promise<void> {
   const polling = new Migration20261011100000({} as never, {} as never);
   await polling.up();
   await applyQueries(client, polling);
+  const amountPresence = new Migration20261107120000({} as never, {} as never);
+  await amountPresence.up();
+  await applyQueries(client, amountPresence);
 }
 
 async function insertPending(client: Client, id: string): Promise<void> {
@@ -112,6 +116,27 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
 
   afterEach(async () => {
     await Promise.all(clients.splice(0).map((client) => client.end()));
+  });
+
+  it("retains Amount omission across an inbox lease and safely reapplies its migration", async () => {
+    await insertPending(database, "missing-amount");
+    await database.query(`update tbank_notification
+      set status = 'CANCELED', success = false, amount_kopecks = 0, amount_provided = false
+      where id = 'missing-amount'`);
+    const claimed = await TbankNotificationModuleService.prototype.claimNotificationById.call(
+      {}, { id: "missing-amount", leaseToken: "lease-amount", now: new Date() },
+      { manager: queryManager(database) } as never,
+    );
+    expect(claimed[0]).toEqual(expect.objectContaining({ amount_kopecks: 0, amount_provided: false }));
+
+    const rollback = new Migration20261107120000({} as never, {} as never);
+    await rollback.down();
+    await applyQueries(database, rollback);
+    const reapply = new Migration20261107120000({} as never, {} as never);
+    await reapply.up();
+    await applyQueries(database, reapply);
+    const historical = await database.query("select amount_provided from tbank_notification where id = 'missing-amount'");
+    expect(historical.rows[0].amount_provided).toBe(true);
   });
 
   it("applies, rolls back, and reapplies with snapshot-compatible index names", async () => {

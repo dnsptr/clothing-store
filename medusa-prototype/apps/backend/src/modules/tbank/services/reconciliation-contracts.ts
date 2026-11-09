@@ -9,6 +9,7 @@ import type {
 
 import type { TBankClient } from "../lib/client";
 import type { PollAttemptRow } from "../../tbank-notifications/service";
+import type { PaymentCheckoutHolds } from "../../checkout-holds/contracts";
 
 
 export type NotificationRow = {
@@ -17,6 +18,7 @@ export type NotificationRow = {
   readonly status: string;
   readonly order_id: string;
   readonly amount_kopecks: number;
+  readonly amount_provided?: boolean;
   readonly terminal_key: string;
   readonly success: boolean;
   readonly lifecycle_state: string;
@@ -93,6 +95,7 @@ export type PaymentReconcilerDependencies = {
   readonly durableLinkageChecker?: DurableLinkageChecker;
   readonly events?: PaidOrderEvents;
   readonly query?: QueryService;
+  readonly holds?: PaymentCheckoutHolds;
   readonly container?: MedusaContainer;
   readonly [key: string]: unknown;
 };
@@ -127,6 +130,7 @@ export type ReconciliationServices = {
   readonly query?: QueryService;
   readonly events?: PaidOrderEvents;
   readonly container?: MedusaContainer;
+  readonly holds?: PaymentCheckoutHolds;
 };
 
 export class InvalidInboxRowError extends Error {
@@ -155,6 +159,9 @@ export function parseNotificationRow(value: unknown): NotificationRow {
   if (typeof amountKopecks !== "number") throw new InvalidInboxRowError("amount_kopecks");
   if (typeof success !== "boolean") throw new InvalidInboxRowError("success");
   if (typeof attemptCount !== "number") throw new InvalidInboxRowError("attempt_count");
+  if (row["amount_provided"] !== undefined && typeof row["amount_provided"] !== "boolean") {
+    throw new InvalidInboxRowError("amount_provided");
+  }
   const canonicalHash = row["canonical_payload_hash"];
   return {
     id: requiredString(row, "id"),
@@ -162,6 +169,7 @@ export function parseNotificationRow(value: unknown): NotificationRow {
     status: requiredString(row, "status"),
     order_id: requiredString(row, "order_id"),
     amount_kopecks: amountKopecks,
+    amount_provided: row["amount_provided"] !== false,
     terminal_key: requiredString(row, "terminal_key"),
     success,
     lifecycle_state: requiredString(row, "lifecycle_state"),

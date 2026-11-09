@@ -33,12 +33,19 @@ export type YandexPickupPoint = {
   readonly isPartialRefuseAllowed: boolean;
 };
 
-export type YandexPricingParams = {
-  readonly destinationStationId: string;
+export type YandexPlace = {
+  readonly groupId: string;
+  readonly unitIndex: number;
   readonly weightGrossGrams: number;
   readonly dxCm: number;
   readonly dyCm: number;
   readonly dzCm: number;
+};
+
+export type YandexPricingParams = {
+  readonly sourceStationId: string;
+  readonly destinationStationId: string;
+  readonly places: readonly YandexPlace[];
   readonly assessedPriceRub: number;
 };
 
@@ -49,6 +56,7 @@ export type YandexPricingResult = {
 };
 
 export type YandexOfferCreateParams = {
+  readonly sourceStationId: string;
   readonly orderId: string;
   readonly destinationStationId: string;
   readonly recipientFirstName: string;
@@ -60,15 +68,10 @@ export type YandexOfferCreateParams = {
     readonly title: string;
     readonly article: string;
     readonly unitPrice: number;
-    readonly quantity: number;
-    readonly dxCm: number;
-    readonly dyCm: number;
-    readonly dzCm: number;
+    readonly groupId: string;
+    readonly unitIndex: number;
   }>;
-  readonly weightGrossGrams: number;
-  readonly dxCm: number;
-  readonly dyCm: number;
-  readonly dzCm: number;
+  readonly places: readonly YandexPlace[];
   readonly assessedPriceRub: number;
 };
 export class YandexDeliveryApiError extends Error {
@@ -97,8 +100,56 @@ function parseUpstream<T>(
 
 export type YandexDetectedLocation = { readonly geo_id: number; readonly address: string };
 
+function physicalDims(place: YandexPlace) {
+  return {
+    weight_gross: place.weightGrossGrams,
+    dx: place.dxCm,
+    dy: place.dyCm,
+    dz: place.dzCm,
+  };
+}
+
+function validatedPlaces(places: readonly YandexPlace[]) {
+  if (!Array.isArray(places) || places.length < 1 || places.length > 100) {
+    throw new YandexDeliveryApiError("Measured places are required");
+  }
+  const identities = new Map<string, YandexPlace>();
+  let totalWeight = 0;
+  for (const place of places) {
+    if (!place || typeof place.groupId !== "string" || !/^[a-f0-9]{64}$/u.test(place.groupId) ||
+      !Number.isInteger(place.unitIndex) ||
+      place.unitIndex < 1 || place.unitIndex > 100 ||
+      ![place.weightGrossGrams, place.dxCm, place.dyCm, place.dzCm]
+        .every((value) => Number.isInteger(value) && value > 0) ||
+      place.weightGrossGrams > 30_000 ||
+      Math.max(place.dxCm, place.dyCm, place.dzCm) > 150 ||
+      place.dxCm + place.dyCm + place.dzCm > 300) {
+      throw new YandexDeliveryApiError("Invalid measured place");
+    }
+    const key = JSON.stringify([place.groupId, place.unitIndex]);
+    if (identities.has(key)) throw new YandexDeliveryApiError("Duplicate measured place");
+    identities.set(key, place);
+    totalWeight += place.weightGrossGrams;
+  }
+  if (totalWeight > 200_000) throw new YandexDeliveryApiError("Order weight exceeds PVZ limit");
+  return { identities, totalWeight };
+}
+
+function placeBarcode(orderId: string, place: Pick<YandexPlace, "groupId" | "unitIndex">) {
+  return `MM-${createHash("sha256")
+    .update(JSON.stringify([orderId, place.groupId, place.unitIndex]), "utf8")
+    .digest("hex")}`;
+}
+
 export class YandexDeliveryClient {
   constructor(private readonly options: YandexDeliveryProviderOptions) {}
+
+  private validateSourceStation(sourceStationId: string): void {
+    if (typeof sourceStationId !== "string" || !sourceStationId.trim() ||
+      sourceStationId.length > 200 || sourceStationId !== sourceStationId.trim()) {
+      throw new YandexDeliveryApiError("An explicit source station is required");
+    }
+  }
 
   private async request(endpoint: string, init: RequestInit = {}): Promise<unknown> {
     const headers = new Headers(init.headers);
@@ -180,29 +231,23 @@ export class YandexDeliveryClient {
    * Calculates delivery price and transit time in days to a specific PVZ.
    */
   async calculatePricing(params: YandexPricingParams): Promise<YandexPricingResult> {
-    const { weightGrossGrams, dxCm, dyCm, dzCm, assessedPriceRub } = params;
-    if (![weightGrossGrams, dxCm, dyCm, dzCm, assessedPriceRub].every(Number.isFinite) ||
-      weightGrossGrams <= 0 || dxCm <= 0 || dyCm <= 0 || dzCm <= 0 || assessedPriceRub <= 0) {
-      throw new YandexDeliveryApiError("Measured parcel and assessed price are required");
+    this.validateSourceStation(params.sourceStationId);
+    const { places, assessedPriceRub } = params;
+    const { totalWeight } = validatedPlaces(places);
+    if (!Number.isFinite(assessedPriceRub) || assessedPriceRub <= 0 || assessedPriceRub > 100_000_000) {
+      throw new YandexDeliveryApiError("Assessed price is required");
     }
 
     const response = await this.request("/pricing-calculator", {
       method: "POST",
       body: JSON.stringify({
-        source: { platform_station_id: this.options.sourceStationId },
+        source: { platform_station_id: params.sourceStationId },
         destination: { platform_station_id: params.destinationStationId },
         tariff: "self_pickup",
         payment_method: "already_paid",
-        total_weight: weightGrossGrams,
+        total_weight: totalWeight,
         total_assessed_price: Math.round(assessedPriceRub * 100),
-        places: [{
-          physical_dims: {
-            weight_gross: weightGrossGrams,
-            dx: dxCm,
-            dy: dyCm,
-            dz: dzCm,
-          },
-        }],
+        places: places.map((place) => ({ physical_dims: physicalDims(place) })),
       }),
     });
     return parseUpstream(pricingCalculatorResponseSchema, response, "pricing calculator");
@@ -212,16 +257,31 @@ export class YandexDeliveryClient {
    * Creates a delivery offer in Yandex Platform API.
    */
   async createOffer(params: YandexOfferCreateParams): Promise<{ offerId: string }> {
+    this.validateSourceStation(params.sourceStationId);
     const orderDigest = createHash("sha256")
       .update(params.orderId, "utf8")
       .digest("base64url");
     const operatorRequestId = `req-pvz-${orderDigest}`;
 
-    const { weightGrossGrams, dxCm, dyCm, dzCm } = params;
-    if (![weightGrossGrams, dxCm, dyCm, dzCm].every(Number.isFinite) ||
-      weightGrossGrams <= 0 || dxCm <= 0 || dyCm <= 0 || dzCm <= 0) {
-      throw new YandexDeliveryApiError("Measured parcel is required");
+    const { identities } = validatedPlaces(params.places);
+    if (!Array.isArray(params.items) || params.items.length !== identities.size) {
+      throw new YandexDeliveryApiError("Every place must contain one item");
     }
+    let assessedPrice = 0;
+    for (const item of params.items) {
+      const key = JSON.stringify([item.groupId, item.unitIndex]);
+      if (!identities.delete(key) || !Number.isFinite(item.unitPrice) || item.unitPrice < 0) {
+        throw new YandexDeliveryApiError("Invalid item place or price");
+      }
+      assessedPrice += item.unitPrice;
+    }
+    if (!Number.isFinite(params.assessedPriceRub) || params.assessedPriceRub <= 0 ||
+      params.assessedPriceRub > 100_000_000 ||
+      Math.round(assessedPrice * 100) !== Math.round(params.assessedPriceRub * 100)) {
+      throw new YandexDeliveryApiError("Assessed item price differs from order");
+    }
+    const placesByIdentity = new Map(params.places.map((place) =>
+      [JSON.stringify([place.groupId, place.unitIndex]), place]));
 
     const response = await this.request("/offers/create", {
       method: "POST",
@@ -232,7 +292,7 @@ export class YandexDeliveryClient {
         },
         source: {
           platform_station: {
-            platform_id: this.options.sourceStationId,
+            platform_id: params.sourceStationId,
           },
         },
         destination: {
@@ -251,31 +311,24 @@ export class YandexDeliveryClient {
           payment_method: "already_paid",
           delivery_cost: 0,
         },
-        places: [
-          {
-            physical_dims: {
-              weight_gross: weightGrossGrams,
-              dx: dxCm,
-              dy: dyCm,
-              dz: dzCm,
-            },
-            barcode: `MM-${params.orderId}-1`,
-          },
-        ],
-        items: params.items.map((item) => ({
-          count: item.quantity,
-          name: item.title,
-          article: item.article,
-          billing_details: {
-            unit_price: Math.round(item.unitPrice * 100),
-            assessed_unit_price: Math.round(item.unitPrice * 100),
-          },
-          physical_dims: {
-            dx: item.dxCm,
-            dy: item.dyCm,
-            dz: item.dzCm,
-          },
+        places: params.places.map((place) => ({
+          physical_dims: physicalDims(place),
+          barcode: placeBarcode(params.orderId, place),
         })),
+        items: params.items.map((item) => {
+          const place = placesByIdentity.get(JSON.stringify([item.groupId, item.unitIndex]))!;
+          return {
+            count: 1,
+            name: item.title,
+            article: item.article,
+            place_barcode: placeBarcode(params.orderId, item),
+            billing_details: {
+              unit_price: Math.round(item.unitPrice * 100),
+              assessed_unit_price: Math.round(item.unitPrice * 100),
+            },
+            physical_dims: { dx: place.dxCm, dy: place.dyCm, dz: place.dzCm },
+          };
+        }),
         last_mile_policy: "self_pickup",
       }),
     });

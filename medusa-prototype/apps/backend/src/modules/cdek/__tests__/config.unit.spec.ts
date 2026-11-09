@@ -36,6 +36,11 @@ describe("parseCdekEnvironment", () => {
     });
   });
 
+  it("does not read a legacy global shipment point", () => {
+    expect(parseCdekEnvironment({
+      ...VALID_CDEK_ENVIRONMENT, CDEK_SHIPMENT_POINT_CODE: "A".repeat(256),
+    })).toEqual(parseCdekEnvironment(VALID_CDEK_ENVIRONMENT));
+  });
   it("rejects an enabled provider without an explicitly configured origin city", () => {
     const { CDEK_FROM_CITY_CODE: _, ...withoutCity } = VALID_CDEK_ENVIRONMENT;
     expect(() => parseCdekEnvironment(withoutCity)).toThrow(CdekConfigurationError);

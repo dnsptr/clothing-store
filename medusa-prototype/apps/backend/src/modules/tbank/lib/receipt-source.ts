@@ -33,7 +33,7 @@ type CartPaymentCollectionLink = {
   readonly payment_collection_id?: string;
 };
 
-const CART_FIELDS = [
+export const CART_FIELDS = [
   "id",
   "email",
   "shipping_address.phone",

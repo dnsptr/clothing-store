@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 import { TBANK_NOTIFICATION_MODULE } from "../../../../modules/tbank-notifications";
 import { notificationDto, paymentAttemptDto } from "./dto";
 import { ManualReviewListQuerySchema, type ManualReviewListQuery } from "./validators";

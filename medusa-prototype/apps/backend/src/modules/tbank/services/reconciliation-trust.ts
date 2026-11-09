@@ -38,7 +38,7 @@ export function correlateRow(
     paymentId: row.payment_id,
     status: row.status,
     amountKopecks: row.amount_kopecks,
-    amountProvided: true,
+    amountProvided: row.amount_provided !== false,
     currencyCode: "rub",
     success: row.success,
   };

@@ -1,6 +1,6 @@
 import OwnCourierFulfillmentProviderService, { UnsupportedOwnCourierCancellationError } from "../service";
 import { parseOwnCourierEnvironment } from "../config";
-import { ownCourierEligibility } from "../eligibility";
+import { ownCourierAddressKey, ownCourierEligibility } from "../eligibility";
 import { OWN_COURIER_OPTION } from "../provider-id";
 
 const address = {
@@ -21,6 +21,7 @@ const inside = {
 };
 const options = { token: "test-token", secret: "test-secret", priceRub: 0 };
 const option = { id: OWN_COURIER_OPTION };
+const addressKey = ownCourierAddressKey(address);
 
 beforeEach(() => {
   jest.restoreAllMocks();
@@ -162,7 +163,10 @@ describe("own courier provider", () => {
     const data = await service.validateFulfillmentData(option, {
       beltway_hit: "IN_MKAD", verified_address: "fake", delivery_mode: "delivered",
     }, { shipping_address: address } as never);
-    expect(data).toEqual({ delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result });
+    expect(data).toEqual({
+      delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+      verified_address_key: addressKey,
+    });
     expect(request).toHaveBeenCalledTimes(1);
   });
 
@@ -177,13 +181,49 @@ describe("own courier provider", () => {
     const request = jest.fn();
     global.fetch = request;
     const result = await service.createFulfillment(
-      { delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result, courier_status: "delivered" },
-      [], undefined, { shipping_option_id: "so_own_courier_123" },
+      { delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+        verified_address_key: addressKey, courier_status: "delivered" },
+      [], { shipping_address: address }, { shipping_option_id: "so_own_courier_123" },
     );
     expect(result).toEqual({ data: {
       delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result, courier_status: "pending_assignment",
+      verified_address_key: addressKey,
     }, labels: [] });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects an old selection when the order address changed or its binding is missing", async () => {
+    const service = new OwnCourierFulfillmentProviderService({}, options);
+    const request = jest.fn();
+    global.fetch = request;
+    const data = {
+      delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+      verified_address_key: addressKey,
+    };
+    for (const shippingAddress of [
+      undefined,
+      { ...address, address_1: "Адрес за МКАД" },
+      { ...address, address_2: "кв 90" },
+    ]) {
+      await expect(service.createFulfillment(data, [], { shipping_address: shippingAddress }, {}))
+        .rejects.toThrow("Own courier is unavailable");
+    }
+    await expect(service.createFulfillment({ ...data, verified_address_key: undefined },
+      [], { shipping_address: address }, {})).rejects.toThrow("Own courier is unavailable");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("honors an already-paid unchanged delivery after the promotion ends", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(Date.parse("2027-01-01T00:00:00+03:00"));
+    const service = new OwnCourierFulfillmentProviderService({}, options);
+    global.fetch = jest.fn();
+    await expect(service.createFulfillment({
+      delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+      verified_address_key: addressKey,
+    }, [], { shipping_address: address }, {})).resolves.toMatchObject({
+      data: { courier_status: "pending_assignment" },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it.each([

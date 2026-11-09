@@ -444,19 +444,18 @@ n.createTransport({
 
 ## Reproducible local checks
 
-Use the workspace-declared `npm@10.9.0` for dependency installation, including
-lockfile maintenance. A clean
-`npx --yes npm@10.9.0 ci --ignore-scripts --no-audit --no-fund` resolved the
-restored lockfile without damaged-lock warnings. Do not regenerate it with a
-different resolver and assume the Medusa/MikroORM dependency layout is equivalent.
+Use the workspace-declared `npm@11.19.1` with the pinned Node 24.22.2.
+The repository root and `medusa-prototype` have independent lockfiles.
+Install each tree with `npm ci --ignore-scripts --no-audit --no-fund`;
+run the explicit audit separately. Do not regenerate a standalone server
+lock or bypass peer constraints with `--force` / `--legacy-peer-deps`.
 
-The root AJV override keeps modern consumers on AJV 8; ESLint and
-`@eslint/eslintrc` explicitly retain their supported, patched AJV 6 branch.
-Forcing AJV 8 into those legacy consumers prevented the lint command from
-loading. `@medusajs/eslint-plugin@2.21.2` also normalizes Windows module paths;
-the previous plugin incorrectly reported same-module model relationships as
-cross-module references. Actual backend lint now completes with zero errors
-and 155 warnings; warnings remain visible.
+Security overrides are scoped to investigated consumers, not applied as
+blanket major replacements. The Rushstack consumer receives patched AJV 8;
+legacy AJV 6 consumers retain their own compatible branch.
+`@medusajs/eslint-plugin@2.22.4` now matches the Medusa release. The observed
+backend build lint reported zero errors and 127 warnings; warnings remain
+visible and are not a clean-security claim.
 
 The Playwright fixture resolves the public `tsx` entry from the backend
 package scope, rather than relying on a particular `node_modules` hoisting
@@ -471,11 +470,17 @@ suite passed all 37 scenarios, including confirmed-payment reload with a
 ## Dependency security policy and residual advisories
 
 Production dependencies are installed in the original workspace layout with
-`npm ci --omit=dev`, using the repository's root `package-lock.json` and
+`npm ci --ignore-scripts --omit=dev`, using the repository's root `package-lock.json` and
 security `overrides`. Do not generate a second standalone server lock during
 the image build: npm produced a `picomatch` tree that its own `ci` rejected.
 The final image retains both the root dependency tree and any backend-local
 dependencies, alongside the compiled server and Admin assets.
+
+`scripts/deploy.sh` uses `db:migrate --execute-safe-links --execute-safe-search`
+so Medusa 2.22 does not hang on interactive link/search prompts. The same
+safe flags passed on the isolated database copy. Unsafe link/search changes
+still require explicit review; do not replace these with automatic
+`--execute-all-*` flags. Keep the pre-migration dump for schema rollback.
 
 The 12 October isolated check passed backend/admin compilation, storefront
 and backend typechecks, five PostgreSQL checkout/access/upload regressions
@@ -486,7 +491,7 @@ No real payment or shipment was made. At that 12 October check, the complete
 Docker image was not built because the local daemon was unavailable.
 The full-image verification on 19 October supersedes that packaging limitation.
 
-The Dockerfile now pins Node `22.23.2` and explicitly sets `NODE_ENV=production`
+The 19 October Dockerfile pinned Node `22.23.2` and explicitly set `NODE_ENV=production`
 for `medusa build`: this CLI otherwise defaults the build environment to
 development. Setting it only in the runner does not fix already-built Admin
 assets. The final Admin login was checked in Chromium; the previous React
@@ -497,7 +502,7 @@ Compose mounts the existing host `./static` at `/app/apps/backend/static`;
 the host media directory and its UID 1000 ownership policy are unchanged.
 Release or roll back the Dockerfile/image and Compose volume mapping together.
 
-The final local image `mm-backend-smoke:796c1c8-dockerfix`
+That 19 October local image `mm-backend-smoke:796c1c8-dockerfix`
 (`sha256:d691a9e9989daf94b18930ac5ff3ccaccd8b35bf89d09c2e945d4ce8225c9a0d`)
 passed compiled migrations and a repeat migration, HTTP checkout with an
 offline bank, access/upload/refund guards, container recreation with persisted
@@ -506,37 +511,598 @@ passed `config --quiet` using synthetic environment values.
 See the [full Docker verification report](../docs/DEPLOYMENT_2026-09-05.md#полный-docker-image--19-октября-2026)
 for evidence and limits; this was not a production deployment or a live charge.
 
-Registry advisory lookup is **not clean**. These packages remain in the
-resolved Medusa runtime tree; inclusion alone does not prove a reachable
-exploit. Major replacements in the vendor's router/build/parser stack were
-not forced without compatibility evidence.
+The dependency audit was refreshed on **7 November 2026**:
 
-| Package | Severity | Advisory |
+| Tree | Full audit result |
+| --- | --- |
+| Storefront | 0 findings, including development, optional and peer dependencies |
+| Medusa workspace | 12 Low package-level findings, all from the same `deepmerge` advisory; no Moderate, High or Critical |
+
+The remaining registry entry is
+[GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4),
+reported for `deepmerge@4.3.1`. Its
+[official CVE record](https://cveawg.mitre.org/api/cve/CVE-2026-93753)
+is **REJECTED**, dated 2 November 2026, because it does not describe a
+security vulnerability. GitHub/npm had not yet reflected that rejection.
+The production path is Medusa → notification-sendgrid → Sendgrid helpers →
+deepmerge; the development path is Jest → jest-config → deepmerge.
+Sendgrid is not a configured notification provider. No fake package version,
+vendor patch or audit-output suppression was added for this rejected CVE.
+
+The former `braces` entry
+[GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+was also withdrawn upstream. It is not a current unpatched High finding.
+
+| Consumer | Security override | Compatibility basis |
 | --- | --- | --- |
-| `braces@3.0.3` (also storefront development dependencies) | High | [Nested-pattern DoS](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) |
-| `vite@5.4.21` | High/moderate | [Windows path bypass](https://github.com/advisories/GHSA-fx2h-pf6j-xcff), [optimized-map traversal](https://github.com/advisories/GHSA-4w7w-66w2-5vf9), [Windows UNC disclosure](https://github.com/advisories/GHSA-v6wh-96g9-6wx3) |
-| `esbuild@0.21.5` under Vite | Moderate | [Development-server request exposure](https://github.com/advisories/GHSA-67mh-4wv8-2f99) |
-| `react-router@6.30.4` | Moderate | [Backslash redirect](https://github.com/advisories/GHSA-wrjc-x8rr-h8h6), [SSR error deserialization](https://github.com/advisories/GHSA-337j-9hxr-rhxg) |
-| `react-router-dom@6.30.4` | Moderate | [Redirect/XSS](https://github.com/advisories/GHSA-jjmj-jmhj-qwj2) |
-| `csv-parse@5.6.0` | Moderate | [Column-path prototype replacement](https://github.com/advisories/GHSA-8cw4-87c7-c6xx) |
-| `uuid@9.0.1` | Moderate | [v3/v5/v6 buffer bounds](https://github.com/advisories/GHSA-w5hq-g745-h8pq) |
-| `@opentelemetry/instrumentation-pg@0.52.0` | Moderate | [Database-username span disclosure](https://github.com/advisories/GHSA-qqmp-wf37-98f9) |
-| `postcss-selector-parser@6.1.4` | Moderate | [Selector parsing CPU exhaustion](https://github.com/advisories/GHSA-rj75-hqrm-r3gf) |
-| `sprintf-js@1.0.3` | Moderate | [Precision-specifier DoS](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) |
+| `@rushstack/node-core-library` | AJV `^8.20.0` | Same major; fixes the older pinned AJV 8 branch |
+| `bullmq` | UUID `11.1.1` | Actual callers use preserved CommonJS `v4()` without arguments |
+| ESLint/config-array, typescript-estree, test-exclude | minimatch `11.0.5` | Used matching APIs and options are retained; no global override |
+| Jest config/runtime/reporters, test-exclude | glob `14.0.2` | CommonJS `glob.sync`, async `glob` and used path/ignore options are retained |
 
-The two High advisories above have different exposure requirements. The
-reviewed `braces` advisory currently lists **no patched version**; it requires
-attacker-controlled deeply nested brace patterns, so dependency presence is
-not sufficient evidence of an HTTP exploit. Trace the pattern-input paths
-before accepting that residual risk.
+Backend schemas now import `@medusajs/framework/zod`, the same runtime and
+types used by Medusa middleware; the redundant direct Zod dependency was
+removed. Mixing direct Zod 4.6.7 with Medusa's 4.6.6 caused structural type
+comparison to exhaust even a 3 GiB heap. With one schema runtime, the native
+Node 24 backend/Admin build passes with a 1536 MiB heap and full type checking.
+That alone does not prove Linux image packaging; its result is reported below.
+The backend type library includes ES2022 for the existing `Array.at` call
+while retaining the ES2021 emission target.
 
-The Vite Windows bypass requires an exposed Vite development server and a
-sensitive file in an allowed directory on NTFS/Windows. This specific issue
-does not describe the Linux production host, but that does not clear the
-other Vite advisories or justify exposing a Windows development server.
+The storefront uses Next.js 16.4.5 / React 19.3.1. Medusa 2.22.4 keeps its
+supported React 18 admin tree, exact dashboard query/i18n context versions
+and Vite 7.3.7; its plugin does not support Vite 8. TypeScript 6.0.3 remains
+within the supported typescript-eslint peer range, unlike TypeScript 7.
+Frontend ESLint 9.39.5 is constrained by the stable React/import/a11y plugin
+peers; its deprecation warning remains a maintenance risk, not an audit fix.
 
-Keep development servers private, admin authentication enabled and the
-origin firewall in place. These controls do not remove the advisories or
-replace review of their input paths. Production deployment has not been
-performed by this check; apply the checkout-access migration and deploy
-the backend and storefront together in a controlled window.
+CI audits both complete trees. Storefront findings fail from Low upward.
+The backend prints its full report and fails from Moderate upward while the
+rejected Low CVE remains in the registry. Review any new Low entry explicitly;
+do not assume it is this rejected CVE. No production deployment or live
+financial/logistics operation is implied by these dependency checks.
+
+## Node 24 runtime alignment — 6 November 2026
+
+The root `.node-version` pins `24.22.2`. All repository GitHub Actions Node
+setup steps consume that file; the backend Dockerfile defaults to the same
+version. No production deployment or hosted-runtime setting was changed.
+
+The Windows Node 24.22.2 backend ran against an isolated copy of the local
+demo database (PostgreSQL 15 on loopback port 55434) and Redis 7 on loopback
+port 56380. Native Medusa migrations and temporary-admin creation succeeded.
+The HTTP smoke on port 9002 verified health, unauthenticated Admin rejection,
+admin login and product access, Store catalog, RUB cart creation, guest-cart
+access-token enforcement (`404` without the token, `200` with it), and adding
+a variant with server-calculated pricing.
+
+Bank, carrier, SMTP and Telegram integrations were disabled in that profile.
+No order, payment, refund or shipment was created. API authentication does
+not establish browser Admin acceptance: Windows Vite development startup
+reported `EPERM` renaming its generated dependency cache.
+
+The complete image `mario-node24-runtime:20261106`
+(`sha256:b7eb16af6748ff167e8199452583366b9acda89de82a4f110f551dc2718303f5`)
+built successfully, including backend and production Admin compilation.
+The build reported 155 lint warnings and no lint errors; these warnings
+were not suppressed or treated as a clean security audit.
+The final image reported Node `v24.22.2`, UID `1000` and working directory
+`/app/apps/backend`.
+
+The final isolated container connected the Redis Event Bus, Cache, Locking,
+Workflow Engine and PubSub, and Docker reported `healthy`. Compiled
+`db:migrate` completed with `DB_MIGRATION_CONCURRENCY=1`, including link
+sync and migration scripts. All 12 HTTP smoke requests passed: health,
+unauthenticated Admin rejection, admin login, Admin/Store catalog, RUB cart
+creation, access-token enforcement, and adding a server-priced variant.
+
+The initial Knex pool timeouts were traced with an independent pool probe:
+the production defaults requested TLS from the local non-TLS PostgreSQL
+server. Only the isolated test connection string was changed to include
+`?sslmode=disable`; the compiled migrations and API smoke then succeeded.
+Do not copy this local-only setting to a remote database that requires TLS.
+The earlier low-memory condition was observed separately and was not a
+sufficient diagnosis of the connection failure.
+
+Browser acceptance used a temporary Caddy HTTPS ingress on localhost:9443
+with a local self-signed certificate trusted only by the managed browser.
+Login and the actual Products table, including published statuses and
+variants, were observed. The session cookie remained `Secure`, `HttpOnly`
+and `SameSite=Lax`; production cookie security was not disabled to make
+plain-HTTP login work. The isolated fixture media were not mounted, so this
+check does not accept product thumbnails or the real launch catalog.
+The Windows Vite development-cache issue above is distinct from this
+successful compiled Admin verification.
+
+No real payment, refund, order or shipment was created. No production
+deployment or remote CI run was performed.
+
+After verification, the isolated containers, databases, network, temporary
+credentials and API smoke helper were removed. The original local demo
+database on port 55433 was preserved. The native Node 24 backend and local
+storefront were restored on `http://127.0.0.1:9000` and
+`http://127.0.0.1:3001`. Both `/health` and `/catalog` returned HTTP 200;
+the browser displayed the demo clothing catalog with images and RUB prices.
+The storefront uses the ignored root `.env.node24-stand.local` profile
+without replacing the existing `.env.local`.
+
+At completion of the Node-only check on 6 November, the storefront still
+used Next.js 16.4.0. Its first development start stopped with the security
+reminder; a normal retry started the local-only server without changing
+security policy flags. That was not vulnerability remediation. The
+7 November dependency refresh upgraded it to Next.js 16.4.5 and supersedes
+the previously open patch requirement; production remains a separate release.
+
+## Dependency refresh verification — 7 November 2026
+
+Both npm trees were upgraded to their latest mutually supported versions,
+without `--force` or `--legacy-peer-deps`. Framework-managed Admin context
+packages remain on Medusa's supported versions rather than incompatible majors.
+The audit result and rejected CVE are documented above; they are not hidden
+by this verification report.
+
+| Surface | Observed verification |
+| --- | --- |
+| Storefront | Lint, Next type generation, TypeScript, all 16 catalog/delivery regressions, server build and Pages export passed |
+| Storefront browser | All 37 Chromium checkout, payment-return, replay and delivery scenarios passed without test retries |
+| Backend and Admin | Full `medusa build` passed on Node 24.22.2; backend lint: 0 errors, 127 visible warnings |
+| Admin types | Separate `tsc --noEmit -p src/admin/tsconfig.json` passed |
+| Backend unit behavior | All 52 suites / 793 tests passed with one worker and memory-based worker recycling on the 8 GiB Windows workstation |
+| PostgreSQL HTTP/bootstrap | 3 tests passed against a separate temporary database |
+| PostgreSQL payment persistence | 2 suites / 20 tests passed for notification inbox and payment reconciliation |
+| Offline bank checkout | 5 HTTP tests passed, including cart access, address/upload guards and signed payment processing; bank fetches were mocked by the existing offline fixture |
+| Compiled production runtime | Started the real `.medusa/server` artifact with isolated PostgreSQL/Redis; all 13 HTTP probes passed, including Admin 401, invalid content payload 400, projected inventory/prices, anonymous cart 404 and server-priced line-item creation |
+| Production Admin browser | HTTPS login, Products, home-content editor and custom catalog editor loaded; no browser exceptions; session cookie remained Secure, HttpOnly, SameSite=Lax |
+| Security override APIs | Actual minimatch consumers passed six matching cases; four glob consumers passed sync/async, ignore, dotfile and Windows absolute-path cases |
+| Release configuration | CI YAML parsed; `bash -n scripts/deploy.sh` passed; safe noninteractive migration flags passed on the database copy |
+| Original local database | Backed up before upgrading; safe schema/link/search migration and refund-status backfill passed after the database-copy checks |
+| Restored local stand | Compiled backend on 9000: health 200, anonymous Admin 401, Store product read 200; Next on 3001 loaded 12 catalog cards and served a canonical product JPEG with HTTP 200 |
+| Linux image packaging | Not confirmed: online `npm ci` failed with network `ETIMEDOUT`; the subsequent offline cache check exceeded 600 seconds |
+
+The isolated Admin copy retained original media URLs at port 9000 while that
+server was stopped, so its thumbnail availability was not validated by the
+HTTPS browser check. It did not migrate or replace the original media.
+Jest emitted its existing forced-exit advice and the resource-limited unit
+runner also reported an ungraceful worker exit. Assertions passed; this is not
+a clean-teardown claim. The PostgreSQL fixture also emitted the pg warning
+about concurrent `client.query` calls being deprecated before pg 9.
+
+The browser fixture's control responses now close their connections: the
+previous failure was a stale API socket reused at Node 24's six-second idle
+close boundary. Payment replay checks wait for the cross-origin navigation
+commit instead of polling the outgoing DOM during document replacement.
+No production timeout, payment allowlist or retry policy was relaxed.
+
+The restored backend uses the compiled artifact with the original development
+environment files, not the dev watcher. Its generated `static` junction points
+to the original backend media directory without copying or replacing data.
+Backend source edits require a rebuild before they appear in that runtime.
+The storefront catalog DOM loaded, but its final screenshot could not complete;
+this is not a full storefront visual-verification claim.
+
+During the unfinished Linux packaging check, the 7.7 GiB Windows host had only
+about 50–70 MiB free. The heavier dev-watcher startup also failed to acquire
+database connections in time; the lower-overhead compiled runtime started
+successfully without changing database pool timeouts. A full image build and
+container HTTP smoke remain required before releasing these backend updates.
+No new Linux image or remote CI run is claimed.
+
+Temporary database/Redis containers, their network, synthetic environment
+profiles, diagnostic scripts and experimental TypeScript installations were
+removed. The pre-upgrade local database dump remains at
+`%TEMP%\omp-dependency-check.dump` for rollback; it contains database data and
+must not be committed or published.
+
+No live payment, refund, shipment or production deployment was performed.
+
+## Isolated Linux candidate verification — 7 November 2026
+
+This server-side run supersedes the outstanding Linux packaging gate above.
+It is not a production deployment or approval to enable checkout.
+
+- Server access verified at `129.101.103.52`.
+- Built and loaded image: `mm-backend-payments:20261107-node24`.
+- Image ID:
+  `sha256:d4ee175aa4d06b568241ae079119414a3b4a916e93cd3677e1bda2fb5e6445a0`.
+- Runtime probe: Node 24.22.2, Medusa 2.22.4, non-root UID 1000.
+- Linux build completed, including the backend and Admin bundle. Existing lint
+  output reported zero errors and 127 warnings; this was not a warning-free run.
+
+Before testing, a PostgreSQL custom-format dump, media archive and copies of
+the live deployment configuration were saved under
+`/opt/mario-candidates/payments-20261107/`. The directory is root-only; dumps,
+archives and configuration copies containing credentials are private artifacts,
+not repository files. These backups remain on the same server and do not
+replace an off-server backup.
+
+The database dump was restored into a separate PostgreSQL 15 container with
+`pg_restore --single-transaction --exit-on-error --no-owner --no-acl`.
+Candidate PostgreSQL, Redis, backend and temporary HTTPS proxy used an internal
+Docker network without outbound access. Carrier and TBank providers were
+disabled, SMTP/Telegram credentials absent, and worker mode set to `server`.
+No production database migration or service restart was performed.
+
+The first migration attempt exposed Medusa's non-localhost PostgreSQL TLS
+default. Appending `?sslmode=disable` to the generated candidate database URI
+fixed that private Docker-network connection; migrations then completed.
+This is not a recommendation to disable TLS for external database connections.
+
+Observed candidate checks:
+
+- `/health` 200; anonymous Admin request 401; existing administrator login 200.
+- 33 undeleted products, including 21 published; Store API returned 21 products.
+- Cart read without its capability token 404, with the token 200.
+- Adding one available variant succeeded at its calculated server price
+  of 3,990 RUB, not a browser-supplied price.
+- Existing media returned 200 as `image/webp`.
+- Real Chromium over private HTTPS loaded Products, the homepage content
+  editor and catalog editor. No catalog/content changes were saved.
+- Session cookie was Secure / HttpOnly / SameSite=Lax.
+  Logout returned 200; a subsequent protected request returned 401.
+- Automatic TBank refund failed with `not_allowed` before a bank call,
+  exercised separately with networking disabled.
+
+The private HTTPS proxy was reached over SSH to its internal bridge address.
+No candidate HTTP or HTTPS listener was publicly exposed. The self-signed
+test certificate exception was restricted to `https://localhost:19443`;
+certificate verification for public sites was not disabled.
+
+The new image serves local files from `/app/apps/backend/static`.
+The live old image uses `/app/static`. The smoke run mounted the existing
+media directory read-only at the new path. A real upgrade must update the mount
+and verify write permissions for UID 1000 without deleting or replacing media.
+Rollback must restore the old image, compatible mount, configuration and
+pre-migration database together. Do not point the old backend at a migrated
+database and assume compatibility.
+
+`compose.candidate.yml` is now a standalone private rehearsal stack, not a
+production override. Never merge it with `compose.production.yml`. Use a
+candidate-only env file and an explicit unique project name:
+`docker compose --env-file /PRIVATE/candidate.env -f compose.candidate.yml -p RELEASE_NAME …`.
+It fixes external providers off, exposes no ports, uses an internal network,
+separate data/media volumes and resource limits. `CANDIDATE_BACKEND_IMAGE`
+must reference an already built reviewed image; this stack cannot build/pull it.
+Do not run `deploy.sh` as a preflight check: it changes live deployment state.
+Before cutover, take a fresh backup and copy it off-server, preserve the
+verified source/image, prepare matching frontend and backend releases for the
+cart capability contract, and schedule a rollback-capable maintenance window.
+Keep public checkout closed until payment and fiscal acceptance is complete.
+
+The frontend payment redirect policy now accepts the exact existing
+backend-approved hostname `pay.tbank-online.com`. HTTPS, exact-host,
+credential and port restrictions remain intact. All 17 existing profile tests,
+including the added payment-session regression, passed. This frontend change
+was not deployed.
+
+Release blockers: the available TBank terminal has demo/test indicators and
+has not been confirmed as live; production SMTP settings are absent. Obtain
+confirmed live `TBANK_TERMINAL_KEY` / `TBANK_PASSWORD` and actual
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`,
+`SMTP_FROM` through a private channel, not a public issue or commit.
+The cashbox provider must approve taxation/marking and the complete prepayment,
+handover and refund receipt lifecycle; the existing prepayment receipt alone
+does not prove compliance. Automatic refunds remain blocked.
+
+Production remains on `mm-backend-catalog:20261107-sales` with Medusa 2.17.2 /
+Node 22.14.0. Public checkout was rechecked in Chromium and remains unavailable.
+No real payment, refund, order, email or carrier operation was performed.
+
+After verification, the candidate containers, copied database volume, isolated
+network, generated runtime profiles, temporary proxy, SSH tunnel, browser profile
+and dedicated BuildKit builder/cache were removed. The built image, source
+archive and protected backups remain available on the server. The live API
+returned `OK` over verified HTTPS after cleanup; its original backend,
+PostgreSQL, Redis, Caddy and backup containers remained running.
+
+## Payment/shipping closeout source verification — 7 November 2026
+
+New source was checked separately under
+`/opt/mario-candidates/closeout-20261107/{backend,frontend}`. The image
+`mm-backend-payments:20261107-node24` supplied Node/npm for these checks;
+**it does not contain these newer source changes and is not the new release**.
+The live image, production database and public checkout state were not changed.
+
+The source now requires coordinated frontend/backend deployment:
+
+- Payment initialization requires buyer-approved `data.expected_total`.
+  The backend recalculates delivery and cart totals before contacting the bank.
+  The frontend requests renewed approval when that total changes.
+- Cart mutation routes reject changes after payment initialization.
+  Unchanged recipient/address/metadata/shipping replay remains valid.
+- Complete-cart and Admin fulfillment routes require full net captured payment.
+  Native generic provider webhooks are not a second authoritative TBank path;
+  `/hooks/payment/tbank` owns signed notification processing.
+- `checkout-holds` is a registered module. Payment initialization, reconciliation
+  and expiry processing must be deployed together. Do not drop its ledger or
+  release uncertain expired holds as an operational shortcut.
+- Russian Post is no longer a selectable provider. Re-run the existing import
+  only under the normal reviewed data-import procedure: it also disables
+  historical Postal shipping options. Do not run it against production merely
+  as a test.
+
+New migrations include:
+
+- `tbank-notifications/Migration20261107120000`: preserve whether a notification
+  supplied `Amount`; historical records default to “provided”.
+- `checkout-holds/Migration20261107130000`: persistent online stock holds and
+  their payment/order lifecycle.
+
+Before applying migrations, take a fresh protected database/media/configuration
+backup and copy it off-server. Prepare a newly built, uniquely identified image
+from the verified source, the matching frontend, the correct static-media mount
+and UID 1000 write permissions. Keep checkout closed through acceptance.
+Rollback includes compatible image, configuration, media mount and database;
+never silently restore a pre-payment dump after accepting new payments.
+Pause sales and reconcile all post-backup bank/order activity before approving
+such a rollback.
+
+Observed source checks: 39 browser scenarios against a synthetic Store API,
+5 native Medusa/PostgreSQL HTTP scenarios with a mocked bank and manual
+fulfillment transport, 817 backend unit tests and 18 frontend contract checks.
+The native HTTP run verified unpaid completion/fulfillment rejection,
+last-unit competition, expired-hold retention, late signed capture, webhook
+deduplication and frozen paid-checkout recipient/delivery data.
+These are not real carrier acceptance, fiscal receipt or email-delivery tests.
+
+Final frontend TypeScript checking and the full backend/Admin build passed.
+Lint reported 0 errors and 135 warnings; this was not a warning-free build.
+After compilation, the compiled payment-provider script passed all 8 offline
+scenarios in a container with `--network none`. The final 817-test server
+unit run and build also ran with external networking disabled.
+The separate Next.js 16.4.5 production build also passed, including TypeScript
+and all 31 static pages. It used no production frontend environment profile:
+this demonstrates buildability, not a configured storefront release.
+
+Remaining release gates:
+
+1. Confirmed live bank credentials/moderation and explicitly authorized,
+   controlled real payment/fiscal acceptance.
+2. Approved prepayment, closing and refund receipts plus marking lifecycle;
+   automated money refunds remain blocked.
+3. Working SMTP and confirmed notification recipients; readiness/shipping
+   notifications are not automatically sent by this application.
+4. Transfer the existing per-unit packed measurements to actual catalog variants
+   and configure the confirmed CDEK staff-handoff point. Separately packed units
+   are supported as distinct places; no combined-box measurement is required.
+5. Controlled real carrier acceptance, real waybill and handoff/status checks.
+   CDEK application UUID is not a waybill.
+6. 1C-side reservation/exchange: the online ledger cannot prevent a physical
+   store sale without the corresponding 1C process.
+
+See `docs/PROJECT_STATUS_AND_LAUNCH_PLAN.md` and
+`docs/FISCALIZATION_ATOL_STATUS.md` in the repository root for business and
+fiscal boundaries. Do not treat a passing build or `CONFIRMED` as permission
+to open public checkout.
+
+## Multi-place shipping source update — 8 November 2026
+
+Every already-packed product unit is a distinct physical place. There is no
+combined-box estimate. Cart/order line IDs change during native completion;
+manifests bind actual variant identity, unit price, dimensions and quantities
+independently of line iteration order. Fixed customer delivery fees are charged
+once per order; actual carrier costs stay separate.
+
+Deployment contract changes:
+
+- CDEK shipping/fulfillment data uses `validated_packages`, not the old singular
+  field. Yandex uses `package_manifest`, not flat single-parcel dimensions.
+  All source callers were migrated; there are no compatibility aliases.
+  Revalidate shipping on unpaid carts through the normal checkout workflow.
+- Public `POST /store/cdek/calculate` now accepts
+  `{to_city_code, tariff_code?, packages:[{weight,length,width,height}]}`.
+  Client-supplied measurements in that diagnostic endpoint do not authorize
+  payment or fulfillment; checkout derives its manifest from real variants.
+- The initial singular CDEK sender-point env setting was replaced on 9 November
+  by the native warehouse-address handoff registry described below.
+  Missing/disabled allowed source blocks paid preparation and booking.
+  `CDEK_FROM_CITY_CODE` remains a diagnostic default, not a handoff selection.
+- CDEK bookings contain required real item identity/title/RUB prices, one unit
+  per package and zero COD, without invented VAT data. Yandex sends multiple
+  places and one linked `count:1` item per place through `place_barcode`.
+- Payment-cart replay must not invoke native inline-address replacement with
+  an unchanged partial address: it clears omitted names/phone. The guard turns
+  an unchanged cart replay into an empty update and preserves full saved
+  shipping data for unchanged method replay. Changed values still return 409.
+
+Source verification: 901 unit tests in 55 suites; 5 native HTTP scenarios with
+PostgreSQL; separate real-provider/HTTP-client smoke for 2+1 units proving
+three correctly measured places, fee once, separate costs, changed native
+line IDs, reordered inputs and rejection of partial/replaced/tampered goods.
+Carrier transport was synthetic; the provider smoke had networking disabled.
+
+Final backend/Admin build passed. The same provider/client smoke passed against
+emitted JavaScript in `.medusa/server`, not just TypeScript source. Build lint
+reported 0 errors and 135 warnings; these warnings were not suppressed or fixed
+as part of this shipping change. No storefront source changed in this update.
+
+The application's 100-place cap is not an account/carrier acceptance guarantee.
+Yandex standard Market PVZ limits are 30 kg per place, 150 cm per side, 300 cm sum
+of sides and 200 kg per order. Restricted lanes/smaller PVZ can be stricter; require
+carrier acceptance and a controlled real handoff. Yandex may replace submitted
+place barcodes: do not print assumed operational labels from those IDs.
+
+Primary API contracts:
+
+- [CDEK order registration](https://apidoc.cdek.ru/#tag/order/operation/register_1)
+  and its [official OpenAPI](https://gateway.cdek.ru/api-cdek-docs/web/docs/merged?sectionId=api_v2_integration).
+- [Yandex pricing](https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/1.-Podgotovka-zayavki/apib2bplatformpricing-calculator-post.md),
+  [offers](https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/3.-Osnovnye-zaprosy/apib2bplatformofferscreate-post.md)
+  and [weight limits](https://yandex.ru/support/delivery-profile/ru/other-day/weight-limits.md).
+
+No new shipping migration or production deployment was performed for this
+update. Real booking, bank/cashbox acceptance, actual catalog measurements,
+SMTP and 1C remain release gates. DNS/Vercel were not changed.
+
+## Multiple staff-dropoff origins — 9 November 2026
+
+Use Admin → «Пункты сдачи» (`/app/dispatch-points`) to configure origins for the
+native stock location used by each shipping option. Do not create inventory
+warehouses for carrier PVZ. Data is stored at
+`stock_location.address.metadata.carrier_handoff`, preserving the warehouse's
+other address fields and metadata. Medusa 2.22.4 projects `address.*` during
+native pricing/validation; root location metadata is not projected on every
+price path. At fulfillment time its ORM DTO drops the transient `location`.
+
+The registry has independent optional `cdek` and `yandex` groups, each
+`{default_id, points:[{id,name,address,active,city_code?}]}`. CDEK requires its
+real positive city code per point; Yandex IDs identify confirmed dispatch
+stations. IDs must be unique within a carrier, and any non-empty active list
+requires an active default. Disabling all requires `default_id:null`.
+Registry routes require admin authentication and the native `stock_location`
+read/update permissions. Store-supplied source fields cannot override the
+server-selected checkout default.
+
+In the native order screen, the «Пункт сдачи перевозчику» widget selects an
+allowed point and creates a native fulfillment, forwarding
+`additional_data.dispatch_point_id` via Medusa's fifth provider argument.
+The native Admin fulfillment middleware reloads the authoritative warehouse
+registry and overwrites `additional_data.handoff_location`, including any
+client-supplied value. Providers require its ID to match native `location_id`.
+Internal workflow callers must likewise obtain this context from the stock
+location service; missing/mismatched context fails closed. Never copy it from
+an untrusted request or a checkout snapshot.
+Native payment, order, item and inventory validation remain authoritative.
+The ordinary native fulfillment action also works with the saved checkout
+origin. If that origin is disabled/deleted, it fails rather than silently
+using a different default. An admin may explicitly select an allowed alternate.
+
+Both providers requote from the selected source before booking, charge the
+same configured fixed buyer fee, and persist `data.handoff_origin` plus actual
+carrier expense. CDEK checks reception capability, PVZ type and city before a
+quote/booking. Yandex passes the same explicit source to pricing and offers;
+a receiving-only PVZ is not assumed to support dispatch. Carrier rejection
+blocks the operation. Existing fulfillment snapshots do not change when the
+registry/default/name/address changes.
+
+Clean cutover: remove `CDEK_SHIPMENT_POINT_CODE` and
+`YANDEX_DELIVERY_SOURCE_STATION_ID` from runtime env. Before opening checkout,
+transfer their previously confirmed values into the appropriate native
+warehouse address registry using the Admin screen, with actual names/addresses.
+There is no runtime env fallback or automatic guessed origin. This source
+update did not migrate production data or deploy a new image. No schema
+migration is needed: the existing native address metadata stores the registry.
+An old paid order without a source snapshot needs an explicit allowed selection
+by staff when booking, never a silent fallback.
+
+The read-only Yandex diagnostic script uses `YANDEX_CHECK_SOURCE_STATION_ID`.
+It does not configure checkout. Public Yandex calculation resolves a native
+sales-channel/shipping-option source; with several eligible source options and
+no saved native selection it rejects ambiguity rather than choosing arbitrarily.
+
+Primary contracts: [Medusa fulfillment provider](https://docs.medusajs.com/resources/references/fulfillment/provider),
+[native order fulfillment](https://docs.medusajs.com/api/admin/orders/create-fulfillment),
+[CDEK reception points](https://apidoc.cdek.ru/#tag/delivery_point/operation/search),
+[CDEK shipment_point](https://apidoc.cdek.ru/#tag/order/operation/register_1),
+[Yandex source in pricing](https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/1.-Podgotovka-zayavki/apib2bplatformpricing-calculator-post.md)
+and [offers](https://yandex.ru/support/delivery-profile/ru/api/other-day/ref/3.-Osnovnye-zaprosy/apib2bplatformofferscreate-post.md).
+
+## Closed release artifacts and restore rehearsal — 9 November 2026
+
+Production was not switched. The prepared release lives in the private directory
+`/opt/mario-releases/20261109-prelaunch`; `release-manifest.json` records source
+and artifact SHA-256 values, the exact Docker IDs, runtime profile, observed
+checks and outstanding gates. `SHA256SUMS` covers the retained archives.
+
+- Backend: `mm-backend-closeout:20261109-node24`, Node 24.22.2 /
+  Medusa 2.22.4, non-root UID 1000. `backend-image.tar.gz` contains this image.
+- Frontend: `storefront-closed-linux-node24.tar.gz`, Next 16.4.5, 31 built
+  routes. It contains the normal Next server build, public assets, Linux
+  dependencies and configuration, excluding build caches. It is neither
+  standalone output nor a Vercel prebuilt deployment.
+- Frontend build profile: `BUILD_TARGET=`; both data modes `medusa`;
+  `NEXT_PUBLIC_MEDUSA_PAYMENT_PROVIDER_ID=`;
+  `NEXT_PUBLIC_ALLOW_TEST_CHECKOUT=false`. Public API/canonical origins are
+  `https://api.mariomikke.shop` and `https://www.mariomikke.shop`.
+  Publishable key and RUB region match the restored production snapshot.
+  Set `MEDUSA_BACKEND_URL` explicitly for the intended runtime backend.
+  Do not publish a different frontend against the old cart-capability contract.
+
+### Backup and isolated restoration
+
+`scripts/backup-release.sh` requires explicitly verified container identities,
+the real live compose directory, an encryption recipient certificate and a
+private output directory. The verified live identities for this rehearsal were:
+
+```bash
+POSTGRES_CONTAINER=mario-mikke-postgres-1 \
+BACKEND_CONTAINER=mario-mikke-medusa-1 \
+bash scripts/backup-release.sh \
+  /opt/clothing-store/medusa-prototype \
+  /private/recipient.pem /private/backups
+```
+
+The script verifies compose ownership and the backend working directory before
+dumping. A wrong-project PostgreSQL container was rejected in the rehearsal.
+It captures a custom-format PostgreSQL dump, the exact running backend image,
+deployment env/configuration and static media with component checksums. OpenSSL
+CMS AES-256-GCM encryption uses only the public recipient certificate on the
+server; plaintext temporary files are removed on exit.
+
+`release-20261108T203016Z.tar.gz.cms` was copied off-server, authenticated and
+decrypted using the private key retained on the workstation. The plaintext
+archive hash and all component hashes matched. Preserve that offsite ciphertext
+and its private key separately; neither belongs in the repository.
+
+After trusted decryption, checksum verification and private extraction, restore
+only into a fresh, explicitly named rehearsal project:
+
+```bash
+bash scripts/restore-candidate.sh \
+  /private/candidate.env /private/snapshot mm-rollback-20261109
+```
+
+This script uses only the standalone `compose.candidate.yml`; it does not merge
+the production compose file. It accepts only `mm-closeout-*` / `mm-rollback-*`
+project names, verifies the candidate database/role, refuses a nonempty public
+schema or media directory, restores owned private volumes, and does not start
+the backend or run migrations. Refusal to overwrite an already restored DB was
+exercised. A fresh candidate needs new rehearsal-only secrets, not production
+provider, SMTP or staff MFA credentials.
+
+Two independent restorations were exercised:
+
+1. The new image migrated the cloned database and started successfully:
+   38 products, 1 order; native Admin and Store API smoke checks passed.
+2. The exact old image started against a separately restored pre-migration DB
+   and media with its old `/app/static` mount and without migrations:
+   health 200, 38 products, 1 order. The new image's media path is
+   `/app/apps/backend/static`; never reuse the wrong mount or run the old
+   binary against a migrated database as an assumed rollback.
+
+### Observed release checks and limits
+
+Backend checks: health 200; anonymous Admin 401; fixture login and dispatch-point
+screen 200; HTTPS session cookie `Secure`, `HttpOnly`, `SameSite=Lax`; cart
+without capability 404 and owner access 200; native payment collection 200 and
+system payment session rejected with 400.
+
+Real Chromium checks used the built frontend and native isolated Medusa, not
+synthetic Store API responses: catalog photographs, product page, cart creation
+and line-item addition 200, persisted cart with payment disabled, and direct
+checkout unavailable without a payment form. SSR used the private backend;
+browser fetch/XHR origins were rewritten to it with production Store API blocked
+by the browser allowlist. Public images were fetched read-only by Next image.
+An internal-only network initially blocked those image requests; a separate
+frontend-only egress network enabled public media reads. Private-IP image
+blocking and TLS validation were not disabled.
+
+The native dispatch-point screen is present but the restored warehouse registry
+is empty: transfer previously confirmed carrier points into the native warehouse
+address metadata before opening shipping. No guessed point was written.
+The live backend stayed on `mm-backend-catalog:20261107-sales`, public health
+remained OK, and read-only live counts remained 38 products / 1 order.
+No real payment, refund, email or carrier booking was performed.
+
+This proves backend/database/media restoration, not complete production
+rollback. The Vercel artifact/export and frontend rollback still require the
+owner's access. Before any approved cutover, take a fresh offsite backup, retain
+the currently published frontend artifact and runtime secrets, coordinate both
+releases under maintenance, and verify rollback of both surfaces. After taking
+real payments, never restore an old database blindly: reconcile bank, fiscal,
+carrier and 1C events first.
+
+Keep checkout closed until the confirmed live bank, fiscal/marking lifecycle,
+actual catalog packaging, SMTP and 1C acceptance gates are met. Rehearsal
+containers, volumes, tunnels, decrypted snapshot and dedicated build cache were
+removed after proof. Release archives, rollback configuration and the encrypted
+offsite backup were retained; the existing local development services were not stopped.

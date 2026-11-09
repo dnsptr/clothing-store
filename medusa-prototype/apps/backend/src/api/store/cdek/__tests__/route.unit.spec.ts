@@ -194,7 +194,7 @@ describe("CDEK Store API Routes", () => {
     it("returns 503 when CDEK is not configured", async () => {
       setCdekDisabledEnv();
 
-      const req = { body: { to_city_code: 44, weight: 1200, length: 30, width: 20, height: 10 } } as unknown as MedusaRequest;
+      const req = { body: { to_city_code: 44, packages: [{ weight: 1200, length: 30, width: 20, height: 10 }] } } as unknown as MedusaRequest;
       const res = createMockResponse();
 
       await calculateCdek(req, res);
@@ -212,7 +212,7 @@ describe("CDEK Store API Routes", () => {
         return { tariff_code: 137, delivery_sum: 450, period_min: 1, period_max: 2, weight_calc: 1000, tariff_name: "Посылка склад-дверь" };
       });
 
-      const req = { body: { to_city_code: 44, weight: 1200, length: 30, width: 20, height: 10 } } as unknown as MedusaRequest;
+      const req = { body: { to_city_code: 44, packages: [{ weight: 1200, length: 30, width: 20, height: 10 }] } } as unknown as MedusaRequest;
       const res = createMockResponse();
 
       await calculateCdek(req, res);

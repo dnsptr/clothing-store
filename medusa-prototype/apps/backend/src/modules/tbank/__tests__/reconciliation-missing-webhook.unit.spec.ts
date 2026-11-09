@@ -213,14 +213,24 @@ describe("missing authenticated webhook: durable bank polling", () => {
   );
 
   it.each(["REJECTED", "DEADLINE_EXPIRED", "CANCELED", "REVERSED"])(
-    "keeps terminal bank failure %s for manual review without changing the payment", async (status) => {
+    "finishes a verified unpaid %s without creating an order", async (status) => {
       const { reconciler, bank, payment, workflow } = fixture();
       bank.getState.mockResolvedValue({ ...confirmed, Status: status });
-      expect((await reconciler.processMissingWebhookBatch()).results[0]?.status).toBe("manual_review");
-      expect(payment.updatePaymentSession).not.toHaveBeenCalled();
+      expect((await reconciler.processMissingWebhookBatch()).results[0]?.status).toBe("completed");
+      expect(payment.updatePaymentSession).toHaveBeenCalledWith(expect.objectContaining({
+        status: status === "CANCELED" || status === "REVERSED" ? "canceled" : "error",
+      }));
       expect(workflow).not.toHaveBeenCalled();
     },
   );
+
+  it("does not release a captured payment on a contradictory terminal bank state", async () => {
+    const { reconciler, bank, payment, workflow } = fixture(true, true);
+    bank.getState.mockResolvedValue({ ...confirmed, Status: "CANCELED" });
+    expect((await reconciler.processMissingWebhookBatch()).results[0]?.status).toBe("manual_review");
+    expect(payment.updatePaymentSession).not.toHaveBeenCalled();
+    expect(workflow).not.toHaveBeenCalled();
+  });
 
   it("retries captured payment without durable order linkage without repeating capture", async () => {
     const { reconciler, workflow, events } = fixture(true, false);

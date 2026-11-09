@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import type { CdekDeliveryPoint } from "../../../../modules/cdek/lib/cdek-client";
 import {

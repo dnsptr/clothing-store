@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useCart } from "../context/CartContext";
 import { MOCK_OUTFITS } from "../data/mockData";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
@@ -15,34 +15,28 @@ import {
 } from "../lib/catalog";
 import styles from "./MenuDrawer.module.css";
 
-type SubMenuType = "sale" | "clothing" | "shoes" | "materials" | null;
+const subMenus = {
+  sale: { label: "Sale", items: SALE_CATEGORIES },
+  clothing: { label: CATALOG_SECTIONS.clothing.label, items: CLOTHING_CATEGORIES },
+  shoes: { label: CATALOG_SECTIONS.shoes.label, items: SHOES_CATEGORIES },
+  materials: { label: "Материалы", items: MATERIALS },
+};
+type SubMenuType = keyof typeof subMenus;
 
 function Chevron() {
   return (
-    <svg className={styles.chevronIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg aria-hidden="true" className={styles.chevronIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
     </svg>
   );
 }
 
-function BackHeader({ label, onBack }: { label: string; onBack: () => void }) {
-  return (
-    <div className={styles.subPanelHeader}>
-      <button className={styles.backBtn} onClick={onBack}>
-        <svg className={styles.backIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 19l-7-7 7-7" />
-        </svg>
-        <span>Назад</span>
-      </button>
-      <h3 className={styles.subPanelTitle}>{label}</h3>
-    </div>
-  );
-}
-
 export default function MenuDrawer() {
-  const router = useRouter();
   const { isMenuOpen, setIsMenuOpen } = useCart();
-  const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType>(null);
+  const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  const focusTargetRef = useRef<string | null>(null);
   useBodyScrollLock(isMenuOpen);
   useOverlayDismiss(isMenuOpen, () => setIsMenuOpen(false));
 
@@ -51,203 +45,131 @@ export default function MenuDrawer() {
       const timer = setTimeout(() => setActiveSubMenu(null), 300);
       return () => clearTimeout(timer);
     }
+
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-controls="site-menu-drawer"]');
+    drawerRef.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const controls = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>("a[href], button") ?? [])
+        .filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+      const focusable = trigger ? [trigger, ...controls] : controls;
+      if (focusable.length === 0) return;
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      const nextIndex = event.shiftKey
+        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+        : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+      event.preventDefault();
+      focusable[nextIndex].focus();
+    };
+    window.addEventListener("keydown", trapFocus);
+    return () => window.removeEventListener("keydown", trapFocus);
   }, [isMenuOpen]);
 
-  const go = (path: string) => {
-    setIsMenuOpen(false);
-    router.push(path);
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    if (activeSubMenu) {
+      backRef.current?.focus();
+    } else if (focusTargetRef.current) {
+      document.getElementById(focusTargetRef.current)?.focus();
+      focusTargetRef.current = null;
+    }
+  }, [activeSubMenu, isMenuOpen]);
+
+  const closeMenu = () => setIsMenuOpen(false);
+  const goBack = () => {
+    focusTargetRef.current = `menu-${activeSubMenu}`;
+    setActiveSubMenu(null);
   };
+  const subMenu = activeSubMenu ? subMenus[activeSubMenu] : null;
+
+  const subMenuButton = (name: SubMenuType) => (
+    <li key={name}>
+      <button
+        id={`menu-${name}`}
+        type="button"
+        className={`${styles.menuItem} ${name === "sale" ? styles.menuItemSale : ""} ${activeSubMenu === name ? styles.menuItemActive : ""}`}
+        aria-expanded={activeSubMenu === name}
+        aria-controls="site-menu-subpanel"
+        onClick={() => {
+          if (activeSubMenu === name) goBack();
+          else setActiveSubMenu(name);
+        }}
+      >
+        <span>{subMenus[name].label}</span>
+        <Chevron />
+      </button>
+    </li>
+  );
 
   return (
     <>
       <div
         className={`${styles.overlay} ${isMenuOpen ? styles.overlayOpen : ""}`}
-        onClick={() => setIsMenuOpen(false)}
+        onClick={closeMenu}
+        aria-hidden="true"
       />
-
-      <div
+      <nav
+        ref={drawerRef}
         id="site-menu-drawer"
-        className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""} ${
-          activeSubMenu !== null ? styles.drawerExpanded : ""
-        }`}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "mouse") setActiveSubMenu(null);
-        }}
+        aria-label="Главное меню"
+        aria-hidden={!isMenuOpen}
+        inert={!isMenuOpen}
+        className={`${styles.drawer} ${isMenuOpen ? styles.drawerOpen : ""} ${activeSubMenu !== null ? styles.drawerExpanded : ""}`}
       >
         <div className={styles.drawerSpacer}>
           <span className={styles.drawerLabel}>Каталог</span>
         </div>
-
-        <div
-          className={`${styles.panelContainer} ${
-            activeSubMenu !== null ? styles.slideSubPanel : ""
-          }`}
-        >
-          <div className={styles.panel}>
+        <div className={`${styles.panelContainer} ${activeSubMenu !== null ? styles.slideSubPanel : ""}`}>
+          <div className={`${styles.panel} ${activeSubMenu !== null ? styles.mainPanelInactive : ""}`}>
             <ul className={styles.menuList}>
-              <li
-                className={styles.menuItem}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go(CATALOG_SECTIONS.new.href)}
-              >
-                <span>{CATALOG_SECTIONS.new.label}</span>
-              </li>
-
-              <li
-                className={`${styles.menuItem} ${styles.menuItemSale} ${
-                  activeSubMenu === "sale" ? styles.menuItemActive : ""
-                }`}
-                onMouseEnter={() => setActiveSubMenu("sale")}
-                onClick={() => setActiveSubMenu("sale")}
-              >
-                <span>Sale</span>
-                <Chevron />
-              </li>
-
-              <li
-                className={`${styles.menuItem} ${activeSubMenu === "clothing" ? styles.menuItemActive : ""}`}
-                onMouseEnter={() => setActiveSubMenu("clothing")}
-                onClick={() => setActiveSubMenu("clothing")}
-              >
-                <span>{CATALOG_SECTIONS.clothing.label}</span>
-                <Chevron />
-              </li>
-
-              <li
-                className={`${styles.menuItem} ${activeSubMenu === "shoes" ? styles.menuItemActive : ""}`}
-                onMouseEnter={() => setActiveSubMenu("shoes")}
-                onClick={() => setActiveSubMenu("shoes")}
-              >
-                <span>{CATALOG_SECTIONS.shoes.label}</span>
-                <Chevron />
-              </li>
-
-              <li
-                className={styles.menuItem}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go(CATALOG_SECTIONS.accessories.href)}
-              >
-                <span>{CATALOG_SECTIONS.accessories.label}</span>
-              </li>
-
-              <li
-                className={`${styles.menuItem} ${activeSubMenu === "materials" ? styles.menuItemActive : ""}`}
-                onMouseEnter={() => setActiveSubMenu("materials")}
-                onClick={() => setActiveSubMenu("materials")}
-              >
-                <span>Материалы</span>
-                <Chevron />
-              </li>
-
-              <li className={styles.menuDivider} />
-
+              <li><Link className={styles.menuItem} href={CATALOG_SECTIONS.new.href} onClick={closeMenu}>{CATALOG_SECTIONS.new.label}</Link></li>
+              {subMenuButton("sale")}
+              {subMenuButton("clothing")}
+              {subMenuButton("shoes")}
+              <li><Link className={styles.menuItem} href={CATALOG_SECTIONS.accessories.href} onClick={closeMenu}>{CATALOG_SECTIONS.accessories.label}</Link></li>
+              {subMenuButton("materials")}
+              <li className={styles.menuDivider} aria-hidden="true" />
               {MOCK_OUTFITS.map((outfit) => (
-                <li
-                  key={outfit.id}
-                  className={`${styles.menuItem} ${styles.menuItemCollection}`}
-                  onMouseEnter={() => setActiveSubMenu(null)}
-                  onClick={() => go(`/collection/${outfit.id}`)}
-                >
-                  <span>{outfit.title}</span>
+                <li key={outfit.id}>
+                  <Link className={`${styles.menuItem} ${styles.menuItemCollection}`} href={`/collection/${outfit.id}`} onClick={closeMenu}>{outfit.title}</Link>
                 </li>
               ))}
-
-              <li
-                className={`${styles.menuItem} ${styles.menuItemAll}`}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go("/catalog")}
-              >
-                <span>Смотреть все</span>
-              </li>
-
-              <li className={styles.menuDivider} />
-
-              <li
-                className={`${styles.menuItem} ${styles.menuItemInfo}`}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go("/info/about")}
-              >
-                <span>О бренде</span>
-              </li>
-              <li
-                className={`${styles.menuItem} ${styles.menuItemInfo}`}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go("/info/contacts")}
-              >
-                <span>Магазины и контакты</span>
-              </li>
-              <li
-                className={`${styles.menuItem} ${styles.menuItemInfo}`}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go("/info/delivery")}
-              >
-                <span>Доставка</span>
-              </li>
-              <li
-                className={`${styles.menuItem} ${styles.menuItemInfo}`}
-                onMouseEnter={() => setActiveSubMenu(null)}
-                onClick={() => go("/info/returns")}
-              >
-                <span>Условия возврата</span>
-              </li>
+              <li><Link className={`${styles.menuItem} ${styles.menuItemAll}`} href="/catalog" onClick={closeMenu}>Смотреть все</Link></li>
+              <li className={styles.menuDivider} aria-hidden="true" />
+              {[
+                { href: "/info/about", label: "О бренде" },
+                { href: "/info/contacts", label: "Магазины и контакты" },
+                { href: "/info/delivery", label: "Доставка" },
+                { href: "/info/returns", label: "Условия возврата" },
+                { href: "/account", label: "Личный кабинет" },
+              ].map((item) => (
+                <li key={item.href}><Link className={`${styles.menuItem} ${styles.menuItemInfo}`} href={item.href} onClick={closeMenu}>{item.label}</Link></li>
+              ))}
             </ul>
           </div>
-
-          <div className={styles.panel}>
-            {activeSubMenu === "sale" && (
+          <div id="site-menu-subpanel" className={styles.panel} inert={!subMenu} aria-hidden={!subMenu}>
+            {subMenu && (
               <>
-                <BackHeader label="Sale" onBack={() => setActiveSubMenu(null)} />
+                <div className={styles.subPanelHeader}>
+                  <button ref={backRef} type="button" className={styles.backBtn} onClick={goBack}>
+                    <svg aria-hidden="true" className={styles.backIcon} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <span>Назад</span>
+                  </button>
+                  <h3 className={styles.subPanelTitle}>{subMenu.label}</h3>
+                </div>
                 <ul className={styles.subMenuList}>
-                  {SALE_CATEGORIES.map((item) => (
-                    <li key={item.href + item.label} className={styles.subMenuItem} onClick={() => go(item.href)}>
-                      {item.label}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-
-            {activeSubMenu === "clothing" && (
-              <>
-                <BackHeader label={CATALOG_SECTIONS.clothing.label} onBack={() => setActiveSubMenu(null)} />
-                <ul className={styles.subMenuList}>
-                  {CLOTHING_CATEGORIES.map((item) => (
-                    <li key={item.href + item.label} className={styles.subMenuItem} onClick={() => go(item.href)}>
-                      {item.label}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-
-            {activeSubMenu === "shoes" && (
-              <>
-                <BackHeader label={CATALOG_SECTIONS.shoes.label} onBack={() => setActiveSubMenu(null)} />
-                <ul className={styles.subMenuList}>
-                  {SHOES_CATEGORIES.map((item) => (
-                    <li key={item.href + item.label} className={styles.subMenuItem} onClick={() => go(item.href)}>
-                      {item.label}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-
-            {activeSubMenu === "materials" && (
-              <>
-                <BackHeader label="Материалы" onBack={() => setActiveSubMenu(null)} />
-                <ul className={styles.subMenuList}>
-                  {MATERIALS.map((item) => (
-                    <li key={item.slug} className={styles.subMenuItem} onClick={() => go(item.href)}>
-                      {item.label}
-                    </li>
+                  {subMenu.items.map((item) => (
+                    <li key={item.href + item.label}><Link className={styles.subMenuItem} href={item.href} onClick={closeMenu}>{item.label}</Link></li>
                   ))}
                 </ul>
               </>
             )}
           </div>
         </div>
-      </div>
+      </nav>
     </>
   );
 }

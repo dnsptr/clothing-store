@@ -178,6 +178,10 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://fixture.local");
     const method = request.method ?? "GET";
+    // Control requests can be separated by browser work longer than Node's idle socket timeout.
+    if (requestUrl.pathname.startsWith("/__control/")) {
+      response.setHeader("connection", "close");
+    }
     if (method === "OPTIONS") {
       sendJson(response, 204, {});
       return;

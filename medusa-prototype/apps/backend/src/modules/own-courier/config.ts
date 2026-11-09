@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 const credentialsSchema = z.object({
   OWN_COURIER_ENABLED: z.literal("true"),

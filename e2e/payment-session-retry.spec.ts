@@ -79,7 +79,7 @@ test.describe("Payment-session replay safety", () => {
     await retryPage.goto(`${APP_URL}/checkout`);
     await fillCheckout(retryPage);
     await retryPage.getByRole("button", { name: "Подтвердить заказ" }).click();
-    await expect(retryPage).toHaveURL(/https:\/\/securepay\.tinkoff\.ru\/payment\/payses_fixture_1/);
+    await retryPage.waitForURL(/https:\/\/securepay\.tinkoff\.ru\/payment\/payses_fixture_1/, { waitUntil: "commit" });
 
     // Then: the persisted active session is reused instead of initializing T-Bank again.
     await expect.poll(() => paymentObservations(request)).toMatchObject({
@@ -101,7 +101,7 @@ test.describe("Payment-session replay safety", () => {
       await page.getByRole("button", { name: "Подтвердить заказ" }).click();
 
       // Then: the existing approved bank session is used directly.
-      await expect(page).toHaveURL(/https:\/\/securepay\.tinkoff\.ru\/payment\/payses_terminal/);
+      await page.waitForURL(/https:\/\/securepay\.tinkoff\.ru\/payment\/payses_terminal/, { waitUntil: "commit" });
       await expect.poll(() => paymentObservations(request)).toMatchObject({
         paymentSessionInitializations: 0,
         paymentSessions: [{ id: "payses_terminal", status }],
@@ -162,7 +162,7 @@ test.describe("Payment-session replay safety", () => {
       await page.getByRole("button", { name: "Подтвердить заказ" }).click();
 
       // Then: exactly one replacement session exists.
-      await expect(page).toHaveURL(/https:\/\/securepay\.tinkoff\.ru\/payment\/payses_fixture_1/);
+      await page.waitForURL(/https:\/\/securepay\.tinkoff\.ru\/payment\/payses_fixture_1/, { waitUntil: "commit" });
       await expect.poll(() => paymentObservations(request)).toMatchObject({
         paymentSessionInitializations: 1,
         paymentSessions: [{ id: "payses_fixture_1", status: "pending_authorization" }],

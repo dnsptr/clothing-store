@@ -6,9 +6,14 @@ import type {
   ValidateFulfillmentDataContext,
 } from "@medusajs/types";
 
+import {
+  selectCheckoutHandoff,
+  selectFulfillmentHandoff,
+  selectHandoffPoint,
+} from "../../lib/carrier-handoff";
 import type { YandexDeliveryProviderOptions } from "./config";
 import {
-  buildCartPackage,
+  buildCartPackages,
   buildOfferParams,
   buildPricingParams,
   confirmPvzSelection,
@@ -55,18 +60,19 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     context: ValidateFulfillmentDataContext,
   ): Promise<Record<string, unknown>> {
     if (optionData["id"] !== YANDEX_OPTION_PVZ) throw new YandexFulfillmentDataError("option");
+    const origin = selectHandoffPoint(context.from_location, "yandex");
     const selection = validatePvzSelection(data);
+    const { manifest, places, assessedPriceRub } = buildCartPackages(context.items);
     const points = await this.client.getPickupPoints({ geo_id: selection.geo_id });
     const verified = confirmPvzSelection(data, points);
-    const parcel = buildCartPackage(context.items);
-    const quote = await this.client.calculatePricing({ destinationStationId: verified.platform_station_id, ...parcel });
+    const quote = await this.client.calculatePricing({
+      sourceStationId: origin.id,
+      destinationStationId: verified.platform_station_id, places, assessedPriceRub,
+    });
     return {
       ...verified,
-      weight_gross_grams: parcel.weightGrossGrams,
-      dx_cm: parcel.dxCm,
-      dy_cm: parcel.dyCm,
-      dz_cm: parcel.dzCm,
-      assessed_price_rub: parcel.assessedPriceRub,
+      handoff_origin: origin,
+      package_manifest: manifest,
       carrier_quote_amount: quote.priceRub,
       carrier_quote_currency: quote.currency,
     };
@@ -79,9 +85,11 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
   ): Promise<CalculatedShippingOptionPrice> {
     if (optionData["id"] !== YANDEX_OPTION_PVZ) throw new YandexFulfillmentDataError("option");
     const selection = validatePvzSelection(data);
+    const origin = selectCheckoutHandoff(context["from_location"], "yandex", data);
+    const params = buildPricingParams(selection.platform_station_id, context["items"], origin.id);
     const points = await this.client.getPickupPoints({ geo_id: selection.geo_id });
-    const verified = confirmPvzSelection(data, points);
-    await this.client.calculatePricing(buildPricingParams(verified.platform_station_id, context["items"]));
+    confirmPvzSelection(data, points);
+    await this.client.calculatePricing(params);
     return { calculated_amount: this.pvzPriceRub, is_calculated_price_tax_inclusive: true };
   }
 
@@ -89,11 +97,13 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     data: Record<string, unknown>,
     items: unknown[],
     order: Record<string, unknown> | undefined,
-    _fulfillment: Record<string, unknown>,
+    fulfillment: Record<string, unknown>,
+    additionalData?: Record<string, unknown>,
   ): Promise<CreateFulfillmentResult> {
     // Medusa's shipping_option_id is a generated so_ ID, not the option's type.code.
     if (data["delivery_mode"] !== YANDEX_OPTION_PVZ) throw new YandexFulfillmentDataError("delivery mode");
-    const offerParams = buildOfferParams(data, items, order);
+    const origin = selectFulfillmentHandoff(fulfillment, "yandex", data, additionalData);
+    const offerParams = buildOfferParams(data, items, order, origin.id);
     const selection = validatePvzSelection(data);
     const points = await this.client.getPickupPoints({ geo_id: selection.geo_id });
     confirmPvzSelection(data, points);
@@ -102,6 +112,7 @@ export default class YandexDeliveryFulfillmentProviderService extends AbstractFu
     return {
       data: {
         ...data,
+        handoff_origin: origin,
         carrier_quote_amount: quote.priceRub,
         carrier_quote_currency: quote.currency,
         yandex_request_id: orderResult.requestId,

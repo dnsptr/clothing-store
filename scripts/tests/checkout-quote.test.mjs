@@ -55,3 +55,32 @@ test('bank redirects reject credentials and alternate ports rather than creating
     assert.equal(policy.decideTbankSession([{ ...session, data: { paymentUrl } }], session.provider_id, 1899, 'rub').kind, 'reject');
   }
 });
+
+test('reuses the existing payment on the current bank domain accepted by the backend', () => {
+  const paymentUrl = 'https://pay.tbank-online.com/payment/existing?session=example';
+  const session = {
+    id: 'payses_existing',
+    provider_id: 'pp_tbank_tbank',
+    status: 'pending_authorization',
+    amount: 1899,
+    currency_code: 'rub',
+    data: { paymentUrl },
+  };
+  const decision = policy.decideTbankSession([session], session.provider_id, 1899, 'rub');
+  assert.equal(decision.kind, 'redirect');
+  assert.equal(decision.paymentUrl, paymentUrl);
+});
+
+test('expired or malformed payment deadlines cannot redirect or create a second payment', () => {
+  const session = {
+    id: 'payses_deadline', provider_id: 'pp_tbank_tbank',
+    status: 'pending_authorization', amount: 1899, currency_code: 'rub',
+    data: { paymentUrl: 'https://securepay.tinkoff.ru/payment/existing' },
+  };
+  for (const deadline of ['1970-01-01T00:00:00Z', 'invalid', 123]) {
+    const expired = { ...session, data: { ...session.data, paymentExpiresAt: deadline } };
+    assert.equal(policy.decideTbankSession([expired], session.provider_id, 1899, 'rub').kind, 'reject');
+  }
+  const future = { ...session, data: { ...session.data, paymentExpiresAt: '2100-01-01T00:00:00Z' } };
+  assert.equal(policy.decideTbankSession([future], session.provider_id, 1899, 'rub').kind, 'redirect');
+});

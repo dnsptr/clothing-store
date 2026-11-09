@@ -1,9 +1,9 @@
 {
   "name": "medusa-prototype",
   "private": false,
-  "packageManager": "npm@10.9.0",
+  "packageManager": "npm@11.19.1",
   "engines": {
-    "node": ">=20"
+    "node": ">=24.22.2 <25"
   },
   "scripts": {
     "dev": "turbo dev",
@@ -16,44 +16,45 @@
     "catalog:import": "npm --workspace @dtc/backend run catalog:import",
     "storefront:dev": "turbo dev --filter=@dtc/storefront"
   },
-  "pnpm": {
-    "overrides": {
-      "@types/react": "19.0.5",
-      "@types/react-dom": "19.0.5"
-    }
-  },
   "devDependencies": {
-    "@medusajs/eslint-plugin": "2.21.2",
-    "eslint": "^9.39.4",
+    "@medusajs/eslint-plugin": "2.22.4",
+    "eslint": "^10.14.0",
     "jiti": "^2.7.0",
-    "prettier": "^3.2.5",
-    "turbo": "^2.0.14"
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10"
   },
   "workspaces": [
     "apps/**",
     "!apps/backend/.medusa/**"
   ],
   "overrides": {
-    "ajv": "^8.20.0",
+    "@rushstack/node-core-library": {
+      "ajv": "^8.20.0"
+    },
+    "bullmq": {
+      "uuid": "11.1.1"
+    },
     "eslint": {
-      "ajv": "^6.14.0"
+      "minimatch": "11.0.5"
     },
-    "@eslint/eslintrc": {
-      "ajv": "^6.14.0"
+    "@eslint/config-array": {
+      "minimatch": "11.0.5"
     },
-    "axios": "^1.20.0",
-    "compression": "^1.8.2",
-    "fast-uri": "^3.1.8",
-    "lodash": "^4.18.1",
-    "multer": "^2.4.0",
-    "nanoid": "^3.3.18",
-    "postcss": "^8.5.23",
-    "proxy-addr": "^2.0.8",
-    "qs": "^6.16.0",
-    "source-map-js": "^1.2.2",
-    "@grpc/grpc-js": "^1.14.5",
-    "@opentelemetry/core": "^2.9.0",
-    "@opentelemetry/propagator-jaeger": "^2.9.0",
-    "@graphql-tools/utils": "^12.0.3"
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.5"
+    },
+    "test-exclude": {
+      "minimatch": "11.0.5",
+      "glob": "14.0.2"
+    },
+    "jest-config": {
+      "glob": "14.0.2"
+    },
+    "jest-runtime": {
+      "glob": "14.0.2"
+    },
+    "@jest/reporters": {
+      "glob": "14.0.2"
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 /** Notification IDs are identifiers consisting of alphanumeric characters, hyphens, and underscores. */
 export const NotificationIdSchema = z.string().trim().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);

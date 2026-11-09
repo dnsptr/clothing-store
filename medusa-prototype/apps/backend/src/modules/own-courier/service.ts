@@ -7,7 +7,7 @@ import type {
   ValidateFulfillmentDataContext,
 } from "@medusajs/types";
 import type { OwnCourierOptions } from "./config";
-import { ownCourierEligibility } from "./eligibility";
+import { ownCourierAddressKey, ownCourierEligibility, type OwnCourierAddress } from "./eligibility";
 import { OWN_COURIER_OPTION, OWN_COURIER_PROVIDER_IDENTIFIER } from "./provider-id";
 
 export class OwnCourierUnavailableError extends Error {
@@ -56,23 +56,30 @@ export default class OwnCourierFulfillmentProviderService extends AbstractFulfil
     if (optionData["id"] !== OWN_COURIER_OPTION) throw new OwnCourierUnavailableError();
     const eligible = await ownCourierEligibility(context.shipping_address, this.options);
     if (!eligible.eligible) throw new OwnCourierUnavailableError();
-    return { delivery_mode: OWN_COURIER_OPTION, verified_address: eligible.normalizedAddress };
+    return {
+      delivery_mode: OWN_COURIER_OPTION,
+      verified_address: eligible.normalizedAddress,
+      verified_address_key: ownCourierAddressKey(context.shipping_address),
+    };
   }
 
   async createFulfillment(
     data: Record<string, unknown>,
     _items: unknown[],
-    _order: Record<string, unknown> | undefined,
+    order: Record<string, unknown> | undefined,
     _fulfillment: Record<string, unknown>,
   ): Promise<CreateFulfillmentResult> {
+    const addressKey = ownCourierAddressKey(order?.shipping_address as OwnCourierAddress | undefined);
     if (data["delivery_mode"] !== OWN_COURIER_OPTION ||
-      typeof data["verified_address"] !== "string" || !data["verified_address"].trim()) {
+      typeof data["verified_address"] !== "string" || !data["verified_address"].trim() ||
+      !addressKey || data["verified_address_key"] !== addressKey) {
       throw new OwnCourierUnavailableError();
     }
     return {
       data: {
         delivery_mode: OWN_COURIER_OPTION,
         verified_address: data["verified_address"],
+        verified_address_key: addressKey,
         courier_status: "pending_assignment",
       },
       labels: [],

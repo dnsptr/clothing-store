@@ -117,7 +117,7 @@ fi
 # Миграции — отдельный шаг с проверяемым результатом. Падение здесь оставляет
 # работающую старую версию, а не бесконечный цикл перезапусков.
 echo "Применяем миграции…"
-if ! compose run --rm --no-deps medusa npx medusa db:migrate; then
+if ! compose run --rm --no-deps medusa npx medusa db:migrate --execute-safe-links --execute-safe-search; then
   echo "Миграции не применились. Приложение не обновлено." >&2
   echo "Восстановление: scripts/restore-db.sh ${PRE_MIGRATION_DUMP}" >&2
   exit 1

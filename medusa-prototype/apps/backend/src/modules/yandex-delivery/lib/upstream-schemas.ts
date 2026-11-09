@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 const boundedText = z.string().trim().min(1).max(500);
 
