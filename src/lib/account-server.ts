@@ -125,8 +125,10 @@ export function createAccountService(fetcher: typeof fetch = fetch, env: NodeJS.
     if (id && !/^[a-f0-9]{64}$/.test(capability)) throw new AccountError("Ключ доступа к корзине отсутствует. Создайте новую корзину.", 403);
     const owner = token ? await customer(token) : null;
     if (id) {
-      const previous = record((await request(`/store/carts/${id}?fields=id,customer_id,customer.has_account`, token, undefined, capability)).cart);
-      if (previous.customer_id && previous.customer_id !== owner?.id && record(previous.customer).has_account !== false) throw new AccountError("Эта корзина связана с другим аккаунтом. Выйдите из кабинета и создайте новую корзину.", 409);
+      const previous = record((await request(`/store/carts/${id}`, token, undefined, capability)).cart);
+      const ownerId = previous.customer_id;
+      if (previous.id !== id || (ownerId !== null && (typeof ownerId !== "string" || !ownerId.trim()))) throw new AccountError("Не удалось проверить владельца корзины.", 502);
+      if (ownerId !== null && ownerId !== owner?.id) throw new AccountError("Эта корзина связана с другим аккаунтом. Выйдите из кабинета и создайте новую корзину.", 409);
       await request(`/store/carts/${id}/customer`, token, {}, capability);
       return { linked: true };
     }

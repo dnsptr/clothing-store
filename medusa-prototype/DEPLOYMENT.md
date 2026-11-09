@@ -1160,3 +1160,46 @@ revert/rebuild is slower, depends on current build/env settings and is not a
 verified instant alias rollback. The host also reports Redis memory-overcommit
 disabled; evaluate that host setting separately before relying on background
 saves under memory pressure.
+
+### Merged account/cart acceptance and Git publication block
+
+The merged source passed 951 backend unit tests and 45 frontend regressions
+(10 catalog, 10 delivery, 25 account), typecheck and lint. Linux Next server
+build generated 31 routes; the separate Pages mock export generated 43.
+Frontend dependency audit reported zero findings. Backend audit passed the
+configured moderate threshold with the previously documented 12 low transitive
+deepmerge findings; this is not a zero-finding backend audit.
+
+Actual built Next behind private HTTPS plus isolated native Medusa 2.22.4
+exposed and confirmed fixes for two account boundary errors: same-origin POSTs
+behind a reverse proxy were rejected, and a selective cart query returned only
+`id`, letting the previous ownership guard skip verification. The new guard
+uses the native default cart response, requires explicit valid ownership data,
+permits null/same owner and rejects every foreign owner without consulting the
+obsolete `has_account` hint. Forged forwarded headers do not authorize an origin.
+
+Observed native/browser results: registration/login; guest create/add and
+guest-to-customer linkage; signed-in create/add with preserved capability;
+missing capability 404 at Store API; foreign-customer linkage 409 with owner
+unchanged; same-owner linkage 200; forged Origin 403; customer orders 200 with
+zero own orders; Secure/HttpOnly/SameSite=Lax cookie; logout 200 followed by
+empty session and orders 401. The cart payment button remained disabled and
+direct checkout had no payment form. Test customers/carts existed only in the
+disposable clone. The fixture used the prepared native 2.22.4 image for its
+unchanged auth/capability contract, not a newly built merged catalog image.
+The merged backend still needs its own fresh image before release.
+
+Publication of `release/20261109-closed` was actually attempted and rejected:
+the current GitHub OAuth authorization lacks `workflow` scope for the CI file.
+The local keyring authorization has `gist`, `read:org`, `repo`; an SSH attempt
+with GitHub's HTTPS-published host key also failed public-key authentication.
+The branch has not been published and no PR/CI run or production deployment is
+claimed. The user must authorize `gh auth refresh -h github.com -s workflow`
+or provide another appropriately scoped supported Git credential; do not drop
+workflow changes or bypass GitHub's permission check to force a partial push.
+Vercel owner participation remains separately required before merging main.
+
+After acceptance, the private Next/Caddy/Medusa/PostgreSQL/Redis fixture,
+synthetic customer data, own networks/tunnel, browser profiles and intermediate
+source/profile files were removed. Production and existing local services were
+not restarted or switched.

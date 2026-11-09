@@ -14,6 +14,23 @@ function failure(error: unknown) {
 }
 function clearCookie(response: NextResponse) { response.cookies.set(COOKIE, "", { ...cookieOptions, maxAge: 0 }); return response; }
 
+function isSameOrigin(request: NextRequest): boolean {
+  if (request.headers.get("sec-fetch-site") === "cross-site") return false;
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (!origin || !host || /[\\/?#@,%\s]/.test(host)) return false;
+  try {
+    const source = new URL(origin);
+    if (source.protocol !== "https:" && (process.env.NODE_ENV === "production" || source.protocol !== "http:")) return false;
+    if (source.origin !== origin) return false;
+    // NextURL can describe the internal HTTP listener behind a TLS proxy.
+    // Compare the actual Host authority; forwarded headers are not trusted.
+    return source.origin === new URL(`${source.protocol}//${host}`).origin;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: NextRequest, context: Context) {
   const { action } = await context.params;
   if (!["session", "orders"].includes(action)) return reply({ message: "Страница не найдена." }, 404);
@@ -31,7 +48,7 @@ export async function GET(request: NextRequest, context: Context) {
 export async function POST(request: NextRequest, context: Context) {
   const { action } = await context.params;
   if (!["login", "register", "logout", "profile", "cart"].includes(action)) return reply({ message: "Страница не найдена." }, 404);
-  if (request.headers.get("origin") !== request.nextUrl.origin || request.headers.get("sec-fetch-site") === "cross-site") return reply({ message: "Недопустимый источник запроса." }, 403);
+  if (!isSameOrigin(request)) return reply({ message: "Недопустимый источник запроса." }, 403);
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") return reply({ message: "Ожидается JSON." }, 415);
   try {
     const raw = await request.text();

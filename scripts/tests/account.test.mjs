@@ -89,11 +89,11 @@ function routes(overrides={}) {
   const calls=[];
   const service={login:async()=>{calls.push('login');return {token:'private-token',customer};},customer:async()=>customer,...overrides};
   const exports={};
-  vm.runInNewContext(compile('src/app/api/account/[action]/route.node.ts'),{exports,Buffer,process:{env:{NODE_ENV:'production'}},require:name=>name==='next/server'?require(name):name==='@/lib/account'?shared:{createAccountService:()=>service}});
+  vm.runInNewContext(compile('src/app/api/account/[action]/route.node.ts'),{exports,Buffer,URL,process:{env:{NODE_ENV:'production'}},require:name=>name==='next/server'?require(name):name==='@/lib/account'?shared:{createAccountService:()=>service}});
   return {...exports,calls};
 }
 const ctx=action=>({params:Promise.resolve({action})});
-function post(action,options={}) {return new NextRequest(`https://shop.test/api/account/${action}`,{method:'POST',headers:{origin:'https://shop.test','content-type':'application/json',...options.headers},body:JSON.stringify(options.body??{})});}
+function post(action,options={}) {return new NextRequest(options.url ?? `https://shop.test/api/account/${action}`,{method:'POST',headers:{host:'shop.test',origin:'https://shop.test','content-type':'application/json',...options.headers},body:JSON.stringify(options.body??{})});}
 test('cross-site and originless writes are rejected before authentication',async()=>{
   const api=routes();
   assert.equal((await api.POST(post('login',{headers:{origin:'https://attacker.test'}}),ctx('login'))).status,403);
@@ -120,13 +120,66 @@ test('logout removes the browser session',async()=>{
   assert.equal(response.status,200);assert.match(response.headers.get('set-cookie'),/Max-Age=0/);
 });
 
+test('HTTPS cart writes use the public Host even when NextURL identifies the internal HTTP listener', async () => {
+  const backend = guardedCartBackend();
+  const request = post('cart', {
+    url: 'http://127.0.0.1:3000/api/account/cart',
+    headers: { host: 'localhost:19034', origin: 'https://localhost:19034', 'sec-fetch-site': 'same-origin', 'x-forwarded-host': 'attacker.test', 'x-forwarded-proto': 'http' },
+  });
+  assert.notEqual(request.nextUrl.origin, 'https://localhost:19034');
+  const response = await routes({ cart: backend.api.cart }).POST(request, ctx('cart'));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.cart.id, 'cart_1');
+  assert.equal(body.cart_access_token, backend.carts.get('cart_1').capability);
+  assert.equal(response.headers.get('set-cookie'), null);
+});
+
+test('canonical Host matching accepts HTTPS default ports without using forwarded authorities', async () => {
+  const response = await routes().POST(post('logout', { url: 'http://127.0.0.1:3000/api/account/logout', headers: { host: 'SHOP.TEST:443' } }), ctx('logout'));
+  assert.equal(response.status, 200);
+});
+
+test('missing, malformed, cross-site and forwarded-only origins cannot create a cart', async () => {
+  const backend = guardedCartBackend();
+  const handler = routes({ cart: backend.api.cart });
+  const cases = [
+    { origin: 'null' },
+    { origin: 'not a URL' },
+    { origin: 'https://shop.test/' },
+    { origin: 'https://shop.test/path' },
+    { origin: 'https://shop.test#fragment' },
+    { origin: 'https://name:password@shop.test' },
+    { origin: 'http://shop.test' },
+    { origin: 'https://shop.test:444' },
+    { origin: 'https://attacker.test', 'x-forwarded-host': 'attacker.test', 'x-forwarded-proto': 'https' },
+    { origin: 'https://attacker.test', forwarded: 'host=attacker.test;proto=https' },
+    { 'sec-fetch-site': 'cross-site' },
+    { host: 'shop.test/path' },
+    { host: 'name@shop.test' },
+    { host: 'shop.test,attacker.test' },
+  ];
+  for (const headers of cases) {
+    const response = await handler.POST(post('cart', { headers }), ctx('cart'));
+    assert.equal(response.status, 403, JSON.stringify(headers));
+  }
+  for (const missing of ['origin', 'host']) {
+    const request = post('cart');
+    request.headers.delete(missing);
+    assert.equal((await handler.POST(request, ctx('cart'))).status, 403);
+  }
+  assert.equal(backend.carts.size, 0);
+});
+
 function guardedCartBackend() {
   const carts = new Map();
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
   async function transport(url, options = {}) {
-    const path = new URL(url).pathname;
-    const authenticated = options.headers?.Authorization === 'Bearer customer-token';
-    if (path === '/store/customers/me') return authenticated ? json({ customer }) : json({}, 401);
+    const parsed = new URL(url);
+    const path = parsed.pathname;
+    const actor = options.headers?.Authorization === 'Bearer customer-token' ? customer
+      : options.headers?.Authorization === 'Bearer other-token' ? { ...customer, id: 'cus_other' } : null;
+    if (path === '/store/customers/me') return actor ? json({ customer: actor }) : json({}, 401);
     if (path === '/store/carts') {
       const id = `cart_${carts.size + 1}`;
       const state = { cart: { id, customer_id: null, items: [] }, capability: String(carts.size + 1).repeat(64) };
@@ -137,12 +190,13 @@ function guardedCartBackend() {
     const state = match && carts.get(match[1]);
     if (!state || options.headers?.['x-cart-access-token'] !== state.capability) return json({}, 404);
     if (match[2] === 'customer') {
-      if (!authenticated) return json({}, 401);
-      state.cart.customer_id = customer.id;
+      if (!actor) return json({}, 401);
+      state.cart.customer_id = actor.id;
     } else if (match[2] === 'line-items') {
       state.cart.items.push(JSON.parse(options.body));
     }
-    return json({ cart: { ...state.cart, customer: { has_account: Boolean(state.cart.customer_id) } } });
+    if (parsed.searchParams.has('fields')) return json({ cart: { id: state.cart.id } });
+    return json({ cart: state.cart });
   }
   return { transport, carts, api: server.createAccountService(transport, env) };
 }
@@ -188,9 +242,38 @@ test('existing cart linkage requires its capability and refuses another register
   assert.equal(backend.carts.get(created.cart.id).cart.customer_id, null);
   await backend.api.cart('customer-token', input);
   assert.equal(backend.carts.get(created.cart.id).cart.customer_id, customer.id);
+  await backend.api.cart('customer-token', input);
+  assert.equal(backend.carts.get(created.cart.id).cart.customer_id, customer.id);
   backend.carts.get(created.cart.id).cart.customer_id = 'cus_other';
   await assert.rejects(backend.api.cart('customer-token', input), error => error.status === 409);
   assert.equal(backend.carts.get(created.cart.id).cart.customer_id, 'cus_other');
+});
+
+test('foreign customer cannot claim an owned cart even with its capability and an id-only field projection', async () => {
+  const backend = guardedCartBackend();
+  const created = await backend.api.cart('customer-token', {});
+  const response = await routes({ cart: backend.api.cart }).POST(post('cart', {
+    headers: { cookie: 'mm_customer_session=other-token' },
+    body: { cart_id: created.cart.id, cart_access_token: created.cart_access_token },
+  }), ctx('cart'));
+  assert.equal(response.status, 409);
+  assert.equal(backend.carts.get(created.cart.id).cart.customer_id, customer.id);
+});
+
+test('missing or malformed ownership data fails closed before cart transfer', async () => {
+  for (const cart of [
+    { id: 'cart_1' },
+    { id: 'cart_1', customer_id: '' },
+    { id: 'cart_1', customer_id: ' ' },
+    { id: 'cart_1', customer_id: 1 },
+    { id: 'cart_1', customer_id: {} },
+    { id: 'cart_other', customer_id: null },
+    { customer_id: null },
+  ]) {
+    const { api, calls } = service([{ body: { customer } }, { body: { cart } }]);
+    await assert.rejects(api.cart('customer-token', { cart_id: 'cart_1', cart_access_token: cartCapability }), error => error.status === 502);
+    assert.equal(calls.length, 2);
+  }
 });
 
 test('creation rejects absent or malformed upstream capabilities instead of returning an unusable cart', async () => {
