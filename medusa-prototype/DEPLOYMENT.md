@@ -1189,14 +1189,14 @@ disposable clone. The fixture used the prepared native 2.22.4 image for its
 unchanged auth/capability contract, not a newly built merged catalog image.
 The separate fresh merged-image acceptance is recorded below.
 
-Publication of `release/20261109-closed` was actually attempted and rejected:
-the current GitHub OAuth authorization lacks `workflow` scope for the CI file.
-The local keyring authorization has `gist`, `read:org`, `repo`; an SSH attempt
-with GitHub's HTTPS-published host key also failed public-key authentication.
-The branch has not been published and no PR/CI run or production deployment is
-claimed. The user must authorize `gh auth refresh -h github.com -s workflow`
-or provide another appropriately scoped supported Git credential; do not drop
-workflow changes or bypass GitHub's permission check to force a partial push.
+The initial publication attempt for `release/20261109-closed` was rejected
+because the old GitHub OAuth authorization lacked `workflow` scope for CI.
+After the account rename to `funMachie`, a fresh login granted `workflow`
+alongside `gist`, `read:org` and `repo`. The prepared release branch was then
+successfully published through the standard HTTPS/keyring credential helper.
+This resolves Git publication authorization, not Vercel project access or
+production deployment. Do not use a main push as a substitute for preview and
+rollback verification.
 Vercel owner participation remains separately required before merging main.
 
 After acceptance, the private Next/Caddy/Medusa/PostgreSQL/Redis fixture,
@@ -1244,4 +1244,4 @@ cache were removed after proof. The final image and release archives remain.
 Old private cutover profiles are still pinned to the previous rehearsal image:
 regenerate them for this exact image, preserve production secrets and take a
 fresh stopped-writer PG/Redis backup when the coordinated window is available.
-GitHub workflow authorization and Vercel access still block publication.
+GitHub publication authorization is restored; Vercel access still gates release.
