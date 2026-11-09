@@ -1245,3 +1245,110 @@ Old private cutover profiles are still pinned to the previous rehearsal image:
 regenerate them for this exact image, preserve production secrets and take a
 fresh stopped-writer PG/Redis backup when the coordinated window is available.
 GitHub publication authorization is restored; Vercel access still gates release.
+
+## Backend-only private review — 10 November 2026
+
+The owner deferred Vercel/storefront work. This is a retained private backend
+review environment, not an independent production cutover:
+
+- Root: `/opt/mario-releases/20261109-backend-only` (0700).
+- Compose project: `mm-closeout-backend-only-20261109`.
+- Runtime source: `cc4b339a06110a85c9aa5b320b366aeca49d8af3`.
+- Image: `mm-backend-only:20261110-cc4b339`,
+  `sha256:d13e83b2dbe236ff3fba6309da51f20913c745c1017c7f892d1e569d49db6af7`.
+  Native backend and Admin were rebuilt; observed Node 24.22.2, Medusa 2.22.4,
+  UID 1000. The pinned official ECR Node base is the same as documented above.
+- PostgreSQL, Redis and media use separate candidate volumes. The backend has
+  no published port and stays on an internal network without external egress.
+  Only the private Caddy has an ingress network and publishes
+  `127.0.0.1:19443 -> 8443`. No production mount, secret or database is shared.
+- Payment/carrier flags remain false; SMTP and Telegram are absent. Production
+  bank callback URLs must not be exercised from this clone. No payment,
+  refund, shipment, cancellation or customer notification was created.
+- Services intentionally have `restart: "no"`; no unattended restart after a
+  host reboot is promised. Production containers and existing local services
+  were not restarted.
+
+Use the exact project directory so `./Caddyfile` resolves to the retained root:
+
+```bash
+docker compose \
+  --project-directory /opt/mario-releases/20261109-backend-only \
+  --env-file /opt/mario-releases/20261109-backend-only/candidate.env \
+  -f /opt/mario-releases/20261109-backend-only/backend-source/compose.candidate.yml \
+  -f /opt/mario-releases/20261109-backend-only/compose.backend-only.yml \
+  -p mm-closeout-backend-only-20261109 \
+  up -d --no-build --wait --wait-timeout 150
+```
+
+Access native Admin at `https://localhost:9443/app` through:
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+  -L 127.0.0.1:9443:127.0.0.1:19443 mario-mikke-demo
+```
+
+The local private directory
+`C:/Users/baira/.omp/backups/mario-mikke/20261109-prelaunch/backend-only`
+contains `admin-access.json`, `localhost-root-ca.pem`, `backend-only-proof.json`
+and `confirmed-dispatch-candidates.json`. Do not publish these files or copy
+review credentials into production. HTTPS was verified against the explicit
+private CA; browser proof used an isolated Chrome profile pinned to the leaf
+SPKI, not a global TLS bypass or Windows trust-store change. A normal browser
+does not automatically trust this private CA.
+
+Actual rebuilt-runtime HTTP checks: health 200; anonymous Admin 401;
+authenticated dispatch registry 200; capability-authorized native cart and
+shipping-option reads 200. Native shipping calculation without a capability
+previously reached the handler and returned 500 for the restored flat manual
+option. The fixed route returns 404 with `Cache-Control: no-store` both without
+a key and with another cart's real key. The manual provider cannot calculate
+a carrier tariff; successful authorized CDEK/Yandex calculation and native
+paid-fulfillment transitions are covered by the separate offline HTTP suite,
+not misreported as live carrier checkout on this clone.
+
+CI [42717280737](https://github.com/dnsptr/clothing-store/actions/runs/42717280737)
+at `745d696` passed 951 unit tests, five offline checkout cases, three carrier
+HTTP cases and 21 PostgreSQL payment-recovery cases, plus frontend checks and
+builds. The workflow now explicitly enables the checkout and carrier suites;
+their prior skips in the general HTTP job were not positive coverage.
+Actual browser login, product editor and dispatch-point screen also worked
+on the rebuilt image with no captured browser errors.
+
+Read-only external probes ran in separate short-lived diagnostic containers,
+not by enabling integrations in the retained clone:
+
+- T-Bank `CheckOrder`: accepted signature, expected missing-order code 335;
+  production API with a DEMO terminal. No `Init` or financial operation.
+- CDEK: the provided live keys authenticate against `https://api.cdek.ru/v2`;
+  do not combine them with the old EDU URL/keys. An illustrative 1000 g,
+  30 × 20 × 10 cm Moscow–Saint Petersburg parcel returned 285 RUB for tariff
+  136 and 540 RUB for 137. These are sample quotes, not real-order prices or
+  approval to change the fixed buyer fees.
+- Yandex: city/PVZ lookup and illustrative price calculation succeeded.
+  A separate `available_for_dropoff: true` lookup confirmed the existing
+  source ID at `Москва улица Татьянин Парк 19 к2`.
+- CDEK `MSK2545`, `ш. Боровское, 2к3`, city 44, was confirmed as a receiving
+  `PVZ` with `is_reception=true`, Monday–Sunday 09:00–21:00.
+
+Confirmed public point metadata is retained privately, but not assigned to
+the arbitrary restored warehouse. Native data still has one «Основной склад»
+and empty source registries. Map it to the confirmed Mosmart consolidation
+workflow before creating native carrier options/providers and assigning origins.
+Of 217 native variants, 159 lack at least one positive packaged-measurement
+field. Import the measurements already supplied by the client; do not ask for
+them again or synthesize dimensions. Positive fields alone do not prove that
+the measurements describe real packaging.
+
+Own courier is the only agreed free method inside MKAD. The implemented free
+period ends at `2027-01-01T00:00:00+03:00`; afterwards the method is unavailable
+until a positive approved price is configured. Do not describe it as perpetual.
+Live terminal ownership, final/return receipts, marked-goods handling and the
+cash-register process remain launch gates; a successful read-only bank probe
+does not close them. See `docs/FISCALIZATION_ATOL_STATUS.md` at repository root.
+
+After proof, the plaintext restore snapshot, temporary carrier-key profiles,
+isolated browser profile and dedicated BuildKit container/cache were removed.
+The review stack, its private configuration, image, source archive, CA,
+credentials and SSH tunnel remain for review. Review-only carts/account exist
+only in the clone. This is not a fresh stopped-writer production rollback point.
