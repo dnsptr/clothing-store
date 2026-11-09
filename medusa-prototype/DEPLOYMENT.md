@@ -1187,7 +1187,7 @@ empty session and orders 401. The cart payment button remained disabled and
 direct checkout had no payment form. Test customers/carts existed only in the
 disposable clone. The fixture used the prepared native 2.22.4 image for its
 unchanged auth/capability contract, not a newly built merged catalog image.
-The merged backend still needs its own fresh image before release.
+The separate fresh merged-image acceptance is recorded below.
 
 Publication of `release/20261109-closed` was actually attempted and rejected:
 the current GitHub OAuth authorization lacks `workflow` scope for the CI file.
@@ -1203,3 +1203,45 @@ After acceptance, the private Next/Caddy/Medusa/PostgreSQL/Redis fixture,
 synthetic customer data, own networks/tunnel, browser profiles and intermediate
 source/profile files were removed. Production and existing local services were
 not restarted or switched.
+
+### Final rebuilt artifacts from merged source `3ec20fa`
+
+The release is retained at `/opt/mario-releases/20261109-closed-3ec20fa`
+with four archive SHA-256 entries, `release-manifest.json` and the public-only
+closed storefront profile. Runtime source is committed locally; documentation
+commits after `3ec20fa` do not imply that a different runtime was built.
+
+- Backend `mm-backend-closed:20261109-3ec20fa`,
+  image `sha256:877fced513ec001e0c2caa2cdd4cc3f668617dc3046c354d3bd64c7b59bd0901`,
+  Node 24.22.2, Medusa 2.22.4, UID 1000. Both backend and native Admin compiled.
+  The dedicated BuildKit container was bounded to 2400 MiB and one CPU.
+  Docker Hub returned 429 for the Node pull; the unchanged Dockerfile used a
+  named base-image context from the Docker Official Images ECR mirror, pinned
+  to index `sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9`.
+  Its OCI source annotation points to `nodejs/docker-node`.
+- The new image ran `db:migrate --execute-safe-links --execute-safe-search`
+  only on a fresh isolated PG/media clone, then became healthy. Read-only counts
+  remained 38 products and 1 order. HTTP returned health 200, anonymous Admin
+  401, native Admin app 200 and Store catalog 200 with 21 visible products.
+  Native cart creation/addition and capability-authorized read returned 200;
+  a read without capability returned 404. The line item had a positive
+  server-calculated total. Native payment-collection creation returned 200,
+  but `pp_system_default` payment-session creation was rejected with 400.
+  All five external payment/carrier flags were false; no real operation ran.
+- The final Linux storefront used the public production API/site origins,
+  empty payment provider and test checkout false. `npm ci --include=dev`
+  avoids the runtime image's production default omitting build dependencies;
+  the final build did not rely on Next auto-installing TypeScript. It produced
+  31 server routes. Actual loopback runtime returned 200 for home, catalog,
+  closed checkout without a form and empty account session; forged Origin plus
+  forwarded host returned 403. This is an ordinary server bundle, not a Vercel
+  prebuilt deployment or proof of Vercel's project environment.
+
+Both compiled archives passed `gzip -t`; source and compiled archive checksums
+are retained in the release ledger. The new fixture, plaintext PG/media
+snapshot, candidate-only secrets, extracted build trees and dedicated BuildKit
+cache were removed after proof. The final image and release archives remain.
+Old private cutover profiles are still pinned to the previous rehearsal image:
+regenerate them for this exact image, preserve production secrets and take a
+fresh stopped-writer PG/Redis backup when the coordinated window is available.
+GitHub workflow authorization and Vercel access still block publication.
