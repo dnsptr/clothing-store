@@ -171,6 +171,50 @@ jobs:
           ADMIN_CORS: http://localhost:9000
           AUTH_CORS: http://localhost:3000,http://localhost:9000
 
+      - name: Run native checkout HTTP integration tests (offline bank)
+        run: npm run test:checkout:offline
+        working-directory: medusa-prototype/apps/backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_TEMP_NAME: medusa_checkout_integration_tests
+          JWT_SECRET: test-jwt-secret
+          COOKIE_SECRET: test-cookie-secret
+
+      - name: Run carrier HTTP integration tests (offline providers)
+        run: npm run test:integration:http -- --runTestsByPath integration-tests/http/carrier-handoff.spec.ts
+        working-directory: medusa-prototype/apps/backend
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_TEMP_NAME: medusa_carrier_integration_tests
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa_carrier_integration_tests
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret
+          COOKIE_SECRET: test-cookie-secret
+          STORE_CORS: http://localhost:3000
+          ADMIN_CORS: http://localhost:9000
+          AUTH_CORS: http://localhost:3000,http://localhost:9000
+          TBANK_ENABLED: "false"
+          POCHTA_ENABLED: "false"
+          OWN_COURIER_ENABLED: "false"
+          CDEK_ENABLED: "true"
+          CDEK_CLIENT_ID: isolated-carrier-client
+          CDEK_CLIENT_SECRET: isolated-carrier-secret
+          CDEK_API_BASE_URL: https://api.edu.cdek.ru/v2
+          CDEK_FROM_CITY_CODE: "44"
+          CDEK_PVZ_PRICE_RUB: "350"
+          CDEK_COURIER_PRICE_RUB: "490"
+          YANDEX_DELIVERY_ENABLED: "true"
+          YANDEX_DELIVERY_TOKEN: isolated-yandex-token
+          YANDEX_DELIVERY_API_BASE_URL: https://b2b.taxi.tst.yandex.net/api/b2b/platform
+          YANDEX_DELIVERY_PVZ_PRICE_RUB: "350"
+
       # Run the payment recovery lease and projection tests against PostgreSQL,
       # not as silently skipped unit suites without TBANK_INBOX_TEST_DATABASE_URL.
       - name: Run TBank payment recovery integration tests
