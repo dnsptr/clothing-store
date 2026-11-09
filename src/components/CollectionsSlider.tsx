@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { MOCK_OUTFITS } from "../data/mockData";
+import { STOREFRONT_OUTFITS } from "../lib/collections";
 import { withBasePath } from "../lib/assets";
 import EditorialCursor, { useEditorialCursor } from "./EditorialCursor";
 import styles from "./CollectionsSlider.module.css";
@@ -54,7 +54,7 @@ export default function CollectionsSlider() {
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
       >
-        {MOCK_OUTFITS.map((outfit) => (
+        {STOREFRONT_OUTFITS.map((outfit) => (
           <Link
             key={outfit.id}
             href={`/collection/${outfit.id}`}

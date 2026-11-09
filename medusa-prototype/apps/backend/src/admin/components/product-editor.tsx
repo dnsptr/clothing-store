@@ -4,7 +4,7 @@ import { ArrowUpMini, ArrowDownMini, Trash } from "@medusajs/icons"
 import { Badge, Button, Heading, Input, Label, Textarea, toast } from "@medusajs/ui"
 import { sdk } from "../lib/sdk"
 import { resolveMediaPreviewUrl } from "../lib/media"
-import { PROFILE_FIELDS, profileProblems, readProfile, type CatalogProfile } from "../../lib/catalog-profile"
+import { PROFILE_FIELDS, profileProblems, publicationProfileProblems, readProfile, type CatalogProfile } from "../../lib/catalog-profile"
 import { applyProfileTemplate, readMeasurements, measurementProblems, type Measurement } from "../../lib/catalog-quality"
 
 interface ProductRow {
@@ -38,6 +38,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
   const [templates, setTemplates] = useState<{ id: string; title: string }[]>([])
   const [templateId, setTemplateId] = useState("")
   const [overwrite, setOverwrite] = useState(false)
+  const [preview, setPreview] = useState(false)
 
   const load = useCallback(async () => {
     setError("")
@@ -48,6 +49,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
       const p = data.product
       setProduct(p); setTitle(p.title); setDescription(p.description ?? "")
       setProfile(readProfile(p.metadata?.catalog_profile))
+      setPreview(p.metadata?.storefront_preview === true)
       setMeasurements(readMeasurements((p.metadata?.catalog_profile as Record<string, unknown> | undefined)?.measurements))
       setImages([...(p.thumbnail ? [p.thumbnail] : []), ...p.images.map((image) => image.url)].filter((url, i, all) => all.indexOf(url) === i))
       setCategoryIds(p.categories?.map((category) => category.id) ?? [])
@@ -75,11 +77,12 @@ export const ProductEditor = ({ id }: { id: string }) => {
   }
   const missing = [
     ...measurementProblems(measurements),
-    ...(!title.trim() ? ["Наименование"] : []), ...profileProblems(profile),
+    ...(!title.trim() ? ["Наименование"] : []), ...publicationProfileProblems(profile),
     ...(!images.length ? ["Фото товара"] : []), ...(!categoryIds.length ? ["Категория"] : []),
     ...(!product?.variants?.length ? ["Варианты, размеры и цены"] : []),
     ...(product?.variants?.some((variant) => !variant.prices?.some((price) => price.currency_code === "rub" && price.amount > 0)) ? ["Рублёвая цена для каждого варианта"] : []),
   ]
+  const incompleteDetails = profileProblems(profile).filter(problem => !missing.includes(problem))
 
   async function save(status: "draft" | "published") {
     if (!product) return
@@ -92,7 +95,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
       if (current.updated_at !== product.updated_at) throw new Error("Товар изменён другим сотрудником. Обновите страницу и проверьте изменения.")
       await sdk.admin.product.update(id, {
         title: title.trim() || product.title, description, status,
-        metadata: { ...current.metadata, catalog_profile: { ...(current.metadata?.catalog_profile as Record<string, unknown> ?? {}), ...profile, measurements: readMeasurements(measurements), label_images: labels } },
+        metadata: { ...current.metadata, storefront_preview: preview, catalog_profile: { ...(current.metadata?.catalog_profile as Record<string, unknown> ?? {}), ...profile, measurements: readMeasurements(measurements), label_images: labels } },
         images: images.map((url) => ({ url })), thumbnail: images[0] ?? null,
         categories: categoryIds.map((categoryId) => ({ id: categoryId })), collection_id: collectionId || null,
       })
@@ -167,6 +170,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
     </div>
     <div role="tabpanel" aria-label={tab}>
       {tab === "Карточка" && <div className="grid gap-5 md:grid-cols-2">
+        <label className="flex items-center gap-2 md:col-span-2"><input type="checkbox" checked={preview} onChange={e => { setPreview(e.target.checked); setDirty(true) }} />Предпросмотр на сайте без возможности покупки</label>
         <details className="md:col-span-2">
           <summary>Характеристики из другой карточки</summary>
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -227,6 +231,7 @@ export const ProductEditor = ({ id }: { id: string }) => {
     </div>
     <div className="border-ui-border-base space-y-3 border-t pt-4">
       {!!missing.length && <details><summary>Не заполнено: {missing.length}</summary><ul className="list-disc pl-5 text-sm">{missing.map((item) => <li key={item}>{item}</li>)}</ul></details>}
+      {!!incompleteDetails.length && <details><summary>Дополнительные сведения не заполнены: {incompleteDetails.length}</summary><ul className="list-disc pl-5 text-sm">{incompleteDetails.map(item => <li key={item}>{item}</li>)}</ul></details>}
       {!labels.length && <p className="text-ui-fg-subtle text-sm">Фото ярлыков ещё не добавлены.</p>}
       <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={busy} onClick={() => void save("draft")}>{product.status === "published" ? "Снять с публикации и сохранить" : "Сохранить черновик"}</Button><Button disabled={busy || missing.length > 0} onClick={() => void save("published")}>{product.status === "published" ? "Сохранить опубликованным" : "Опубликовать"}</Button>{dirty && <Badge>Есть несохранённые изменения</Badge>}</div>
     </div>

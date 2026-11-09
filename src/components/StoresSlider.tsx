@@ -40,7 +40,7 @@ export default function StoresSlider({ items }: StoresSliderProps) {
     <section className={styles.section}>
       <div className={styles.titleSection}>
         <span className={styles.subtitle}>Магазины и контакты</span>
-        <h2 className={styles.title}>10 магазинов сегодня. Одиннадцатый откроется в августе</h2>
+        <h2 className={styles.title}>Магазины MARIO MIKKE</h2>
       </div>
 
       <div

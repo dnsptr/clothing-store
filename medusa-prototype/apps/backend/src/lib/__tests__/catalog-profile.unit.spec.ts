@@ -1,6 +1,11 @@
-import { normalizeSize, profileProblems, readProfile, PROFILE_FIELDS } from "../catalog-profile"
+import { normalizeSize, profileProblems, publicationProfileProblems, readProfile, PROFILE_FIELDS } from "../catalog-profile"
 
 describe("catalog profile", () => {
+  it("reports missing descriptions for quality review without blocking publication", () => {
+    expect(profileProblems(readProfile({})).length).toBeGreaterThan(0)
+    expect(publicationProfileProblems(readProfile({}))).toEqual([])
+    expect(publicationProfileProblems(readProfile({ manufactured_at: "13.2026", registry_url: "http://example.com" }))).toHaveLength(2)
+  })
   it("preserves an incomplete draft without inventing values", () => {
     expect(readProfile(undefined).manufacturer).toBe("")
     expect(profileProblems(readProfile({}))).toContain("Изготовитель")

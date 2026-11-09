@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "medusa-prototype/**",
+    ".env*/**",
     "next-env.d.ts",
     // Local worktrees and tool output are not application source.
     ".slim/**",

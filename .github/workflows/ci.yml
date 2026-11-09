@@ -46,7 +46,7 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Catalog and delivery regression tests
+      - name: Catalog, delivery and account regression tests
         run: npm test
 
       # Two deployable artifacts exist, so CI builds both. Neither is allowed to

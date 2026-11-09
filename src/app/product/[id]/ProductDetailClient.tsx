@@ -216,7 +216,7 @@ function ProductView({ product }: { product: Product }) {
   // Combinations that are out of stock OR that don't exist at all resolve to
   // "unavailable" and are rendered disabled (never hidden).
   const isColorAvailable = (colorName: string) =>
-    product.variants.some(
+    product.isPreview || product.variants.some(
       (variant) =>
         variant.available &&
         variant.options.Цвет === colorName &&
@@ -224,7 +224,7 @@ function ProductView({ product }: { product: Product }) {
     );
 
   const isSizeAvailable = (size: string) =>
-    product.variants.some(
+    product.isPreview || product.variants.some(
       (variant) =>
         variant.available &&
         variant.options.Размер === size &&
@@ -233,7 +233,7 @@ function ProductView({ product }: { product: Product }) {
 
   // FE-006 B4: the primary action is enabled only for a fully-selected, existing
   // and available combination (and while the cart isn't mutating).
-  const canAddToCart = Boolean(selectedVariant && selectedColor) && !isCartMutating;
+  const canAddToCart = !product.isPreview && Boolean(selectedVariant && selectedColor) && !isCartMutating;
 
   // Артикул — только настоящий SKU: выбранного варианта, а пока выбор не сделан —
   // единственного варианта товара. Раньше здесь стоял один и тот же выдуманный
@@ -422,8 +422,10 @@ function ProductView({ product }: { product: Product }) {
               disabled={!canAddToCart}
               aria-busy={isCartMutating}
             >
-              Добавить в корзину
+              {product.isPreview ? "Скоро в продаже" : "Добавить в корзину"}
             </button>
+
+            {product.isPreview && <p className={styles.selectionHint}>Товар доступен для просмотра. Продажи скоро откроются.</p>}
 
             {sku && (
               <div className={styles.productFacts}>

@@ -51,15 +51,15 @@
 }
 
 .name {
-  overflow: hidden;
+  min-height: 40px;
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 12.2px;
   font-weight: 400;
   line-height: 20px;
   letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .name a {
@@ -76,6 +76,7 @@
 
 .colors {
   display: flex;
+  flex-wrap: wrap;
   grid-column: 1 / -1;
   align-items: center;
   gap: 7px;
@@ -84,11 +85,19 @@
 }
 
 .colorDot {
+  flex: 0 0 11px;
   width: 11px;
   height: 11px;
   border: 1px solid rgba(79, 62, 53, 0.14);
   border-radius: 50%;
   transition: outline-color 0.18s ease, transform 0.18s ease;
+}
+
+.previewNote {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .colorDot:hover {

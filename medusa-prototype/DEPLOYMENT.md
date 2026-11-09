@@ -1026,17 +1026,23 @@ private output directory. The verified live identities for this rehearsal were:
 ```bash
 POSTGRES_CONTAINER=mario-mikke-postgres-1 \
 BACKEND_CONTAINER=mario-mikke-medusa-1 \
+REDIS_CONTAINER=mario-mikke-redis-1 \
 bash scripts/backup-release.sh \
   /opt/clothing-store/medusa-prototype \
   /private/recipient.pem /private/backups
 ```
 
-The script verifies compose ownership and the backend working directory before
-dumping. A wrong-project PostgreSQL container was rejected in the rehearsal.
-It captures a custom-format PostgreSQL dump, the exact running backend image,
-deployment env/configuration and static media with component checksums. OpenSSL
-CMS AES-256-GCM encryption uses only the public recipient certificate on the
-server; plaintext temporary files are removed on exit.
+The script verifies compose ownership and the backend/Redis working directories
+before dumping. A wrong-project PostgreSQL container was rejected in the
+rehearsal. It captures a custom-format PostgreSQL dump, the exact running backend
+image and protected Docker runtime metadata, authenticated whole-instance Redis
+RDB with `redis-check-rdb` proof, deployment env/configuration and static media
+with component checksums. OpenSSL CMS AES-256-GCM encryption uses only the public
+recipient certificate on the server; plaintext temporary files are removed on
+exit. Redis replication-snapshot bookkeeping is not an application-data write.
+For a coordinated recovery point, stop all backend/queue writers under
+maintenance before the final PostgreSQL and Redis snapshots; sequential snapshots
+of an active system are not a common cutover point.
 
 `release-20261108T203016Z.tar.gz.cms` was copied off-server, authenticated and
 decrypted using the private key retained on the workstation. The plaintext
@@ -1106,3 +1112,51 @@ actual catalog packaging, SMTP and 1C acceptance gates are met. Rehearsal
 containers, volumes, tunnels, decrypted snapshot and dedicated build cache were
 removed after proof. Release archives, rollback configuration and the encrypted
 offsite backup were retained; the existing local development services were not stopped.
+
+## Release publication gate and main integration — 9 November 2026
+
+GitHub access permits branch publication, but direct Vercel project access is
+not available. The current custom domain is served by Vercel; the latest
+successful GitHub Production deployment refers to main
+`7062b821ab6ac76a7abb6cd867e72c22125f033a`, project `clothing-store`,
+deployment `dpl_G7G2viAvqtqX6rAAHRVLZ2vbbBpB`.
+The immutable deployment and preview require Vercel SSO; unauthenticated API
+access returns `403 missingToken`. GitHub records alone do not authenticate the
+current alias assignment, project env, preview behavior or an immediate rollback.
+Pushing main can publish Vercel independently of the Pages workflow: do not use
+a blind main push as a deployment test.
+
+Fetching origin/main exposed six newer colleague commits, including customer
+accounts and catalog/manual-stock changes. The retained prelaunch source/image
+archives predate this integration and are historical proof, **not** deployable
+artifacts for the merged release. Rebuild from the reviewed merged commit and
+record new identities before any coordinated cutover. The release branch is
+`release/20261109-closed`; customer DOCX documents, Office lockfiles, private
+runtime profiles and backup files are excluded from publication.
+
+A newer snapshot `release-20261109T110830Z.tar.gz.cms` includes Redis and exact
+runtime metadata. Its offsite copy passed authenticated decryption and all
+10 component checksums. The RDB was actually loaded into Redis 7.4.11 without
+network access or production volumes: PONG, 1020 loaded keys, four naturally
+expired keys discarded. Plaintext fixtures and the isolated Redis were removed.
+This exercise was taken while the old application was running; take a new,
+quiescent PostgreSQL/Redis snapshot at the eventual maintenance window.
+
+The old backend currently has TBank enabled despite the storefront checkout
+being closed. The new disabled-provider configuration rejects nonempty payment
+settings: a closed cutover must disable all provider flags and clear the eight
+TBank payment variables, retaining originals privately for rollback. Preserve
+actual JWT/cookie/MFA secrets, not newly generated candidate values. The prepared
+private override pins the pre-merge image and must be regenerated for a new
+merged image. Server-only worker mode does not make Medusa read-only: synchronous
+workflows and startup can still write Redis; do not assume queue rollback is
+unnecessary. Restoring the production Redis AOF/RDB volume is a separate
+controlled operation, not something `restore-candidate.sh` currently performs.
+
+Production stays unchanged until the Vercel owner can authenticate the preview,
+confirm the closed production build profile, retain/promote the previous
+deployment for rollback and coordinate publication with the backend. A Git
+revert/rebuild is slower, depends on current build/env settings and is not a
+verified instant alias rollback. The host also reports Redis memory-overcommit
+disabled; evaluate that host setting separately before relying on background
+saves under memory pressure.

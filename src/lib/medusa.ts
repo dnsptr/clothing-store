@@ -412,7 +412,7 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
       sku: variant.sku ?? null,
       options: getVariantOptions(variant, optionTitlesById),
       price,
-      available: isVariantAvailable(variant),
+      available: metadata.storefront_preview !== true && isVariantAvailable(variant),
     }];
   });
   const options = (product.options || []).flatMap((option) => {
@@ -481,6 +481,7 @@ function mapMedusaProduct(product: MedusaStoreProduct): Product | null {
     variants,
     available,
     isNew: Boolean(metadata.is_new),
+    isPreview: metadata.storefront_preview === true,
     isSoldOut: !available,
   };
 }
@@ -595,6 +596,13 @@ function parseCartResponse(data: unknown, endpoint: string): MedusaCartResponse 
   const cart = expectRecord(root.cart, endpoint, "cart");
   expectString(cart.id, endpoint, "cart.id");
   return data as MedusaCartResponse;
+}
+
+function parseCreatedCartResponse(data: unknown, endpoint: string) {
+  const root = expectRecord(data, endpoint, "$");
+  const token = expectString(root.cart_access_token, endpoint, "cart_access_token");
+  if (!/^[a-f0-9]{64}$/.test(token)) throw new MedusaContractError(endpoint, "cart_access_token", "is invalid");
+  return { ...parseCartResponse(data, endpoint), cart_access_token: token };
 }
 
 function parseLineItemDeleteResponse(
@@ -1007,16 +1015,22 @@ export async function fetchMedusaCollections(signal?: AbortSignal): Promise<{ id
 
 export async function createMedusaCart() {
   const regionId = await getRussianRegionId();
-  const response = await medusaRequest("/store/carts", {
-    method: "POST",
-    body: regionId ? { region_id: regionId } : {},
-    parse: (data, endpoint) => {
-      const root = expectRecord(data, endpoint, "$");
-      const token = expectString(root.cart_access_token, endpoint, "cart_access_token");
-      if (!/^[a-f0-9]{64}$/.test(token)) throw new MedusaContractError(endpoint, "cart_access_token", "is invalid");
-      return { ...parseCartResponse(data, endpoint), cart_access_token: token };
-    },
-  });
+  let response;
+  if (typeof window !== "undefined") {
+    const result = await fetch("/api/account/cart", {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(regionId ? { region_id: regionId } : {}),
+    });
+    if (!result.ok) throw new MedusaRequestError("/api/account/cart", "Не удалось создать корзину. Если сессия истекла, войдите ещё раз.", result.status);
+    response = parseCreatedCartResponse(await result.json(), "/api/account/cart");
+  } else {
+    response = await medusaRequest("/store/carts", {
+      method: "POST",
+      body: regionId ? { region_id: regionId } : {},
+      parse: parseCreatedCartResponse,
+    });
+  }
   rememberCartAccessToken(response.cart.id, response.cart_access_token);
   return response.cart;
 }

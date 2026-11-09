@@ -8,6 +8,7 @@ import {
   updateProductsWorkflow,
 } from "@medusajs/medusa/core-flows"
 import { CUSTOMER_CATALOG, CUSTOMER_CATALOG_SHARED, customerVariantSku, parseCustomerColors } from "./data/customer-catalog"
+import physical from "./data/customer-physical.json"
 
 const IMPORT_SOURCE = "mario-mikke-customer-sheet"
 const CATEGORY_DEFINITIONS = {
@@ -93,6 +94,7 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
 
   if (create.length) await createProductsWorkflow(container).run({ input: { products: create.map(product => ({
     title: `${product.row.name} ${product.row.article}`,
+    ...physical[product.row.article as keyof typeof physical],
     handle: product.handle,
     status: ProductStatus.DRAFT,
     thumbnail: placeholderUrl,
@@ -117,6 +119,7 @@ export default async function importCustomerCatalog({ container }: ExecArgs) {
     await updateProductsWorkflow(container).run({ input: { products: [{
       id: existing.id,
       title: `${product.row.name} ${product.row.article}`,
+      ...physical[product.row.article as keyof typeof physical],
       category_ids: [product.categoryId],
       shipping_profile_id: shippingProfileId,
       sales_channels: [{ id: channelId }],

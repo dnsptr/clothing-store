@@ -1,3 +1,5 @@
+import { storefrontDataMode } from "./medusa";
+
 export interface CatalogLink {
   label: string;
   href: string;
@@ -36,7 +38,7 @@ export const CATALOG_SECTIONS = {
   },
 } as const satisfies Record<string, CatalogLink>;
 
-export const PRODUCT_CATEGORIES: CatalogCategory[] = [
+const ALL_PRODUCT_CATEGORIES: CatalogCategory[] = [
   {
     slug: "outerwear",
     label: "Пальто и тренчи",
@@ -48,6 +50,18 @@ export const PRODUCT_CATEGORIES: CatalogCategory[] = [
     label: "Трикотаж",
     section: "clothing",
     href: "/catalog?category=knitwear",
+  },
+  {
+    slug: "skirts",
+    label: "Юбки",
+    section: "clothing",
+    href: "/catalog?category=skirts",
+  },
+  {
+    slug: "cardigans",
+    label: "Кардиганы",
+    section: "clothing",
+    href: "/catalog?category=cardigans",
   },
   {
     slug: "trousers",
@@ -68,6 +82,10 @@ export const PRODUCT_CATEGORIES: CatalogCategory[] = [
     href: "/catalog?category=accessories",
   },
 ];
+
+export const PRODUCT_CATEGORIES = storefrontDataMode === "mock"
+  ? ALL_PRODUCT_CATEGORIES
+  : ALL_PRODUCT_CATEGORIES.filter(category => ["knitwear", "cardigans", "skirts"].includes(category.slug));
 
 // Пункты меню соответствуют реальным категориям каталога — по одному пункту на
 // фильтр. Раньше здесь были ярлыки без своего фильтра: «Платья» вели в
@@ -90,7 +108,11 @@ export const SALE_CATEGORIES: CatalogLink[] = [
   { label: "Аксессуары", href: "/catalog?category=accessories" },
 ];
 
-export const MATERIALS: CatalogMaterial[] = [
+export const MATERIALS: CatalogMaterial[] = storefrontDataMode !== "mock" ? [
+  { slug: "wool", label: "Шерсть", eyebrow: "Материалы в деталях", image: "https://api.mariomikke.shop/static/catalog/2026-11/1999-1.webp", href: "/catalog?material=wool" },
+  { slug: "cotton", label: "Хлопок", eyebrow: "Материалы в деталях", image: "https://api.mariomikke.shop/static/catalog/2026-11/1603-1.webp", href: "/catalog?material=cotton" },
+  { slug: "viscose", label: "Вискоза", eyebrow: "Материалы в деталях", image: "https://api.mariomikke.shop/static/catalog/2026-11/4262-1.webp", href: "/catalog?material=viscose" },
+] : [
   {
     slug: "linen",
     label: "Лен",
@@ -121,12 +143,12 @@ export const MATERIALS: CatalogMaterial[] = [
   },
 ];
 
-export const CATALOG_PRIMARY_NAV: CatalogLink[] = [
+export const CATALOG_PRIMARY_NAV: CatalogLink[] = storefrontDataMode === "mock" ? [
   CATALOG_SECTIONS.new,
   CATALOG_SECTIONS.clothing,
   CATALOG_SECTIONS.shoes,
   CATALOG_SECTIONS.accessories,
-];
+] : [CATALOG_SECTIONS.new, CATALOG_SECTIONS.clothing];
 
 /**
  * The home page's category shortcuts used to live here. They are editorial —
@@ -138,7 +160,7 @@ export const CATALOG_PRIMARY_NAV: CatalogLink[] = [
  * `?material=linen` to a heading. That is a fact about the assortment rather
  * than a promotional choice, and it belongs with the catalog taxonomy.
  */
-export const CLOTHING_SECTION_CATEGORY_SLUGS = ["outerwear", "knitwear", "trousers"];
+export const CLOTHING_SECTION_CATEGORY_SLUGS = ["outerwear", "knitwear", "cardigans", "skirts", "trousers"];
 
 export function getCategoryBySlug(slug: string) {
   return PRODUCT_CATEGORIES.find((category) => category.slug === slug);

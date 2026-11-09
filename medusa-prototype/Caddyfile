@@ -1,4 +1,4 @@
-http://{$BACKEND_HOST} {
+{$BACKEND_HOST:api.mariomikke.shop} {
 	encode zstd gzip
 
 	log {

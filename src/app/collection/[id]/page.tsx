@@ -1,7 +1,8 @@
 import { notFound, unstable_rethrow } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { MOCK_OUTFITS, MOCK_PRODUCTS, type Product } from "../../../data/mockData";
+import { MOCK_PRODUCTS, type Product } from "../../../data/mockData";
+import { STOREFRONT_OUTFITS } from "../../../lib/collections";
 import { withBasePath } from "../../../lib/assets";
 import {
   CATALOG_REVALIDATE_SECONDS,
@@ -23,7 +24,7 @@ interface CollectionPageProps {
 // отдельную задачу. Поэтому список образов остаётся статическим в обоих
 // режимах — в отличие от товаров внутри образа, у которых есть цена и наличие.
 export async function generateStaticParams() {
-  return MOCK_OUTFITS.map((outfit) => ({
+  return STOREFRONT_OUTFITS.map((outfit) => ({
     id: outfit.id,
   }));
 }
@@ -71,7 +72,7 @@ async function resolveOutfitProducts(productIds: string[]): Promise<OutfitProduc
 
 export default async function CollectionDetailPage({ params }: CollectionPageProps) {
   const { id } = await params;
-  const outfit = MOCK_OUTFITS.find((o) => o.id === id);
+  const outfit = STOREFRONT_OUTFITS.find((o) => o.id === id);
 
   if (!outfit) {
     notFound();
@@ -109,13 +110,13 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
           <div className={styles.breadcrumbs}>
             <Link href="/">Главная</Link>
             <span>/</span>
-            <span>Кампания</span>
+            <span>Коллекции</span>
             <span>/</span>
             <span className={styles.breadcrumbCurrent}>{outfit.title}</span>
           </div>
 
           <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>Составить образ</h2>
+            <h2 className={styles.sectionTitle}>Товары коллекции</h2>
           </div>
 
           {/* Interactive Outfit items grid */}

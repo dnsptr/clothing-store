@@ -344,7 +344,7 @@ function CatalogContent() {
           {isMedusa && (catalogCategories.length > 0 || collections.length > 0) && (
             <nav className={styles.taxonomy} aria-label="Категории и коллекции">
               {catalogCategories.map((category) => <Link key={category.id} href={`/catalog?category=${encodeURIComponent(category.handle)}`} aria-current={categoryParam === category.handle ? "page" : undefined}>{category.name}</Link>)}
-              {collections.map((collection) => <Link key={collection.id} href={`/catalog?collection=${encodeURIComponent(collection.id)}`} aria-current={collectionParam === collection.id ? "page" : undefined}>{collection.title}</Link>)}
+              {collections.filter(collection => !catalogCategories.some(category => category.name === collection.title)).map((collection) => <Link key={collection.id} href={`/catalog?collection=${encodeURIComponent(collection.id)}`} aria-current={collectionParam === collection.id ? "page" : undefined}>{collection.title}</Link>)}
             </nav>
           )}
         </div>

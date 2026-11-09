@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useCart } from "../context/CartContext";
-import { MOCK_OUTFITS } from "../data/mockData";
+import { STOREFRONT_OUTFITS } from "../lib/collections";
+import { storefrontDataMode } from "../lib/medusa";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import {
@@ -124,13 +125,13 @@ export default function MenuDrawer() {
           <div className={`${styles.panel} ${activeSubMenu !== null ? styles.mainPanelInactive : ""}`}>
             <ul className={styles.menuList}>
               <li><Link className={styles.menuItem} href={CATALOG_SECTIONS.new.href} onClick={closeMenu}>{CATALOG_SECTIONS.new.label}</Link></li>
-              {subMenuButton("sale")}
+              {storefrontDataMode === "mock" && subMenuButton("sale")}
               {subMenuButton("clothing")}
-              {subMenuButton("shoes")}
-              <li><Link className={styles.menuItem} href={CATALOG_SECTIONS.accessories.href} onClick={closeMenu}>{CATALOG_SECTIONS.accessories.label}</Link></li>
+              {storefrontDataMode === "mock" && subMenuButton("shoes")}
+              {storefrontDataMode === "mock" && <li><Link className={styles.menuItem} href={CATALOG_SECTIONS.accessories.href} onClick={closeMenu}>{CATALOG_SECTIONS.accessories.label}</Link></li>}
               {subMenuButton("materials")}
               <li className={styles.menuDivider} aria-hidden="true" />
-              {MOCK_OUTFITS.map((outfit) => (
+              {STOREFRONT_OUTFITS.map((outfit) => (
                 <li key={outfit.id}>
                   <Link className={`${styles.menuItem} ${styles.menuItemCollection}`} href={`/collection/${outfit.id}`} onClick={closeMenu}>{outfit.title}</Link>
                 </li>
