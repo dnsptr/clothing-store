@@ -61,6 +61,7 @@ export default defineMiddlewares({
     { matcher: "/store/payment-collections", method: "POST", middlewares: [requireCheckoutAccess] },
     { matcher: "/store/payment-collections/*", middlewares: [requireCheckoutAccess] },
     { matcher: "/store/shipping-options", method: "GET", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/shipping-options/:id/calculate", method: "POST", middlewares: [requireCheckoutAccess] },
     { matcher: "/store/yandex/calculate", method: "POST", middlewares: [requireCheckoutAccess] },
     {
       matcher: "/store/orders/:id",

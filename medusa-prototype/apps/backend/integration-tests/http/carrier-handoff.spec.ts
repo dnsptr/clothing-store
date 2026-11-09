@@ -224,6 +224,16 @@ describeCarriers("Carrier handoff origins through native HTTP and PostgreSQL (of
           const selection = carrier === "cdek"
             ? { city_code: DESTINATION_CITY, cdek_pvz_code: "TEST-CDEK-DESTINATION" }
             : { geo_id: DESTINATION_CITY, platform_station_id: "TEST-YANDEX-DESTINATION", pvz_name: destination.name, pvz_address: destination.address, city: destination.city };
+          const foreignCart = await api.post<CartResponse>("/store/carts", { region_id: region.id }, { headers: { "x-publishable-api-key": key.token } });
+          for (const deniedHeaders of [
+            { "x-publishable-api-key": key.token },
+            { "x-publishable-api-key": key.token, "x-cart-access-token": foreignCart.data.cart_access_token },
+          ]) {
+            const denied = await api.post(`/store/shipping-options/${option.id}/calculate`, {
+              cart_id: cartId, data: selection,
+            }, { headers: deniedHeaders, validateStatus: () => true });
+            expect(denied.status).toBe(404);
+          }
           const calculated = await api.post<{ shipping_option: { amount: number } }>(`/store/shipping-options/${option.id}/calculate`, { cart_id: cartId, data: selection }, { headers });
           const buyerFee = Number(carrier === "cdek" ? process.env.CDEK_PVZ_PRICE_RUB : process.env.YANDEX_DELIVERY_PVZ_PRICE_RUB);
           expect(calculated.data.shipping_option.amount).toBe(buyerFee);
