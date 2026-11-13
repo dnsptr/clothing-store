@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 export const postalIndexSchema = z.string().regex(/^(?!000000)\d{6}$/u);
 export const packageSchema = z.object({

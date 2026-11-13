@@ -19,7 +19,7 @@ async function waitForCheckout(appUrl: string, child: ChildProcess): Promise<voi
       throw new FixtureServerError(`Next checkout exited before readiness with ${child.exitCode}`);
     }
     try {
-      const response = await fetch(appUrl, { signal: AbortSignal.timeout(5_000) });
+      const response = await fetch(`${appUrl}/checkout`, { signal: AbortSignal.timeout(5_000) });
       if (response.status < 500) return;
     } catch (error) {
       if (!(error instanceof TypeError || error instanceof DOMException)) throw error;

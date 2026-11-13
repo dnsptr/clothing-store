@@ -1,3 +1,5 @@
+import type { PaymentSessionDTO } from "@medusajs/types";
+
 import type {
   ManualReviewDetails,
   PaymentSessionService,
@@ -9,17 +11,23 @@ export type OperatorAction = {
   readonly reason: string;
 };
 
+export type AttemptManualReviewDetails = {
+  readonly attempt: Record<string, unknown>;
+  readonly conflicts: readonly Record<string, unknown>[];
+  readonly paymentSession: PaymentSessionDTO | null;
+};
+
 export class ManualReviewNotFoundError extends Error {
   readonly name = "ManualReviewNotFoundError";
   constructor(readonly notificationId: string) {
-    super(`Notification ${notificationId} was not found`);
+    super(`T-Bank review ${notificationId} was not found`);
   }
 }
 
 export class ManualReviewStateError extends Error {
   readonly name = "ManualReviewStateError";
   constructor(readonly notificationId: string) {
-    super(`Notification ${notificationId} is not in manual review`);
+    super(`T-Bank review ${notificationId} is not in manual review`);
   }
 }
 
@@ -48,7 +56,7 @@ export async function inspectManualReview(
   const conflicts = notifications.listTbankNotificationConflicts && typeof paymentId === "string"
     ? await notifications.listTbankNotificationConflicts({ payment_id: paymentId }, { take: 100 })
     : [];
-  let paymentSession: any = null;
+  let paymentSession: PaymentSessionDTO | null = null;
   if (typeof orderId === "string" && payment.retrievePaymentSession) {
     try {
       paymentSession = await payment.retrievePaymentSession(orderId);
@@ -66,6 +74,48 @@ export async function inspectManualReview(
     conflicts,
     paymentSession,
   };
+}
+
+export async function inspectAttemptManualReview(
+  notifications: TbankNotificationStore,
+  payment: PaymentSessionService,
+  id: string,
+): Promise<AttemptManualReviewDetails> {
+  if (!notifications.listTbankPaymentAttempts) throw new Error("Payment attempt review store is unavailable");
+  const attempt = (await notifications.listTbankPaymentAttempts({ id }, { take: 1 }))[0];
+  if (!attempt) throw new ManualReviewNotFoundError(id);
+  if (attempt["poll_state"] !== "manual_review") throw new ManualReviewStateError(id);
+  const paymentId = typeof attempt["poll_payment_id"] === "string"
+    ? attempt["poll_payment_id"]
+    : `attempt:${id}`;
+  const conflicts = notifications.listTbankNotificationConflicts
+    ? await notifications.listTbankNotificationConflicts({ payment_id: paymentId }, { take: 100 })
+    : [];
+  let paymentSession: PaymentSessionDTO | null = null;
+  if (typeof attempt["payment_session_id"] === "string") {
+    try {
+      paymentSession = await payment.retrievePaymentSession(attempt["payment_session_id"]);
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+  }
+  return { attempt, conflicts, paymentSession };
+}
+
+export async function transitionAttemptManualReview(
+  notifications: TbankNotificationStore,
+  id: string,
+  action: OperatorAction,
+  outcome: "pending" | "completed",
+): Promise<void> {
+  if (!notifications.listTbankPaymentAttempts || !notifications.transitionPollManualReview) {
+    throw new Error("Payment attempt review store is unavailable");
+  }
+  const attempt = (await notifications.listTbankPaymentAttempts({ id }, { take: 1 }))[0];
+  if (!attempt) throw new ManualReviewNotFoundError(id);
+  if (attempt["poll_state"] !== "manual_review") throw new ManualReviewStateError(id);
+  const rows = await notifications.transitionPollManualReview({ id, now: new Date(), ...action, outcome });
+  if (rows.length === 0) throw new ManualReviewStateError(id);
 }
 
 export async function retryManualReview(

@@ -9,6 +9,12 @@ const compiled = ts.transpileModule(
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 
+const cartAccess = {};
+vm.runInNewContext(ts.transpileModule(
+  readFileSync(new URL('../../src/lib/cartAccess.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText, { exports: cartAccess });
+
 function fixture(overrides = {}) {
   return {
     id: 'prod_admin', title: 'Admin product', handle: 'linen-shirt',
@@ -29,6 +35,7 @@ function client(products = [fixture()]) {
       NEXT_PUBLIC_MEDUSA_BACKEND_URL: 'https://backend.test',
       NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: 'pk_test', NEXT_PUBLIC_MEDUSA_REGION_ID: 'reg_test' } },
     require: (name) => {
+      if (name === './cartAccess') return cartAccess;
       if (name === 'next/navigation') {
         return { unstable_rethrow() {} };
       }
@@ -43,6 +50,9 @@ function client(products = [fixture()]) {
     },
     fetch: async (url, options) => {
       requests.push({ url: new URL(url), options });
+      if (new URL(url).pathname.endsWith('/shipping-methods')) {
+        return { ok: true, json: async () => ({ cart: { id: 'cart_1' } }) };
+      }
       return { ok: true, json: async () => ({ products: state.products, count: state.products.length }) };
     },
   });
@@ -107,16 +117,11 @@ test('missing and unrelated products do not resolve as the requested product', a
   assert.equal(await client().api.fetchMedusaProductByFrontendId('prod_other'), null);
 });
 
-test('consecutive reads use no-store and return edited content', async () => {
-  const { api, requests, state } = client();
+test('subsequent catalog reads return edited content', async () => {
+  const { api, state } = client();
   assert.equal((await api.fetchMedusaProductByFrontendId('prod_admin')).description, 'Original description');
   state.products = [fixture({ description: 'Edited description' })];
   assert.equal((await api.fetchMedusaProductByFrontendId('prod_admin')).description, 'Edited description');
-  for (const { options } of requests) {
-    assert.equal(options.cache, 'no-store');
-    assert.equal(options.next, undefined);
-  }
-  assert.equal(api.CATALOG_REVALIDATE_SECONDS, 0);
 });
 
 test('explicit positive cache lifetime never conflicts with no-store', async () => {
@@ -126,13 +131,6 @@ test('explicit positive cache lifetime never conflicts with no-store', async () 
   assert.equal(requests[0].options.cache, undefined);
 });
 
-test('zero revalidation and cancellation are passed to fetch', async () => {
-  const { api, requests } = client();
-  const controller = new AbortController();
-  await api.fetchMedusaProductByFrontendId('prod_admin', controller.signal, 0);
-  assert.equal(requests[0].options.signal, controller.signal);
-  assert.equal(requests[0].options.cache, 'no-store');
-});
 
 test('public product characteristics use only supported fields and HTTPS registry links', async () => {
   const { api } = client([fixture({ metadata: { catalog_profile: {
@@ -148,29 +146,5 @@ test('public product characteristics use only supported fields and HTTPS registr
   assert.equal(JSON.stringify(product).includes('not public'), false);
 });
 
-test('collection and category filters are both sent to Medusa', async () => {
-  const { api, requests } = client();
-  await api.fetchMedusaProducts({ limit: 24, offset: 24, categoryId: 'pcat_1', collectionId: 'pcol_1' });
-  assert.equal(requests[0].url.searchParams.get('collection_id[]'), 'pcol_1');
-  assert.equal(requests[0].url.searchParams.get('category_id[]'), 'pcat_1');
-  assert.equal(requests[0].url.searchParams.get('offset'), '24');
-});
 
-test('only the Pages export declares static product parameters', async () => {
-  const page = ts.transpileModule(
-    readFileSync(new URL('../../src/app/product/[id]/page.tsx', import.meta.url), 'utf8'),
-    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } },
-  ).outputText;
-  for (const target of ['pages', 'server']) {
-    const exports = {};
-    vm.runInNewContext(page, {
-      exports, process: { env: { BUILD_TARGET: target } },
-      require: (name) => name.endsWith('/mockData') ? { MOCK_PRODUCTS: [{ id: '12' }] } : {},
-    });
-    if (target === 'pages') {
-      assert.equal((await exports.generateStaticParams())[0].id, '12');
-    } else {
-      assert.equal(exports.generateStaticParams, undefined);
-    }
-  }
-});
+

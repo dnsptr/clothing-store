@@ -41,16 +41,16 @@ function UserIcon() {
   );
 }
 
-export default function Header() {
+export default function Header({ transparent = false }: { transparent?: boolean }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
   const { cartCount, favoriteCount, isMenuOpen, setIsMenuOpen } = useCart();
 
   const isHome = pathname === "/";
-  const isSolid = !isHome || isScrolled;
+  const isSolid = !isHome || !transparent || isScrolled;
 
   useEffect(() => {
-    if (!isHome) {
+    if (!isHome || !transparent) {
       return;
     }
 
@@ -61,7 +61,7 @@ export default function Header() {
     handleScroll();
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [isHome]);
+  }, [isHome, transparent]);
 
   return (
     <header className={`${styles.header} ${isSolid ? styles.scrolled : ""} ${isMenuOpen ? styles.menuOpen : ""}`}>
@@ -69,11 +69,8 @@ export default function Header() {
         <div className={styles.leftSection}>
           <button
             className={styles.iconButton}
-            onPointerEnter={(event) => {
-              if (event.pointerType === "mouse") setIsMenuOpen(true);
-            }}
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            aria-label="Открыть меню"
+            aria-label={isMenuOpen ? "Закрыть меню" : "Открыть меню"}
             aria-expanded={isMenuOpen}
             aria-controls="site-menu-drawer"
           >
@@ -81,7 +78,7 @@ export default function Header() {
           </button>
         </div>
 
-        <Link href="/" className={styles.logo} aria-label="Mario Mikke">
+        <Link href="/" className={styles.logo} aria-label="Mario Mikke" inert={isMenuOpen}>
           <Image
             src={withBasePath("/mario-mikke-logo.svg")}
             alt=""
@@ -105,7 +102,7 @@ export default function Header() {
         {/* Выбор города и поиск убраны до реализации: кнопки не имели
             обработчиков вообще. Кнопка города при этом обещала выбор региона
             доставки, которого нет ни в витрине, ни в Medusa. */}
-        <div className={styles.actions}>
+        <div className={styles.actions} inert={isMenuOpen}>
           <Link href="/favorites" className={styles.iconButton} aria-label="Избранное">
             <BookmarkIcon />
             {favoriteCount > 0 && <span className={styles.cartBadge}>{favoriteCount}</span>}

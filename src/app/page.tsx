@@ -11,11 +11,12 @@ import styles from "./page.module.css";
 
 export default async function Home() {
   const content = await fetchHomeContent();
+  const hasHero = content.hero.length > 0;
 
   return (
     <>
-      <Header />
-      <main className={styles.homeMain}>
+      <Header transparent={hasHero} />
+      <main className={`${styles.homeMain} ${hasHero ? "" : styles.withoutHero}`}>
         {/* Fullscreen Hero Campaign */}
         <Hero slides={content.hero} />
 

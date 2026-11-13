@@ -30,12 +30,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit all frontend dependencies
+        run: npm audit --include=dev --include=optional --include=peer --audit-level=low
 
       - name: Lint
         run: npm run lint
@@ -43,7 +46,7 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Catalog and account regression tests
+      - name: Catalog, delivery and account regression tests
         run: npm test
 
       # Two deployable artifacts exist, so CI builds both. Neither is allowed to
@@ -72,12 +75,20 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: medusa-prototype/package-lock.json
 
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: medusa-prototype
+
+      # Preserve the full report, including Low findings. The registry still
+      # reports deepmerge CVE-2026-93753, rejected by its CNA on 2026-11-02:
+      # https://cveawg.mitre.org/api/cve/CVE-2026-93753
+      # Moderate and higher findings must block the backend build.
+      - name: Audit all backend dependencies
+        run: npm audit --include=dev --include=optional --include=peer --audit-level=moderate
         working-directory: medusa-prototype
 
       # `npm run build` -> `turbo build` -> `medusa build`. This compiles the
@@ -126,7 +137,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: medusa-prototype/package-lock.json
 
@@ -159,6 +170,50 @@ jobs:
           STORE_CORS: http://localhost:3000
           ADMIN_CORS: http://localhost:9000
           AUTH_CORS: http://localhost:3000,http://localhost:9000
+
+      - name: Run native checkout HTTP integration tests (offline bank)
+        run: npm run test:checkout:offline
+        working-directory: medusa-prototype/apps/backend
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_TEMP_NAME: medusa_checkout_integration_tests
+          JWT_SECRET: test-jwt-secret
+          COOKIE_SECRET: test-cookie-secret
+
+      - name: Run carrier HTTP integration tests (offline providers)
+        run: npm run test:integration:http -- --runTestsByPath integration-tests/http/carrier-handoff.spec.ts
+        working-directory: medusa-prototype/apps/backend
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_TEMP_NAME: medusa_carrier_integration_tests
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa_carrier_integration_tests
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret
+          COOKIE_SECRET: test-cookie-secret
+          STORE_CORS: http://localhost:3000
+          ADMIN_CORS: http://localhost:9000
+          AUTH_CORS: http://localhost:3000,http://localhost:9000
+          TBANK_ENABLED: "false"
+          POCHTA_ENABLED: "false"
+          OWN_COURIER_ENABLED: "false"
+          CDEK_ENABLED: "true"
+          CDEK_CLIENT_ID: isolated-carrier-client
+          CDEK_CLIENT_SECRET: isolated-carrier-secret
+          CDEK_API_BASE_URL: https://api.edu.cdek.ru/v2
+          CDEK_FROM_CITY_CODE: "44"
+          CDEK_PVZ_PRICE_RUB: "350"
+          CDEK_COURIER_PRICE_RUB: "490"
+          YANDEX_DELIVERY_ENABLED: "true"
+          YANDEX_DELIVERY_TOKEN: isolated-yandex-token
+          YANDEX_DELIVERY_API_BASE_URL: https://b2b.taxi.tst.yandex.net/api/b2b/platform
+          YANDEX_DELIVERY_PVZ_PRICE_RUB: "350"
 
       # Run the payment recovery lease and projection tests against PostgreSQL,
       # not as silently skipped unit suites without TBANK_INBOX_TEST_DATABASE_URL.

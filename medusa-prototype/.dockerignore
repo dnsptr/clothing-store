@@ -1,18 +1,38 @@
-node_modules
-**/node_modules
-.turbo
-**/.medusa
+# Backend-only source context. Keep this allowlist aligned with Dockerfile COPY.
+# In particular, do not send local secrets, media, backups or cached builds.
+**
+!package.json
+!package-lock.json
+!apps/
+!apps/backend/
+!apps/backend/package.json
+!apps/backend/Dockerfile
+!apps/backend/medusa-config.ts
+!apps/backend/tsconfig.json
+!apps/backend/instrumentation.ts
+!apps/backend/certificates/
+!apps/backend/certificates/*.crt
+!apps/backend/src/
+!apps/backend/src/**
+
+# Admin and backend tests are not release inputs. Standalone offline/real-bank
+# diagnostic scripts must not become executable commands in the runtime image.
+**/__tests__/
+**/fixtures/
+**/*.spec.*
+**/*.test.*
+apps/backend/src/scripts/test-*
+apps/backend/src/scripts/run-offline-checkout.cjs
+
+# Apply after the source allowlist so nested local files stay excluded too.
+**/node_modules/
 **/.env
 **/.env.*
-!**/.env.template
-.git
-.gitignore
-npm-debug.log*
-
-# Дампы БД с персональными данными покупателей. Каталог примонтирован в
-# `./backups` и лежит в контексте сборки: без этой строки каждый деплой
-# отправлял демону Docker все накопленные дампы, а с ростом базы — ещё и
-# ощутимо замедлял сборку на прод-машине.
-backups
-
-
+**/.npmrc
+**/.medusa/
+**/.turbo/
+**/coverage/
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx

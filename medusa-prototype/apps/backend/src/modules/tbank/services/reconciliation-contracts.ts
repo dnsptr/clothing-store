@@ -8,6 +8,9 @@ import type {
 } from "@medusajs/types";
 
 import type { TBankClient } from "../lib/client";
+import type { PollAttemptRow } from "../../tbank-notifications/service";
+import type { PaymentCheckoutHolds } from "../../checkout-holds/contracts";
+
 
 export type NotificationRow = {
   readonly id: string;
@@ -15,6 +18,7 @@ export type NotificationRow = {
   readonly status: string;
   readonly order_id: string;
   readonly amount_kopecks: number;
+  readonly amount_provided?: boolean;
   readonly terminal_key: string;
   readonly success: boolean;
   readonly lifecycle_state: string;
@@ -28,21 +32,6 @@ export type InboxMutationRow = {
   readonly attempt_count?: number;
 };
 
-export type PaymentAttemptPollRow = {
-  readonly id: string;
-  readonly payment_session_id: string;
-  readonly provider_id: string;
-  readonly terminal_key: string;
-  readonly order_id: string;
-  readonly expected_amount_kopecks: number;
-  readonly currency_code: string;
-};
-
-export type PaymentAttemptPollMutationRow = {
-  readonly id: string;
-  readonly poll_state: "pending" | "leased" | "complete" | "manual_review";
-};
-
 export interface TbankNotificationStore {
   quarantineExpiredExhausted(input: { readonly now: Date }): Promise<readonly InboxMutationRow[]>;
   claimNotificationById(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
@@ -51,15 +40,13 @@ export interface TbankNotificationStore {
   completeInbox(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly unknown[]>;
   failInbox(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly InboxMutationRow[]>;
   quarantineConflict(input: { readonly id: string; readonly leaseToken: string; readonly reason: string; readonly now: Date }): Promise<readonly unknown[]>;
-  claimDuePaymentAttempts(input: { readonly limit: number; readonly leaseToken: string; readonly now: Date; readonly terminalKey: string }): Promise<readonly PaymentAttemptPollRow[]>;
-  renewPaymentAttemptPollLease(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
-  completePaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
-  deferPaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
-  failPaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
-  quarantinePaymentAttemptPoll(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PaymentAttemptPollMutationRow[]>;
-  expireStalePaymentAttemptPolls(input: { readonly now: Date; readonly terminalKey: string }): Promise<readonly PaymentAttemptPollMutationRow[]>;
   retryManualReview(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string }): Promise<readonly unknown[]>;
   resolveManualReview(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string }): Promise<readonly unknown[]>;
+  claimDuePaymentAttempts?(input: { readonly limit: number; readonly leaseToken: string; readonly now: Date }): Promise<readonly PollAttemptRow[]>;
+  renewPaymentAttemptPoll?(input: { readonly id: string; readonly leaseToken: string; readonly now: Date }): Promise<readonly PollAttemptRow[]>;
+  observePaymentAttemptPoll?(input: { readonly id: string; readonly leaseToken: string; readonly paymentId: string; readonly status: string; readonly now: Date }): Promise<readonly PollAttemptRow[]>;
+  finishPaymentAttemptPoll?(input: { readonly id: string; readonly leaseToken: string; readonly outcome: "completed" | "manual_review" | "retry"; readonly reason?: string; readonly now: Date }): Promise<readonly PollAttemptRow[]>;
+  transitionPollManualReview?(input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string; readonly outcome: "pending" | "completed" }): Promise<readonly PollAttemptRow[]>;
   listTbankNotifications?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
   listTbankPaymentAttempts?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
   listTbankNotificationConflicts?(filters: Record<string, unknown>, config?: Record<string, unknown>): Promise<readonly Record<string, unknown>[]>;
@@ -108,6 +95,7 @@ export type PaymentReconcilerDependencies = {
   readonly durableLinkageChecker?: DurableLinkageChecker;
   readonly events?: PaidOrderEvents;
   readonly query?: QueryService;
+  readonly holds?: PaymentCheckoutHolds;
   readonly container?: MedusaContainer;
   readonly [key: string]: unknown;
 };
@@ -122,20 +110,6 @@ export type ProcessNotificationResult =
 export type ProcessBatchResult = {
   readonly claimed: number;
   readonly results: readonly ProcessNotificationResult[];
-};
-
-export type PollPaymentAttemptResult =
-  | { readonly status: "processed"; readonly id: string; readonly action: string }
-  | { readonly status: "deferred"; readonly id: string; readonly reason: string }
-  | { readonly status: "retry_scheduled"; readonly id: string; readonly error: string }
-  | { readonly status: "manual_review"; readonly id: string; readonly reason: string }
-  | { readonly status: "ignored"; readonly id: string; readonly reason: "stale_lease_fenced" };
-
-export type PollMissingNotificationsResult = {
-  readonly claimed: number;
-  readonly expired: number;
-  readonly results: readonly PollPaymentAttemptResult[];
-  readonly skipped?: "tbank_disabled";
 };
 
 export type ManualReviewDetails = {
@@ -156,6 +130,7 @@ export type ReconciliationServices = {
   readonly query?: QueryService;
   readonly events?: PaidOrderEvents;
   readonly container?: MedusaContainer;
+  readonly holds?: PaymentCheckoutHolds;
 };
 
 export class InvalidInboxRowError extends Error {
@@ -184,6 +159,9 @@ export function parseNotificationRow(value: unknown): NotificationRow {
   if (typeof amountKopecks !== "number") throw new InvalidInboxRowError("amount_kopecks");
   if (typeof success !== "boolean") throw new InvalidInboxRowError("success");
   if (typeof attemptCount !== "number") throw new InvalidInboxRowError("attempt_count");
+  if (row["amount_provided"] !== undefined && typeof row["amount_provided"] !== "boolean") {
+    throw new InvalidInboxRowError("amount_provided");
+  }
   const canonicalHash = row["canonical_payload_hash"];
   return {
     id: requiredString(row, "id"),
@@ -191,6 +169,7 @@ export function parseNotificationRow(value: unknown): NotificationRow {
     status: requiredString(row, "status"),
     order_id: requiredString(row, "order_id"),
     amount_kopecks: amountKopecks,
+    amount_provided: row["amount_provided"] !== false,
     terminal_key: requiredString(row, "terminal_key"),
     success,
     lifecycle_state: requiredString(row, "lifecycle_state"),

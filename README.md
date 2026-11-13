@@ -114,10 +114,20 @@ This build is intended as a frontend demo and does not provide checkout function
 
 ## Local Development
 
+Use **Node.js 24.22.2 LTS**, pinned in the root `.node-version`. All GitHub
+Actions Node setup steps read this file; the backend Dockerfile uses the same
+version. Existing hosted deployments are not upgraded by changing this pin.
+
+The storefront uses Next.js 16.4.5, React 19.3.1 and TypeScript 6.0.3.
+Dependency updates must respect framework and ESLint plugin peer ranges:
+the newest incompatible major is not a safe upgrade. The storefront and
+Medusa workspace have separate npm lockfiles; install both from those locks.
+
 ### 1. Install dependencies
 
 ```bash
-npm install
+npm ci --ignore-scripts
+npm --prefix medusa-prototype ci --ignore-scripts
 ```
 
 ### 2. Start PostgreSQL and Redis

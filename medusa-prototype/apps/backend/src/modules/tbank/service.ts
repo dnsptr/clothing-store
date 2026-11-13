@@ -27,7 +27,6 @@ import type {
   GetPaymentStatusOutput,
   InitiatePaymentInput,
   InitiatePaymentOutput,
-  PaymentSessionStatus,
   ProviderWebhookPayload,
   RefundPaymentInput,
   RefundPaymentOutput,
@@ -38,17 +37,13 @@ import type {
   WebhookActionResult,
 } from "@medusajs/types";
 
-import { TBankApiError, TBankClient } from "./lib/client";
+import { TBankApiError, TBankClient, type TBankGetStateResult } from "./lib/client";
 import { rublesToKopecks } from "./lib/money";
 import { TBankReceiptSource, type ReceiptQuery } from "./lib/receipt-source";
 import { isStrongReceiptSnapshotSecret } from "./lib/receipt-snapshot";
 import { TBankAttemptPersistenceError } from "./errors";
-import {
-  parseNotification,
-  toSessionStatus,
-  toWebhookActionAndData,
-} from "./lib/status";
-import { verifyNotificationToken } from "./lib/token";
+import { toSessionStatus } from "./lib/status";
+import { validateBankState } from "./services/reconciliation-trust";
 import {
   TBANK_PAYMENT_PROVIDER_ID,
   TBANK_PROVIDER_IDENTIFIER,
@@ -66,15 +61,14 @@ export type TBankOptions = {
 };
 
 import { TBANK_NOTIFICATION_MODULE } from "../tbank-notifications";
-import type {
-  TbankNotificationStore,
-  TbankPaymentAttemptRow,
-} from "../tbank-notifications/lifecycle";
+import type { TbankNotificationStore } from "../tbank-notifications/lifecycle";
+import { CHECKOUT_HOLD_MODULE, type PaymentCheckoutHolds } from "../checkout-holds/contracts";
 
 export type InjectedDependencies = {
   logger: Logger;
   query?: ReceiptQuery;
   [TBANK_NOTIFICATION_MODULE]?: TbankNotificationStore;
+  [CHECKOUT_HOLD_MODULE]?: PaymentCheckoutHolds;
   [key: string]: unknown;
 };
 
@@ -139,6 +133,12 @@ export function validatePaymentUrl(urlStr?: string): void {
       `tbank: непроверенный хост PaymentURL: ${parsed.hostname}`,
     );
   }
+  if (parsed.port && parsed.port !== "443") {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      "tbank: PaymentURL должен использовать стандартный HTTPS-порт",
+    );
+  }
 }
 
 export type CartSnapshot = {
@@ -157,6 +157,7 @@ export type TBankSessionData = {
   attemptId?: string;
   cartSnapshot?: CartSnapshot;
   initiatedAt?: string;
+  paymentExpiresAt?: string;
   indeterminateReason?: string;
   receiptSnapshotEnvelope?: string;
 };
@@ -169,7 +170,12 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   protected readonly client_: TBankClient;
   protected readonly receiptSource_: TBankReceiptSource;
   protected readonly notificationService_?: TbankNotificationStore;
-  private static readonly inFlightInitiations_ = new Map<string, Promise<InitiatePaymentOutput>>();
+  protected readonly checkoutHolds_: PaymentCheckoutHolds;
+  private static readonly inFlightInitiations_ = new Map<string, {
+    readonly amountKopecks: number;
+    readonly currencyCode: string;
+    readonly promise: Promise<InitiatePaymentOutput>;
+  }>();
 
   /**
    * Валидация опций на старте приложения, а не при первой оплате. Терминал без
@@ -211,6 +217,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     this.notificationService_ = providerDependency<TbankNotificationStore>(
       container, TBANK_NOTIFICATION_MODULE, true,
     );
+    this.checkoutHolds_ = providerDependency<PaymentCheckoutHolds>(container, CHECKOUT_HOLD_MODULE)!;
     this.client_ = new TBankClient(
       {
         terminalKey: options.terminalKey,
@@ -239,16 +246,29 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
    */
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
     const sessionId = this.resolveSessionId_(input);
+    const amountKopecks = rublesToKopecks(input.amount);
+    const currencyCode = input.currency_code.toLowerCase();
+    const approvedTotal = input.data?.expected_total;
+    if (approvedTotal !== undefined &&
+        (typeof approvedTotal !== "number" || rublesToKopecks(approvedTotal) !== amountKopecks)) {
+      throw new MedusaError(MedusaError.Types.CONFLICT, "Стоимость заказа изменилась после подтверждения. Проверьте итог перед оплатой");
+    }
     const inFlight = TBankPaymentProviderService.inFlightInitiations_.get(sessionId);
     if (inFlight) {
+      if (inFlight.amountKopecks !== amountKopecks || inFlight.currencyCode !== currencyCode) {
+        throw new MedusaError(
+          MedusaError.Types.CONFLICT,
+          "tbank: параллельная инициализация той же сессии с другой суммой или валютой",
+        );
+      }
       this.logger_.info(
         `tbank: параллельный вызов initiatePayment для сессии ${sessionId} обнаружен, ожидаем завершения первого запроса`,
       );
-      return inFlight;
+      return inFlight.promise;
     }
 
-    const promise = this.executeInitiatePayment_(sessionId, input);
-    TBankPaymentProviderService.inFlightInitiations_.set(sessionId, promise);
+    const promise = this.executeInitiatePayment_(sessionId, input, amountKopecks);
+    TBankPaymentProviderService.inFlightInitiations_.set(sessionId, { amountKopecks, currencyCode, promise });
 
     try {
       return await promise;
@@ -260,8 +280,8 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   protected async executeInitiatePayment_(
     sessionId: string,
     input: InitiatePaymentInput,
+    amountKopecks: number,
   ): Promise<InitiatePaymentOutput> {
-    const amountKopecks = rublesToKopecks(input.amount);
     const existingData = (input.data ?? {}) as TBankSessionData;
     if (input.data && typeof input.data === "object") {
       delete input.data.receiptSnapshot;
@@ -301,7 +321,10 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
           persistedAttemptId = existingAttempt.id;
           if (
             existingAttempt.expected_amount_kopecks !== amountKopecks ||
-            existingAttempt.currency_code.toLowerCase() !== input.currency_code.toLowerCase()
+            existingAttempt.currency_code.toLowerCase() !== input.currency_code.toLowerCase() ||
+            existingAttempt.terminal_key !== this.options_.terminalKey ||
+            existingAttempt.provider_id !== TBANK_PAYMENT_PROVIDER_ID ||
+            existingAttempt.payment_session_id !== sessionId
           ) {
             throw new MedusaError(
               MedusaError.Types.INVALID_DATA,
@@ -313,20 +336,28 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         if (dbErr instanceof MedusaError) {
           throw dbErr;
         }
-        this.logger_.warn(
-          `tbank: ошибка при проверке существующих попыток в БД для сессии ${sessionId}: ${
-            dbErr instanceof Error ? dbErr.message : String(dbErr)
-          }`,
-        );
+        throw new TBankAttemptPersistenceError(sessionId, dbErr);
       }
+    }
+    if (persistedAttemptId && !existingData.paymentId) {
+      // The first Init may have reached the bank before its response/session
+      // data was lost. A durable attempt is not permission for a second Init.
+      existingData.status = "indeterminate";
     }
 
     // Обработка неопределённого состояния (indeterminate) после таймаута:
     // никогда не посылать повторный Init вслепую, а сверить через OrderId/PaymentId.
     if (existingData.status === "indeterminate") {
+      existingData.orderId = sessionId;
+      existingData.attemptId = persistedAttemptId ?? existingData.attemptId;
+      existingData.cartSnapshot ??= {
+        amountKopecks,
+        currencyCode: "rub",
+        orderId: sessionId,
+      };
       if (existingData.paymentId) {
         try {
-          const state = await this.client_.getState(existingData.paymentId);
+          const state = await this.verifiedBankState_(existingData);
           if (state.Success && state.Status) {
             existingData.status = state.Status;
             return {
@@ -347,22 +378,24 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
           const orderState = await this.client_.checkOrder(sessionId);
           if (
             orderState.Success &&
+            orderState.OrderId === sessionId &&
             Array.isArray(orderState.Payments) &&
-            orderState.Payments.length > 0
+            orderState.Payments.length === 1
           ) {
-            const payment = orderState.Payments[0];
-            const paymentId = String(payment.PaymentId);
+            const paymentId = String(orderState.Payments[0].PaymentId);
+            const state = await this.verifiedBankState_({ ...existingData, paymentId });
             existingData.paymentId = paymentId;
-            existingData.status = payment.Status ?? orderState.Status ?? "NEW";
+            existingData.status = state.Status;
             return {
               id: paymentId,
-              status: toSessionStatus(existingData.status),
+              status: toSessionStatus(state.Status ?? ""),
               data: existingData as unknown as Record<string, unknown>,
             };
           }
         } catch (checkErr) {
           if (
             checkErr instanceof TBankApiError &&
+            checkErr.method === "CheckOrder" &&
             ["914", "407", "63", "335"].includes(checkErr.errorCode)
           ) {
             this.logger_.info(
@@ -398,6 +431,13 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         existingData.status === "pending_authorization" ||
         existingData.status === "FORM_SHOWED")
     ) {
+      // A previously issued bank URL must not be re-exposed after the buyer
+      // removes the shipping method from the cart.
+      await this.receiptSource_.resolve({
+        sessionId,
+        existingSnapshotEnvelope: existingData.receiptSnapshotEnvelope,
+        paymentAmountKopecks: amountKopecks,
+      });
       this.logger_.info(
         `tbank: повторный initiatePayment для сессии ${sessionId} — повторное использование существующей попытки ${existingData.paymentId}`,
       );
@@ -405,6 +445,17 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         id: existingData.paymentId,
         status: "pending_authorization",
         data: existingData as unknown as Record<string, unknown>,
+      };
+    }
+    if (existingData.paymentId) {
+      if (existingData.orderId !== sessionId) {
+        throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: банковская попытка относится к другой сессии");
+      }
+      const state = await this.verifiedBankState_(existingData);
+      return {
+        id: existingData.paymentId,
+        status: toSessionStatus(state.Status ?? ""),
+        data: { ...existingData, status: state.Status },
       };
     }
 
@@ -419,6 +470,12 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       receipt,
       snapshotEnvelope,
     } = receiptResolution;
+    const hold = await this.checkoutHolds_.acquirePaymentHold(sessionId, cartId);
+    const expiresAt = new Date(hold.expires_at);
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() - Date.now() < 60_000) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "Срок резерва истекает. Начните оформление заново после завершения банковской попытки");
+    }
+    const paymentExpiresAt = expiresAt.toISOString().replace(/Z$/, "+00:00");
     existingData.receiptSnapshotEnvelope = snapshotEnvelope;
     if (input.data && typeof input.data === "object") {
       input.data.receiptSnapshotEnvelope = snapshotEnvelope;
@@ -457,6 +514,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         failUrl: this.options_.failUrl,
         notificationUrl: this.options_.notificationUrl,
         receipt,
+        redirectDueDate: paymentExpiresAt,
       });
 
       if (!result.PaymentId) {
@@ -467,6 +525,12 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       }
 
       validatePaymentUrl(result.PaymentURL);
+      if (
+        (result.OrderId !== undefined && result.OrderId !== sessionId) ||
+        (result["TerminalKey"] !== undefined && result["TerminalKey"] !== this.options_.terminalKey)
+      ) {
+        throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: ответ Init относится к другой сессии или терминалу");
+      }
 
       if (result.Amount !== undefined && Number(result.Amount) !== amountKopecks) {
         throw new MedusaError(
@@ -484,6 +548,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
         cartSnapshot,
         initiatedAt: new Date().toISOString(),
         receiptSnapshotEnvelope: snapshotEnvelope,
+        paymentExpiresAt,
       };
 
       if (input.data && typeof input.data === "object") {
@@ -548,7 +613,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       return { status: "pending", data: input.data };
     }
 
-    const result = await this.client_.getState(data.paymentId);
+    const result = await this.verifiedBankState_(data);
     return {
       status: toSessionStatus(result.Status ?? ""),
       data: {
@@ -560,80 +625,37 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   }
 
   /**
-   * Разбор нотификации.
-   *
-   * Подпись проверяется здесь и до всего остального (§5.4). Несовпадение — это
-   * не «неуспешный платёж», а подделка либо расхождение конфигурации, поэтому
-   * возвращается `not_supported`: Medusa не должна сделать ничего.
-   *
-   * Токен считается по разобранным полям, а не по байтам тела, поэтому
-   * `rawData` здесь не нужен.
+   * Only /hooks/payment/tbank may ingest bank callbacks: it authenticates,
+   * correlates and durably records the notification before reconciliation.
+   * Medusa also exposes generic provider aliases; projecting them here would
+   * bypass the inbox and let a signed but unrelated payment complete a cart.
    */
   async getWebhookActionAndData(
-    payload: ProviderWebhookPayload["payload"],
+    _payload: ProviderWebhookPayload["payload"],
   ): Promise<WebhookActionResult> {
-    const body = payload.data as Record<string, unknown>;
-
-    if (!verifyNotificationToken(body, this.options_.password)) {
-      this.logger_.warn(
-        `tbank: нотификация с неверной подписью, OrderId=${String(body?.["OrderId"])}`,
-      );
-      return { action: "not_supported" };
-    }
-
-    let notification: ReturnType<typeof parseNotification>;
-    try {
-      notification = parseNotification(body);
-    } catch (error) {
-      this.logger_.warn(
-        `tbank: нотификация не разобрана: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return { action: "not_supported" };
-    }
-
-    const result = toWebhookActionAndData(notification);
-    this.logger_.info(
-      `tbank: нотификация ${notification.status} по сессии ${notification.orderId} → ${result.action}`,
-    );
-    return result;
+    return { action: "not_supported" };
   }
 
   /**
-   * При одностадийной оплате (`PayType: O`) отдельного списания нет: банк
-   * присылает `AUTHORIZED` и `CONFIRMED` одновременно, деньги списаны к
-   * моменту второй нотификации. Метод обязан быть корректным, но работы не
-   * выполняет — подтверждать нечего.
+   * PayType O requires no bank capture operation. A manual Medusa capture must
+   * still prove CONFIRMED: AUTHORIZED is only a hold, not money received.
    */
   async capturePayment(input: CapturePaymentInput): Promise<CapturePaymentOutput> {
-    return { data: input.data };
+    const data = (input.data ?? {}) as TBankSessionData;
+    const state = await this.verifiedBankState_(data);
+    if (state.Status !== "CONFIRMED") {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "tbank: списание в Medusa допускается только после GetState=CONFIRMED",
+      );
+    }
+    if (data.orderId) await this.checkoutHolds_.settlePaymentHold(data.orderId);
+    return { data: { ...data, status: state.Status } };
   }
 
   /**
-   * Авторизация. Состояние выясняется живым `GetState`, а не полем `status` из
-   * данных сессии.
-   *
-   * Это не перестраховка. `data.status` пишется ровно один раз — в
-   * `initiatePayment`, из ответа `Init`, — то есть навсегда остаётся `NEW`.
-   * Обновить его некому: `getPaymentStatus` фреймворк 2.17.2 сам не вызывает, а
-   * нотификация приходит в наш роут, который данных сессии не трогает. Дальше
-   * протухшее `NEW` даёт `pending_authorization`, на нём
-   * `authorizePaymentSessionStep` возвращает `null`, `capturePaymentWorkflow`
-   * получает `payment_id: undefined` и падает — заказ остаётся неоплаченным
-   * навсегда, при списанных деньгах (аудит 2026-07-27).
-   *
-   * Поэтому здесь тот же путь, что и в `getPaymentStatus`: спросить банк и
-   * вернуть его ответ, сохранив свежий `Status` в `data`. Отвечая `captured` на
-   * `CONFIRMED`, мы попадаем в ветку автосписания модуля платежей — он сам
-   * создаёт `Payment` и закрывает списание.
-   *
-   * Банк может не ответить, и недоступность банка — не исход платежа. Падение
-   * здесь означало бы сорванное оформление на ровном месте, поэтому сетевая
-   * ошибка `GetState` не выпускается наружу: возвращается последнее известное
-   * состояние, сессия остаётся в ожидании, а исход доберут повторная
-   * нотификация и сверка (PAY-005) — та же дисциплина «не ронять», что в
-   * `cancelPayment`.
+   * Authorize only from a correlated live bank state. A stale/client-supplied
+   * data.status is never evidence of capture when the bank is unavailable.
    */
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -641,22 +663,14 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     // Платежа в банке нет — спрашивать не о чем, и это не ошибка: сессия просто
     // не дошла до `Init`. Прежнее поведение сохранено осознанно.
     if (!data.paymentId) {
-      return { status: this.knownSessionStatus_(data), data: input.data };
+      return { status: "pending_authorization", data: input.data };
+    }
+    if (input.context?.idempotency_key && input.context.idempotency_key !== data.orderId) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: OrderId не совпадает с платёжной сессией");
     }
 
     try {
       const result = await this.getPaymentStatus(input);
-      const bankData = (result.data ?? {}) as Record<string, unknown>;
-      if (
-        data.cartSnapshot?.amountKopecks !== undefined &&
-        bankData.Amount !== undefined &&
-        Number(bankData.Amount) !== data.cartSnapshot.amountKopecks
-      ) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          `tbank: сумма подтверждения банка (${bankData.Amount}) не совпадает со снапшотом корзины (${data.cartSnapshot.amountKopecks})`,
-        );
-      }
       return { status: result.status, data: result.data };
     } catch (error) {
       if (error instanceof MedusaError && error.type === MedusaError.Types.INVALID_DATA) {
@@ -665,15 +679,16 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       this.logger_.warn(
         `tbank: GetState при авторизации платежа ${data.paymentId} не прошёл (${
           error instanceof Error ? error.message : String(error)
-        }), возвращено последнее известное состояние`,
+        }), подтверждение оплаты отложено`,
       );
-      return { status: this.knownSessionStatus_(data), data: input.data };
+      return { status: "pending_authorization", data: input.data };
     }
   }
 
   /**
-   * Отмена до списания. У Т-Банка отмена и возврат — один метод `Cancel`,
-   * различает их сам банк по текущему состоянию платежа.
+   * Cancel у банка может стать возвратом даже после GetState=NEW: состояние
+   * меняется между запросами. До реализации возвратного чека здесь только
+   * чтение состояния; активный банковский платёж отменяется вручную.
    */
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -681,41 +696,21 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       // Платёж не создавался — отменять нечего, и это не ошибка.
       return { data: input.data };
     }
-
-    try {
-      await this.client_.cancel({ paymentId: data.paymentId });
-    } catch (error) {
-      if (!(error instanceof TBankApiError)) {
-        throw error;
-      }
-
-      // `Cancel` не идемпотентен по контракту. После ошибки удалять сессию
-      // можно только если GetState доказывает, что старый URL уже не оплатить.
-      try {
-        const state = await this.client_.getState(data.paymentId);
-        if (
-          state.Status === "CANCELED" ||
-          state.Status === "REVERSED" ||
-          state.Status === "REJECTED" ||
-          state.Status === "DEADLINE_EXPIRED"
-        ) {
-          this.logger_.warn(
-            `tbank: Cancel вернул ${error.errorCode}, но GetState подтвердил ${state.Status}`,
-          );
-          return { data: input.data };
-        }
-      } catch (stateError) {
-        this.logger_.warn(
-          `tbank: после ошибки Cancel не удалось проверить GetState: ${
-            stateError instanceof Error ? stateError.message : String(stateError)
-          }`,
-        );
-      }
-
-      throw error;
+    // Безопасно удалить только уже завершённую неоплачиваемую попытку.
+    const state = await this.verifiedBankState_(data);
+    if (
+      state.Status === "CANCELED" ||
+      state.Status === "REVERSED" ||
+      state.Status === "REJECTED" ||
+      state.Status === "DEADLINE_EXPIRED"
+    ) {
+      if (data.orderId) await this.checkoutHolds_.releasePaymentHold(data.orderId);
+      return { data: input.data };
     }
-
-    return { data: input.data };
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      "tbank: автоматическая отмена активного банковского платежа недоступна; обратитесь к ответственному за ККТ для ручной отмены или возврата с фискализацией",
+    );
   }
 
   /**
@@ -723,8 +718,8 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
    *
    * ВНИМАНИЕ. Возврат по 54-ФЗ требует **возвратного чека** — `Cancel` с
    * `Receipt` (§8). Построение возвратного чека здесь не реализовано: текущий
-   * builder создаёт только чек 100% предоплаты для `Init`. Поэтому возвраты
-   * проводятся через личный кабинет банка, а не этим методом.
+   * builder создаёт только чек 100% предоплаты для `Init`. Метод блокирует
+   * возврат до обращения в банк; ручной возврат требует отдельного чека ККТ.
    */
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -735,12 +730,10 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
       );
     }
 
-    await this.client_.cancel({
-      paymentId: data.paymentId,
-      amountKopecks: rublesToKopecks(input.amount),
-    });
-
-    return { data: input.data };
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      "tbank: автоматический возврат недоступен без возвратного чека; обратитесь к ответственному за ККТ для ручного возврата и фискализации",
+    );
   }
 
   async retrievePayment(input: RetrievePaymentInput): Promise<RetrievePaymentOutput> {
@@ -748,37 +741,62 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     if (!data.paymentId) {
       return { data: input.data };
     }
-    const result = await this.client_.getState(data.paymentId);
+    const result = await this.verifiedBankState_(data);
     return {
       data: { ...data, status: result.Status } as unknown as Record<string, unknown>,
     };
   }
 
   /**
-   * Сумма платежа в Т-Банке после `Init` не меняется. Обновление означает, что
-   * корзина изменилась, — тогда создаётся новая сессия, а старая удаляется.
-   * Поэтому здесь только перенос данных.
+   * The bank amount cannot be updated after Init. Reject a changed Medusa
+   * amount/currency instead of retaining a bank payment for an older cart.
    */
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
+    const data = (input.data ?? {}) as TBankSessionData;
+    if (data.paymentId || data.cartSnapshot) {
+      if (
+        !data.cartSnapshot ||
+        data.cartSnapshot.amountKopecks !== rublesToKopecks(input.amount) ||
+        data.cartSnapshot.currencyCode !== input.currency_code.toLowerCase()
+      ) {
+        throw new MedusaError(
+          MedusaError.Types.INVALID_DATA,
+          "tbank: сумма или валюта изменились после Init; сначала завершите прежнюю банковскую попытку",
+        );
+      }
+    }
     return { data: input.data };
   }
 
-  /** Удаление сессии = отмена платежа, если он был создан. */
+  /** Удаление сессии допускается только без платежа или после его завершения. */
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
     await this.cancelPayment(input);
     return { data: input.data };
   }
 
-  /**
-   * Последнее известное состояние сессии — ответ на случай, когда банк спросить
-   * не удалось.
-   *
-   * Пустой `status` означает «платёж ещё в пути», а не «платёж неуспешен»:
-   * `pending_authorization` оставляет сессию ожидающей и обратимой, тогда как
-   * `error` закрыл бы её отказом из-за проблем с сетью на нашей стороне.
-   */
-  private knownSessionStatus_(data: TBankSessionData): PaymentSessionStatus {
-    return data.status ? toSessionStatus(data.status) : "pending_authorization";
+  private async verifiedBankState_(data: TBankSessionData): Promise<TBankGetStateResult> {
+    const snapshot = data.cartSnapshot;
+    if (
+      !data.paymentId || !data.orderId || !snapshot ||
+      snapshot.orderId !== data.orderId || snapshot.currencyCode !== "rub" ||
+      !Number.isSafeInteger(snapshot.amountKopecks) || snapshot.amountKopecks <= 0
+    ) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: отсутствует достоверный снимок банковской попытки");
+    }
+    const state = await this.client_.getState(data.paymentId);
+    const trust = validateBankState(state, {
+      payment_id: data.paymentId,
+      order_id: data.orderId,
+      amount_kopecks: snapshot.amountKopecks,
+    }, this.options_.terminalKey, true);
+    if (!trust.valid) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, `tbank: ${trust.reason}`);
+    }
+    // Refunds require separate fiscal/accounting recovery, never a fresh capture.
+    if (state.Status === "REFUNDED" || state.Status === "PARTIAL_REFUNDED") {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: возврат банка требует ручной сверки платежа и ККТ");
+    }
+    return state;
   }
 
   /**

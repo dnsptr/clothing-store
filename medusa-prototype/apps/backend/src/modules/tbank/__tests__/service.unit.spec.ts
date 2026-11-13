@@ -7,7 +7,7 @@
  */
 
 import { TBankPaymentProviderService } from "../service";
-import { TBankClient } from "../lib/client";
+import { TBankClient, type TBankInitResult } from "../lib/client";
 import { generateToken } from "../lib/token";
 import { TBANK_NOTIFICATION_MODULE } from "../../tbank-notifications";
 import { MedusaError } from "@medusajs/framework/utils";
@@ -19,6 +19,31 @@ const OPTIONS = {
   apiBaseUrl: "https://rest-api-test.tinkoff.ru/v2",
   notificationUrl: "https://api.mariomikke.shop/hooks/payment/tbank",
 };
+
+const BANK_SESSION = {
+  paymentId: "3456789",
+  paymentUrl: "https://securepay.tinkoff.ru/xxx",
+  orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+  status: "NEW",
+  cartSnapshot: {
+    amountKopecks: 1899000,
+    currencyCode: "rub",
+    orderId: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+  },
+};
+
+function bankState(status: string, overrides: Record<string, unknown> = {}) {
+  return {
+    Success: true,
+    ErrorCode: "0",
+    TerminalKey: OPTIONS.terminalKey,
+    PaymentId: BANK_SESSION.paymentId,
+    OrderId: BANK_SESSION.orderId,
+    Amount: BANK_SESSION.cartSnapshot.amountKopecks,
+    Status: status,
+    ...overrides,
+  };
+}
 
 const logger = {
   info: jest.fn(),
@@ -33,6 +58,7 @@ function authoritativeCart(overrides: Record<string, unknown> = {}) {
     email: " Buyer@Example.com ",
     shipping_address: { phone: " +7 (999) 000-00-00 " },
     total: 18990,
+    shipping_methods: [{ id: "casm_01JABCDEFGHJKMNPQRSTVWXYZ" }],
     shipping_total: 90,
     items: [
       {
@@ -92,6 +118,14 @@ function makeService(
       logger,
       query,
       ...(notificationStore ? { [TBANK_NOTIFICATION_MODULE]: notificationStore } : {}),
+      checkoutHold: {
+        acquirePaymentHold: jest.fn().mockImplementation(async (sessionId: string, cartId: string) => ({
+          id: `chold_${sessionId}`, payment_session_id: sessionId, cart_id: cartId,
+          state: "active", allocations: [], expires_at: new Date(Date.now() + 600_000),
+        })),
+        settlePaymentHold: jest.fn().mockResolvedValue(undefined),
+        releasePaymentHold: jest.fn().mockResolvedValue(undefined),
+      },
     } as never,
     OPTIONS as never,
   );
@@ -131,9 +165,6 @@ describe("validateOptions", () => {
         receiptSnapshotSecret: OPTIONS.password,
       }),
     ).toThrow(/TBANK_RECEIPT_SNAPSHOT_SECRET/);
-    expect(() =>
-      TBankPaymentProviderService.validateOptions({ terminalKey: "x", password: "y", receiptSnapshotSecret: OPTIONS.receiptSnapshotSecret }),
-    ).not.toThrow();
   });
 });
 
@@ -145,6 +176,14 @@ describe("initiatePayment", () => {
       idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
     },
   };
+
+  it("does not initialize a changed bank amount after buyer confirmation", async () => {
+    const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
+    await expect(makeService().initiatePayment({
+      ...input, data: { expected_total: 18989 },
+    } as never)).rejects.toHaveProperty("type", "conflict");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("builds the Init receipt from authoritative cart items and paid shipping", async () => {
     const cart = authoritativeCart();
@@ -339,6 +378,14 @@ describe("initiatePayment", () => {
       makeService(undefined, authoritativeCart({ email: null, shipping_address: { phone: "" } }))
         .initiatePayment(input as never),
     ).rejects.toThrow(/контакт/i);
+    expect(initSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not call Init when the cart has no selected shipping method", async () => {
+    const initSpy = jest.spyOn(TBankClient.prototype, "init");
+
+    await expect(makeService(undefined, authoritativeCart({ shipping_methods: [] }))
+      .initiatePayment(input as never)).rejects.toThrow(/способ доставки не выбран/i);
     expect(initSpy).not.toHaveBeenCalled();
   });
 
@@ -549,6 +596,22 @@ describe("initiatePayment", () => {
       expect(result.data).not.toHaveProperty("receiptSnapshotSignature");
     });
 
+    it("does not reuse a bank URL after the shipping method is removed", async () => {
+      const initSpy = jest.spyOn(TBankClient.prototype, "init");
+      const cart = authoritativeCart({ shipping_methods: [] });
+
+      await expect(makeService(undefined, cart).initiatePayment({
+        ...input,
+        data: {
+          paymentId: "3456789",
+          paymentUrl: "https://securepay.tinkoff.ru/xxx",
+          orderId: input.context.idempotency_key,
+          status: "NEW",
+        },
+      } as never)).rejects.toThrow(/способ доставки не выбран/i);
+      expect(initSpy).not.toHaveBeenCalled();
+    });
+
     it("запрещает повторное использование, если корзина изменилась по сумме", async () => {
       const inputWithModifiedAmount = {
         ...input,
@@ -587,12 +650,7 @@ describe("initiatePayment", () => {
     });
 
     it("при статусе indeterminate не шлёт Init вслепую, а опрашивает GetState если есть paymentId", async () => {
-      const fetchMock = mockFetchOnce({
-        Success: true,
-        ErrorCode: "0",
-        PaymentId: "3456789",
-        Status: "AUTHORIZED",
-      });
+      const fetchMock = mockFetchOnce(bankState("AUTHORIZED"));
 
       const inputIndeterminate = {
         ...input,
@@ -608,7 +666,7 @@ describe("initiatePayment", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [url] = fetchMock.mock.calls[0];
       expect(url).toContain("GetState");
-      expect(result.status).toBe("authorized");
+      expect(result.status).toBe("pending_authorization");
       expect((result.data as Record<string, unknown>).status).toBe("AUTHORIZED");
     });
 
@@ -620,6 +678,8 @@ describe("initiatePayment", () => {
         Status: "NEW",
         Payments: [{ PaymentId: "777666", Amount: 1899000, Status: "NEW" }],
       });
+      jest.spyOn(TBankClient.prototype, "getState")
+        .mockResolvedValue(bankState("NEW", { PaymentId: "777666" }));
 
       const inputIndeterminateNoId = {
         ...input,
@@ -802,21 +862,24 @@ describe("initiatePayment", () => {
             order_id: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
             expected_amount_kopecks: 1899000,
             currency_code: "rub",
+            terminal_key: OPTIONS.terminalKey,
+            provider_id: "pp_tbank_tbank",
           },
         ]),
         createTbankPaymentAttempts: jest.fn(),
       };
-      mockFetchOnce({
-        Success: true,
-        ErrorCode: "0",
-        PaymentId: "12345",
-        PaymentURL: "https://securepay.tinkoff.ru/pay",
-        Amount: 1899000,
+      const checkOrder = jest.spyOn(TBankClient.prototype, "checkOrder").mockResolvedValue({
+        Success: true, ErrorCode: "0", OrderId: input.context.idempotency_key,
+        Payments: [{ PaymentId: BANK_SESSION.paymentId }],
       });
+      jest.spyOn(TBankClient.prototype, "getState").mockResolvedValue(bankState("CONFIRMED"));
+      const init = jest.spyOn(TBankClient.prototype, "init");
 
       const result = await makeService(mockNotificationStore).initiatePayment(input as never);
 
       expect(mockNotificationStore.createTbankPaymentAttempts).not.toHaveBeenCalled();
+      expect(checkOrder).toHaveBeenCalledWith(input.context.idempotency_key);
+      expect(init).not.toHaveBeenCalled();
       expect((result.data as Record<string, unknown>).attemptId).toBe("tbatt_existing");
     });
 
@@ -881,274 +944,235 @@ describe("initiatePayment", () => {
       await expect(initiation).rejects.not.toHaveProperty("message", expect.stringContaining("password"));
       expect(initSpy).not.toHaveBeenCalled();
     });
+
+    it("rejects a nonstandard bank redirect port", async () => {
+      mockFetchOnce({ ...bankState("NEW"), PaymentURL: "https://securepay.tinkoff.ru:8443/pay" });
+      await expect(makeService().initiatePayment(input as never)).rejects.toThrow(/HTTPS-порт/);
+    });
+
+    it("rejects a changed amount while the same session's Init is in flight", async () => {
+      let release!: (value: TBankInitResult) => void;
+      const pending = new Promise<TBankInitResult>((resolve) => { release = resolve; });
+      const init = jest.spyOn(TBankClient.prototype, "init").mockReturnValue(pending);
+      const service = makeService();
+      const first = service.initiatePayment(input as never);
+      await expect(service.initiatePayment({ ...input, amount: 19000 } as never))
+        .rejects.toMatchObject({ type: MedusaError.Types.CONFLICT });
+      release({ ...bankState("NEW"), PaymentURL: BANK_SESSION.paymentUrl });
+      await first;
+      expect(init).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed when durable attempt lookup is unavailable", async () => {
+      const init = jest.spyOn(TBankClient.prototype, "init");
+      const store = { listTbankPaymentAttempts: jest.fn().mockRejectedValue(new Error("database unavailable")) };
+      await expect(makeService(store).initiatePayment(input as never))
+        .rejects.toMatchObject({ type: MedusaError.Types.PAYMENT_AUTHORIZATION_ERROR });
+      expect(init).not.toHaveBeenCalled();
+    });
+
+    it.each(["CONFIRMED", "REJECTED", "AUTHORIZED"])("does not issue Init again for an existing %s payment", async (status) => {
+      mockFetchOnce(bankState(status));
+      const init = jest.spyOn(TBankClient.prototype, "init");
+      await makeService().initiatePayment({ ...input, data: { ...BANK_SESSION, status } } as never);
+      expect(init).not.toHaveBeenCalled();
+    });
+
+    it("does not recover a mismatched CheckOrder payment as paid", async () => {
+      jest.spyOn(TBankClient.prototype, "checkOrder").mockResolvedValue({
+        Success: true, ErrorCode: "0", OrderId: input.context.idempotency_key,
+        Payments: [{ PaymentId: "wrong" }],
+      });
+      jest.spyOn(TBankClient.prototype, "getState").mockResolvedValue(bankState("CONFIRMED"));
+      const init = jest.spyOn(TBankClient.prototype, "init");
+      await expect(makeService().initiatePayment({
+        ...input, data: { status: "indeterminate" },
+      } as never)).rejects.toMatchObject({ type: MedusaError.Types.CONFLICT });
+      expect(init).not.toHaveBeenCalled();
+    });
   });
 });
 
-describe("getWebhookActionAndData", () => {
-  function signedNotification(overrides: Record<string, unknown> = {}) {
-    const body: Record<string, unknown> = {
-      TerminalKey: OPTIONS.terminalKey,
-      OrderId: "payses_01JABCDEF",
-      PaymentId: 3456789,
-      Status: "CONFIRMED",
-      Amount: 1899000,
-      Success: true,
-      ...overrides,
-    };
-    body.Token = generateToken(body, OPTIONS.password);
-    return body;
-  }
-
-  it("отображает подписанную нотификацию по таблице §4.3", async () => {
-    const result = await makeService().getWebhookActionAndData({
-      data: signedNotification(),
-    } as never);
-
-    expect(result.action).toBe("captured");
-    expect(result.data?.session_id).toBe("payses_01JABCDEF");
-    expect(result.data?.amount).toBe("18990.00");
-  });
-
-  it("отбрасывает нотификацию с неверной подписью", async () => {
-    const body = signedNotification();
-    body.Amount = 1; // сумма подменена после подписи
-
-    const result = await makeService().getWebhookActionAndData({ data: body } as never);
-
-    // Не «неуспешный платёж», а подделка либо расхождение конфигурации:
-    // Medusa не должна сделать ничего.
-    expect(result.action).toBe("not_supported");
-    expect(result.data).toBeUndefined();
-  });
-
-  it("нетерминальный статус не создаёт заказ", async () => {
-    for (const status of ["NEW", "FORM_SHOWED", "AUTHORIZING", "3DS_CHECKING"]) {
-      const result = await makeService().getWebhookActionAndData({
-        data: signedNotification({ Status: status }),
-      } as never);
-      expect(result.action).toBe("not_supported");
-    }
-  });
-
-  it("не падает на неразбираемой нотификации", async () => {
-    const body: Record<string, unknown> = { TerminalKey: OPTIONS.terminalKey };
-    body.Token = generateToken(body, OPTIONS.password);
-
-    const result = await makeService().getWebhookActionAndData({ data: body } as never);
-    expect(result.action).toBe("not_supported");
-  });
+describe("generic provider webhook aliases", () => {
+  it.each(["AUTHORIZED", "CONFIRMED", "REJECTED", "CANCELED"])(
+    "does not bypass durable correlation for signed %s callbacks",
+    async (status) => {
+      const body: Record<string, unknown> = bankState(status);
+      body.Token = generateToken(body, OPTIONS.password);
+      expect(await makeService().getWebhookActionAndData({ data: body } as never))
+        .toEqual({ action: "not_supported" });
+    },
+  );
 });
 
-describe("getPaymentStatus", () => {
-  it("без PaymentId возвращает pending, а не ошибку", async () => {
-    const result = await makeService().getPaymentStatus({ data: {} } as never);
-    expect(result.status).toBe("pending");
-  });
-
-  it("опрашивает банк и отображает статус", async () => {
-    mockFetchOnce({
-      Success: true,
-      ErrorCode: "0",
-      PaymentId: "3456789",
-      Status: "CONFIRMED",
-    });
-
-    const result = await makeService().getPaymentStatus({
-      data: { paymentId: "3456789" },
-    } as never);
-
-    expect(result.status).toBe("captured");
-  });
-});
-
-describe("authorizePayment", () => {
-  /**
-   * Данные сессии в том виде, в каком они лежат в БД к моменту авторизации:
-   * `status` записан один раз в `initiatePayment` из ответа `Init` и с тех пор
-   * никем не обновлялся. Если верить ему, платёж навсегда останется `NEW`.
-   */
-  const session = {
-    paymentId: "3456789",
-    paymentUrl: "https://securepay.tinkoff.ru/xxx",
-    orderId: "payses_01JABCDEF",
-    status: "NEW",
-  };
-
-  it("спрашивает банк, а не протухший status из данных сессии", async () => {
-    const fetchMock = mockFetchOnce({
-      Success: true,
-      ErrorCode: "0",
-      PaymentId: "3456789",
-      Status: "AUTHORIZED",
-    });
-
-    const result = await makeService().authorizePayment({ data: { ...session } } as never);
-
-    expect(fetchMock.mock.calls[0][0]).toContain("/GetState");
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.PaymentId).toBe("3456789");
-    expect(result.status).toBe("authorized");
-  });
-
-  it("на CONFIRMED возвращает captured", async () => {
-    mockFetchOnce({
-      Success: true,
-      ErrorCode: "0",
-      PaymentId: "3456789",
-      Status: "CONFIRMED",
-    });
-
-    const result = await makeService().authorizePayment({ data: { ...session } } as never);
-
-    // Ответ pending_authorization здесь означал бы payment_id: undefined в
-    // capturePaymentWorkflow и заказ, навсегда оставшийся неоплаченным.
-    expect(result.status).toBe("captured");
-  });
-
-  it("на REJECTED возвращает error", async () => {
-    mockFetchOnce({
-      Success: true,
-      ErrorCode: "0",
-      PaymentId: "3456789",
-      Status: "REJECTED",
-    });
-
-    const result = await makeService().authorizePayment({ data: { ...session } } as never);
-
-    expect(result.status).toBe("error");
-  });
-
-  it("сохраняет в данных сессии свежий Status банка", async () => {
-    mockFetchOnce({
-      Success: true,
-      ErrorCode: "0",
-      PaymentId: "3456789",
-      Status: "CONFIRMED",
-    });
-
-    const result = await makeService().authorizePayment({ data: { ...session } } as never);
-
-    const data = result.data as Record<string, unknown>;
-    expect(data.status).toBe("CONFIRMED");
-    expect(data.paymentId).toBe("3456789");
-    expect(data.orderId).toBe("payses_01JABCDEF");
-  });
-
-  it("не валит оформление, если банк не ответил", async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValue(new Error("socket hang up")) as unknown as typeof fetch;
-
-    const result = await makeService().authorizePayment({ data: { ...session } } as never);
-
-    // Недоступность банка — не исход платежа: сессия остаётся ожидающей, а
-    // исход доберут повторная нотификация и сверка.
-    expect(result.status).toBe("pending_authorization");
-    expect((result.data as Record<string, unknown>).status).toBe("NEW");
-    expect(logger.warn).toHaveBeenCalled();
-  });
-
-  it("без PaymentId не обращается в банк", async () => {
+describe("getPaymentStatus / authorizePayment", () => {
+  it("does not call the bank before Init, even with a forged paid status", async () => {
     const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
-
-    const result = await makeService().authorizePayment({ data: {} } as never);
-
-    // Платёж не создавался — спрашивать не о чем, и это не ошибка.
+    const service = makeService();
+    expect((await service.getPaymentStatus({ data: {} } as never)).status).toBe("pending");
+    expect((await service.authorizePayment({ data: { status: "CONFIRMED" } } as never)).status)
+      .toBe("pending_authorization");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.status).toBe("pending_authorization");
   });
 
-  it("отвергает подтверждение, если сумма банка расходится со снапшотом корзины", async () => {
-    mockFetchOnce({
-      Success: true,
-      ErrorCode: "0",
-      PaymentId: "3456789",
-      Status: "CONFIRMED",
-      Amount: 100000, // 1000 руб вместо 18990 руб
-    });
+  it.each([
+    ["AUTHORIZED", "pending_authorization"],
+    ["CONFIRMED", "captured"],
+    ["REJECTED", "error"],
+    ["CANCELED", "canceled"],
+  ])("projects correlated GetState=%s as %s", async (status, expected) => {
+    const fetchMock = mockFetchOnce(bankState(status));
+    const result = await makeService().authorizePayment({
+      data: { ...BANK_SESSION },
+      context: { idempotency_key: BANK_SESSION.orderId },
+    } as never);
+    expect(fetchMock.mock.calls[0][0]).toContain("/GetState");
+    expect(result.status).toBe(expected);
+    expect(result.data).toEqual(expect.objectContaining({ status, paymentId: BANK_SESSION.paymentId }));
+  });
 
-    const sessionWithSnapshot = {
-      ...session,
-      cartSnapshot: {
-        amountKopecks: 1899000,
-        currencyCode: "rub",
-        orderId: "payses_01JABCDEF",
-      },
-    };
+  it.each([
+    ["terminal", { TerminalKey: "another_terminal" }],
+    ["payment", { PaymentId: "another_payment" }],
+    ["order", { OrderId: "another_order" }],
+    ["amount", { Amount: 100000 }],
+    ["missing amount", { Amount: undefined }],
+    ["missing terminal", { TerminalKey: undefined }],
+    ["unknown status", { Status: "UNKNOWN" }],
+    ["refunded", { Status: "REFUNDED" }],
+    ["partial refund", { Status: "PARTIAL_REFUNDED" }],
+  ] as const)("rejects %s mismatch instead of reporting paid", async (_name, overrides) => {
+    mockFetchOnce(bankState("CONFIRMED", overrides));
+    await expect(makeService().authorizePayment({ data: { ...BANK_SESSION } } as never))
+      .rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
+  });
 
-    await expect(
-      makeService().authorizePayment({ data: { ...sessionWithSnapshot } } as never),
-    ).rejects.toThrow(/сумма подтверждения банка .* не совпадает со снапшотом корзины/);
+  it("binds authorization to the framework's session ID", async () => {
+    const fetchMock = mockFetchOnce(bankState("CONFIRMED"));
+    await expect(makeService().authorizePayment({
+      data: { ...BANK_SESSION },
+      context: { idempotency_key: "payses_other" },
+    } as never)).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a snapshot-less legacy/client payment", async () => {
+    const fetchMock = mockFetchOnce(bankState("CONFIRMED"));
+    await expect(makeService().authorizePayment({
+      data: { paymentId: BANK_SESSION.paymentId, orderId: BANK_SESSION.orderId },
+    } as never)).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["NEW", "AUTHORIZED", "CONFIRMED", "REFUNDED"])(
+    "never substitutes saved %s for unavailable bank evidence", async (status) => {
+      global.fetch = jest.fn().mockRejectedValue(new Error("socket hang up"));
+      const result = await makeService().authorizePayment({ data: { ...BANK_SESSION, status } } as never);
+      expect(result.status).toBe("pending_authorization");
+      expect(logger.warn).toHaveBeenCalled();
+    },
+  );
+});
+
+describe("updatePayment", () => {
+  it.each([[19000, "rub"], [18990, "usd"]])(
+    "rejects changed amount/currency %s %s after Init", async (amount, currency_code) => {
+      await expect(makeService().updatePayment({
+        data: BANK_SESSION, amount, currency_code,
+      } as never)).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
+    },
+  );
+
+  it("retains the existing bank attempt when amount and currency are unchanged", async () => {
+    expect(await makeService().updatePayment({
+      data: BANK_SESSION, amount: 18990, currency_code: "RUB",
+    } as never)).toEqual({ data: BANK_SESSION });
   });
 });
 
-describe("cancelPayment", () => {
-  it("без PaymentId не обращается в банк", async () => {
+describe("cancelPayment / deletePayment", () => {
+  it("does not call the bank before Init", async () => {
     const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
     await makeService().cancelPayment({ data: {} } as never);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("считает ошибку отмены идемпотентной только после GetState=CANCELED", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: false, ErrorCode: "9999", Message: "уже отменён" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: true, ErrorCode: "0", Status: "CANCELED" }),
-      }) as unknown as typeof fetch;
+  it.each(["NEW", "AUTHORIZED", "CONFIRMED"])(
+    "blocks active %s without invoking Cancel, including capture races", async (status) => {
+      mockFetchOnce(bankState(status));
+      const cancel = jest.spyOn(TBankClient.prototype, "cancel");
+      const service = makeService();
+      await expect(service.cancelPayment({ data: BANK_SESSION } as never))
+        .rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+      await expect(service.deletePayment({ data: BANK_SESSION } as never))
+        .rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
+      expect(cancel).not.toHaveBeenCalled();
+    },
+  );
 
-    await expect(
-      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
-    ).resolves.toBeDefined();
+  it.each(["CANCELED", "REVERSED", "REJECTED", "DEADLINE_EXPIRED"])(
+    "allows local deletion only after correlated terminal %s", async (status) => {
+      mockFetchOnce(bankState(status));
+      const cancel = jest.spyOn(TBankClient.prototype, "cancel");
+      await makeService().deletePayment({ data: BANK_SESSION } as never);
+      expect(cancel).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not delete a paid session because an unrelated payment was rejected", async () => {
+    mockFetchOnce(bankState("REJECTED", { PaymentId: "another_payment" }));
+    await expect(makeService().deletePayment({ data: BANK_SESSION } as never))
+      .rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
   });
 
-  it("не удаляет сессию после неоднозначной сетевой ошибки Cancel", async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(new Error("socket reset"))
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ Success: true, ErrorCode: "0", Status: "NEW" }),
-      }) as unknown as typeof fetch;
-
-    await expect(
-      makeService().cancelPayment({ data: { paymentId: "1" } } as never),
-    ).rejects.toThrow(/NETWORK/);
+  it("does not invoke Cancel when GetState is unavailable", async () => {
+    jest.spyOn(TBankClient.prototype, "getState").mockRejectedValue(new Error("bank unavailable"));
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
+    await expect(makeService().deletePayment({ data: BANK_SESSION } as never))
+      .rejects.toThrow("bank unavailable");
+    expect(cancel).not.toHaveBeenCalled();
   });
 });
 
 describe("refundPayment", () => {
   it("без PaymentId бросает, а не делает вид, что вернул деньги", async () => {
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
     await expect(
       makeService().refundPayment({ data: {}, amount: 100 } as never),
-    ).rejects.toThrow(/PaymentId/);
+    ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA, message: expect.stringMatching(/PaymentId/) });
+    expect(cancel).not.toHaveBeenCalled();
   });
 
-  it("отправляет сумму возврата в копейках", async () => {
+  it.each([100, 18990])("блокирует возврат %s без фискального чека до любого обращения в банк", async (amount) => {
+    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
     const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
-    await makeService().refundPayment({
-      data: { paymentId: "3456789" },
-      amount: 18990,
-    } as never);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.Amount).toBe(1899000);
+    await expect(makeService().refundPayment({
+      data: { paymentId: "3456789" },
+      amount,
+    } as never)).rejects.toMatchObject({
+      type: MedusaError.Types.NOT_ALLOWED,
+      message: expect.stringMatching(/возвратного чека/),
+    });
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
 describe("capturePayment", () => {
-  it("при одностадийной оплате не обращается в банк", async () => {
-    const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
-    await makeService().capturePayment({ data: { paymentId: "1" } } as never);
-    // Списание уже произошло к моменту CONFIRMED — подтверждать нечего.
-    expect(fetchMock).not.toHaveBeenCalled();
+  it("requires correlated CONFIRMED without issuing a second bank capture", async () => {
+    const fetchMock = mockFetchOnce(bankState("CONFIRMED"));
+    expect(await makeService().capturePayment({ data: BANK_SESSION } as never))
+      .toEqual({ data: { ...BANK_SESSION, status: "CONFIRMED" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/GetState");
+  });
+
+  it.each(["NEW", "AUTHORIZED"])("does not mark an unconfirmed %s payment captured", async (status) => {
+    mockFetchOnce(bankState(status));
+    await expect(makeService().capturePayment({ data: BANK_SESSION } as never))
+      .rejects.toMatchObject({ type: MedusaError.Types.NOT_ALLOWED });
   });
 });
 

@@ -100,21 +100,32 @@ class PublicYandexGuard {
   }
 }
 
-let sharedClient: { readonly identity: string; readonly client: YandexDeliveryClient } | null = null;
+let sharedProvider: {
+  readonly identity: string;
+  readonly client: YandexDeliveryClient;
+  readonly pvzPriceRub: number;
+} | null = null;
 
-export function getPublicYandexClient(): YandexDeliveryClient | null {
+export function getPublicYandexProvider(): {
+  readonly client: YandexDeliveryClient;
+  readonly pvzPriceRub: number;
+} | null {
   const configuration = parseYandexDeliveryEnvironment(process.env);
   if (!configuration.enabled) return null;
   const identity = JSON.stringify(configuration.options);
-  if (!sharedClient || sharedClient.identity !== identity) {
-    sharedClient = { identity, client: new YandexDeliveryClient(configuration.options) };
+  if (!sharedProvider || sharedProvider.identity !== identity) {
+    sharedProvider = {
+      identity,
+      client: new YandexDeliveryClient(configuration.options),
+      pvzPriceRub: configuration.options.pvzPriceRub,
+    };
   }
-  return sharedClient.client;
+  return sharedProvider;
 }
 
 export const publicYandexGuard = new PublicYandexGuard();
 
 export function _resetPublicYandexForTesting(): void {
-  sharedClient = null;
+  sharedProvider = null;
   publicYandexGuard.reset();
 }

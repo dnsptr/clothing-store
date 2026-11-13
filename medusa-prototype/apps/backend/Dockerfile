@@ -1,19 +1,39 @@
-FROM node:22.14.0-bookworm-slim AS builder
+ARG NODE_VERSION=24.22.2
+FROM node:${NODE_VERSION}-bookworm-slim AS builder
 
 WORKDIR /workspace
 
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
-RUN npm config set maxsockets 5 \
-  && npm ci --no-audit --no-fund
+# Keep integrity-checked downloads outside image layers. The shared lock
+# serializes full/prod installs on memory-constrained builders.
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+  npm config set maxsockets 5 \
+  && npm ci --ignore-scripts --no-audit --no-fund --prefer-offline
 
-COPY apps/backend apps/backend
-RUN npm --workspace @dtc/backend run build
+# Copy only reviewed build inputs, never local env, uploads or cached output.
+# Test sources and fixtures are excluded by the root .dockerignore.
+COPY apps/backend/src ./apps/backend/src
+COPY apps/backend/medusa-config.ts apps/backend/tsconfig.json apps/backend/instrumentation.ts ./apps/backend/
+RUN NODE_ENV=production MEDUSA_DISABLE_TELEMETRY=true npm --workspace @dtc/backend run build
 
-FROM node:22.14.0-bookworm-slim AS runner
+FROM node:${NODE_VERSION}-bookworm-slim AS production-deps
 
 ENV NODE_ENV=production
-WORKDIR /app
+WORKDIR /workspace
+# Reuse the reviewed workspace lock and its security overrides. Resolving a
+# second standalone lock during the build can produce a tree npm ci rejects.
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json apps/backend/package.json
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+  npm config set maxsockets 5 \
+  && npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefer-offline
+COPY --from=builder /workspace/apps/backend/.medusa/server ./apps/backend
+
+FROM node:${NODE_VERSION}-bookworm-slim AS runner
+
+ENV NODE_ENV=production
+WORKDIR /app/apps/backend
 
 COPY apps/backend/certificates/ /usr/local/share/ca-certificates/
 RUN apt-get update \
@@ -22,10 +42,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
-COPY --from=builder /workspace/apps/backend/.medusa/server ./
-RUN npm install --omit=dev --no-audit --no-fund \
-  && npm cache clean --force \
-  && chown -R node:node /app
+COPY --chown=node:node --from=production-deps /workspace/apps/backend ./
+COPY --chown=node:node --from=production-deps /workspace/package.json /workspace/package-lock.json /app/
+COPY --chown=node:node --from=production-deps /workspace/node_modules /app/node_modules
+RUN mkdir -p /app/apps/backend/static \
+  && chown node:node /app/apps/backend /app/apps/backend/static
 
 # Процесс не должен быть root: на этом хосте контейнер работает в
 # `network_mode: host` и рядом лежат `.env.production` с секретами и каталог с
@@ -36,7 +57,7 @@ EXPOSE 9000
 
 # Без healthcheck зависший процесс не отличим от живого: Caddy продолжает
 # проксировать в мёртвый upstream, а `restart: unless-stopped` не срабатывает,
-# потому что контейнер формально запущен. Node 22 умеет fetch, поэтому curl в
+# потому что контейнер формально запущен. Node 24 умеет fetch, поэтому curl в
 # образ тащить не нужно.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:9000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"

@@ -1,3 +1,95 @@
+# Standalone private rehearsal stack; NEVER merge with compose.production.yml.
+# Supply a private candidate-only --env-file. Do not use .env.production.
+# Build the reviewed image separately; this file cannot build or pull an image.
+name: mario-mikke-candidate
+
 services:
+  postgres:
+    image: postgres:15-alpine
+    restart: "no"
+    mem_limit: 256m
+    environment:
+      POSTGRES_DB: medusa_candidate
+      POSTGRES_USER: medusa_candidate
+      # Use random hexadecimal passwords so database/Redis URIs need no escaping.
+      POSTGRES_PASSWORD: ${CANDIDATE_POSTGRES_PASSWORD:?Candidate database password is required}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa_candidate -d medusa_candidate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - candidate
+
+  redis:
+    image: redis:7-alpine
+    restart: "no"
+    mem_limit: 128m
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${CANDIDATE_REDIS_PASSWORD:?Candidate Redis password is required}"]
+    environment:
+      REDIS_PASSWORD: ${CANDIDATE_REDIS_PASSWORD:?Candidate Redis password is required}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    networks:
+      - candidate
+
   medusa:
-    image: mm-backend-catalog:20261107-sales
+    image: ${CANDIDATE_BACKEND_IMAGE:?A freshly built reviewed candidate image is required}
+    pull_policy: never
+    restart: "no"
+    mem_limit: 1100m
+    cpus: 1
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=768
+      DATABASE_URL: postgres://medusa_candidate:${CANDIDATE_POSTGRES_PASSWORD:?Candidate database password is required}@postgres:5432/medusa_candidate?sslmode=disable
+      REDIS_URL: redis://:${CANDIDATE_REDIS_PASSWORD:?Candidate Redis password is required}@redis:6379
+      STORE_CORS: ${CANDIDATE_STOREFRONT_URL:?Private candidate storefront origin is required}
+      ADMIN_CORS: ${CANDIDATE_BACKEND_URL:?Private candidate backend origin is required}
+      AUTH_CORS: ${CANDIDATE_STOREFRONT_URL:?Private candidate storefront origin is required},${CANDIDATE_BACKEND_URL:?Private candidate backend origin is required}
+      STOREFRONT_URL: ${CANDIDATE_STOREFRONT_URL:?Private candidate storefront origin is required}
+      PUBLIC_BACKEND_URL: ${CANDIDATE_BACKEND_URL:?Private candidate backend origin is required}
+      JWT_SECRET: ${CANDIDATE_JWT_SECRET:?Candidate JWT secret is required}
+      COOKIE_SECRET: ${CANDIDATE_COOKIE_SECRET:?Candidate cookie secret is required}
+      AUTH_MFA_ENCRYPTION_KEY: ${CANDIDATE_AUTH_MFA_ENCRYPTION_KEY:?Candidate MFA encryption key is required}
+      CDEK_ENABLED: "false"
+      YANDEX_DELIVERY_ENABLED: "false"
+      POCHTA_ENABLED: "false"
+      OWN_COURIER_ENABLED: "false"
+      TBANK_ENABLED: "false"
+      MEDUSA_ADMIN_ONBOARDING_TYPE: default
+      MEDUSA_WORKER_MODE: server
+      MEDUSA_DISABLE_TELEMETRY: "true"
+      DISABLE_MEDUSA_ADMIN: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Restore only an isolated media copy here; never mount live ./static.
+      - static_data:/app/apps/backend/static
+    networks:
+      - candidate
+
+# No published ports, host networking, live bind mounts or outbound network.
+# Reach the application only through a private SSH tunnel/proxy for rehearsal.
+networks:
+  candidate:
+    internal: true
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_data:

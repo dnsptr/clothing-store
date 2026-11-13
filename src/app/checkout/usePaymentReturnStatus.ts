@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { getStoredCartId, useCart } from "@/context/CartContext";
 import { getMedusaPaymentStatus } from "@/lib/medusa";
+import { getPaymentReturnContext, rememberPaymentReturnContext } from "@/lib/paymentReturnContext";
 import { getPaymentPollConfig } from "./paymentPollConfig";
 import type { PaymentReturnState } from "./paymentReturnState";
 
-const CART_CAPABILITY_REGEX = /^cart_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 export function usePaymentReturnStatus(): PaymentReturnState {
   const { clearCart } = useCart();
@@ -24,7 +24,9 @@ export function usePaymentReturnStatus(): PaymentReturnState {
     let isMounted = true;
     const abortController = new AbortController();
     let timerId: ReturnType<typeof setTimeout> | null = null;
-    initialCartIdRef.current = getStoredCartId();
+    const returnContext = getPaymentReturnContext();
+    initialCartIdRef.current = returnContext?.cartId ?? null;
+    hasEverConfirmedPaymentRef.current = returnContext?.paymentConfirmed ?? false;
 
     if (window.location.search) {
       window.history.replaceState(null, "", window.location.pathname);
@@ -45,7 +47,7 @@ export function usePaymentReturnStatus(): PaymentReturnState {
       if (!isMounted) return;
 
       const verifiedCartId = initialCartIdRef.current;
-      if (!verifiedCartId || !CART_CAPABILITY_REGEX.test(verifiedCartId)) {
+      if (!verifiedCartId || !returnContext) {
         setState({ kind: "unverified" });
         return;
       }
@@ -53,16 +55,17 @@ export function usePaymentReturnStatus(): PaymentReturnState {
       attempts += 1;
 
       try {
-        const result = await getMedusaPaymentStatus(verifiedCartId, abortController.signal);
+        const result = await getMedusaPaymentStatus(verifiedCartId, abortController.signal, returnContext.cartAccessToken);
         if (!isMounted) return;
 
         if (result === null) {
-          setState({ kind: "unverified" });
+          setState({ kind: hasEverConfirmedPaymentRef.current ? "order_delayed" : "unverified" });
           return;
         }
 
         if (result.payment === "confirmed") {
           hasEverConfirmedPaymentRef.current = true;
+          rememberPaymentReturnContext({ ...returnContext, paymentConfirmed: true });
           if (result.order === "ready") {
             setState({ kind: "success" });
             if (!hasClearedCartRef.current) {
@@ -88,7 +91,7 @@ export function usePaymentReturnStatus(): PaymentReturnState {
           return;
         }
 
-        setState({ kind: "verifying" });
+        setState({ kind: hasEverConfirmedPaymentRef.current ? "order_processing" : "verifying" });
         if (attempts >= maxAttempts) {
           finishAfterExhaustion();
           return;

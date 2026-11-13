@@ -2,6 +2,7 @@ import { Client } from "pg";
 import { Migration20260726153050 } from "../../tbank-notifications/migrations/Migration20260726153050";
 import { Migration20260909120000 } from "../../tbank-notifications/migrations/Migration20260909120000";
 import { Migration20260926150000 } from "../../tbank-notifications/migrations/Migration20260926150000";
+import { Migration20261011100000 } from "../../tbank-notifications/migrations/Migration20261011100000";
 import TbankNotificationModuleService from "../../tbank-notifications/service";
 import {
   PaymentReconcilerService,
@@ -32,7 +33,7 @@ function queryManager(client: Client) {
 
 async function applyQueries(
   client: Client,
-  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000,
+  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20261011100000,
 ): Promise<void> {
   for (const query of migration.getQueries()) {
     if (typeof query !== "string") throw new TypeError("Test migration contains a non-string query");
@@ -58,6 +59,9 @@ async function rebuildSchema(client: Client): Promise<void> {
   const polling = new Migration20260926150000({} as never, {} as never);
   await polling.up();
   await applyQueries(client, polling);
+  const recovery = new Migration20261011100000({} as never, {} as never);
+  await recovery.up();
+  await applyQueries(client, recovery);
 }
 
 function createNotificationStore(client: Client): TbankNotificationStore {
@@ -119,18 +123,14 @@ function createNotificationStore(client: Client): TbankNotificationStore {
       ),
     claimDuePaymentAttempts: (input) =>
       TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call({}, input, { manager } as never),
-    renewPaymentAttemptPollLease: (input) =>
-      TbankNotificationModuleService.prototype.renewPaymentAttemptPollLease.call({}, input, { manager } as never),
-    completePaymentAttemptPoll: (input) =>
-      TbankNotificationModuleService.prototype.completePaymentAttemptPoll.call({}, input, { manager } as never),
-    deferPaymentAttemptPoll: (input) =>
-      TbankNotificationModuleService.prototype.deferPaymentAttemptPoll.call({}, input, { manager } as never),
-    failPaymentAttemptPoll: (input) =>
-      TbankNotificationModuleService.prototype.failPaymentAttemptPoll.call({}, input, { manager } as never),
-    quarantinePaymentAttemptPoll: (input) =>
-      TbankNotificationModuleService.prototype.quarantinePaymentAttemptPoll.call({}, input, { manager } as never),
-    expireStalePaymentAttemptPolls: (input) =>
-      TbankNotificationModuleService.prototype.expireStalePaymentAttemptPolls.call({}, input, { manager } as never),
+    renewPaymentAttemptPoll: (input) =>
+      TbankNotificationModuleService.prototype.renewPaymentAttemptPoll.call({}, input, { manager } as never),
+    observePaymentAttemptPoll: (input) =>
+      TbankNotificationModuleService.prototype.observePaymentAttemptPoll.call({}, input, { manager } as never),
+    finishPaymentAttemptPoll: (input) =>
+      TbankNotificationModuleService.prototype.finishPaymentAttemptPoll.call({}, input, { manager } as never),
+    transitionPollManualReview: (input) =>
+      TbankNotificationModuleService.prototype.transitionPollManualReview.call({}, input, { manager } as never),
     listTbankNotifications: async (filters: Record<string, unknown>) => {
       const conditions: string[] = [];
       const values: unknown[] = [];
@@ -493,14 +493,14 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
         `INSERT INTO payment_session (id, data)
          VALUES ($1, $2::jsonb)
          ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, deleted_at = NULL`,
-        [sessionId, JSON.stringify({ paymentId, orderId: sessionId })],
+        [sessionId, JSON.stringify({ paymentId, orderId: sessionId, attemptId: "tbatt_poll_no_webhook" })],
       );
       await database.query(
         `INSERT INTO tbank_payment_attempt
           (id, payment_session_id, provider_id, terminal_key, order_id,
            expected_amount_kopecks, currency_code, created_at)
          VALUES ('tbatt_poll_no_webhook', $1, 'pp_tbank_tbank', 'term', $1,
-                 10000, 'rub', NOW() - INTERVAL '3 minutes')`,
+                 10000, 'rub', NOW() - INTERVAL '20 minutes')`,
         [sessionId],
       );
 
@@ -531,13 +531,14 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
             currency_code: "rub",
             provider_id: "pp_tbank_tbank",
             status: captured ? "captured" : "pending",
-            data: { paymentId, orderId: sessionId },
+            data: { paymentId, orderId: sessionId, attemptId: "tbatt_poll_no_webhook" },
           })),
           updatePaymentSession: jest.fn().mockResolvedValue({}),
         } as never,
         expectedTerminalKey: "term",
         tbankClient: bank,
         workflowRunner: workflow,
+        locking: { execute: jest.fn().mockImplementation(async (_key, action) => action()) } as never,
         events,
         durableLinkageChecker: jest.fn().mockImplementation(async () => ({
           orderLinked: captured,
@@ -546,8 +547,8 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
         })),
       });
 
-      expect((await reconciler.pollMissingNotifications(10)).claimed).toBe(1);
-      expect((await reconciler.pollMissingNotifications(10)).claimed).toBe(0);
+      expect((await reconciler.processMissingWebhookBatch(10)).claimed).toBe(1);
+      expect((await reconciler.processMissingWebhookBatch(10)).claimed).toBe(0);
       expect(bank.getState).toHaveBeenCalledTimes(1);
       expect(workflow).toHaveBeenCalledTimes(1);
       expect(events.emit).toHaveBeenCalledTimes(1);
@@ -562,7 +563,7 @@ describePostgres("PaymentReconcilerService PostgreSQL integration", () => {
       const persisted = await database.query(
         "SELECT poll_state FROM tbank_payment_attempt WHERE id = 'tbatt_poll_no_webhook'",
       );
-      expect(persisted.rows[0]).toEqual({ poll_state: "complete" });
+      expect(persisted.rows[0]).toEqual({ poll_state: "completed" });
       const inbox = await database.query("SELECT count(*)::int AS count FROM tbank_notification");
       expect(inbox.rows[0].count).toBe(0);
     } finally {

@@ -8,7 +8,7 @@ import {
 } from "node:crypto";
 
 import { MedusaError } from "@medusajs/framework/utils";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import type { TBankReceipt } from "./receipt";
 

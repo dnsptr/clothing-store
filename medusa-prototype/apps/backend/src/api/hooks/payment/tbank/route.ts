@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import type { PaymentSessionDTO } from "@medusajs/types";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import { TBANK_NOTIFICATION_MODULE } from "../../../../modules/tbank-notifications";
 import {
@@ -165,6 +165,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
       ...key,
       order_id: notification.orderId,
       amount_kopecks: notification.amountKopecks,
+      amount_provided: notification.amountProvided,
       currency_code: notification.currencyCode,
       success: notification.success,
       error_code: null,

@@ -1,6 +1,6 @@
 import OwnCourierFulfillmentProviderService, { UnsupportedOwnCourierCancellationError } from "../service";
 import { parseOwnCourierEnvironment } from "../config";
-import { ownCourierEligibility } from "../eligibility";
+import { ownCourierAddressKey, ownCourierEligibility } from "../eligibility";
 import { OWN_COURIER_OPTION } from "../provider-id";
 
 const address = {
@@ -19,10 +19,16 @@ const inside = {
   qc_geo: 0,
   unparsed_parts: null,
 };
-const options = { token: "test-token", secret: "test-secret" };
+const options = { token: "test-token", secret: "test-secret", priceRub: 0 };
 const option = { id: OWN_COURIER_OPTION };
+const addressKey = ownCourierAddressKey(address);
 
 beforeEach(() => {
+  jest.restoreAllMocks();
+  jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-15T12:00:00+03:00"));
+});
+
+afterEach(() => {
   jest.restoreAllMocks();
 });
 
@@ -33,11 +39,24 @@ function stubClean(body: unknown, status = 200) {
 }
 
 describe("own courier eligibility", () => {
-  it("enables seeding only when both credentials are nonempty", () => {
+  it("enables seeding only with explicit approval, tariff and complete DaData credentials", () => {
+    const credentials = { DADATA_API_KEY: "key", DADATA_SECRET_KEY: "secret" };
     expect(parseOwnCourierEnvironment({})).toEqual({ enabled: false });
-    expect(parseOwnCourierEnvironment({ DADATA_API_KEY: "key" })).toEqual({ enabled: false });
-    expect(parseOwnCourierEnvironment({ DADATA_API_KEY: " ", DADATA_SECRET_KEY: "secret" })).toEqual({ enabled: false });
-    expect(parseOwnCourierEnvironment({ DADATA_API_KEY: "key", DADATA_SECRET_KEY: "secret" }).enabled).toBe(true);
+    expect(parseOwnCourierEnvironment(credentials)).toEqual({ enabled: false });
+    expect(parseOwnCourierEnvironment({ ...credentials, OWN_COURIER_ENABLED: "true" })).toEqual({ enabled: false });
+    expect(parseOwnCourierEnvironment({ ...credentials, OWN_COURIER_ENABLED: "false", OWN_COURIER_PRICE_RUB: "0" })).toEqual({ enabled: false });
+    expect(parseOwnCourierEnvironment({ OWN_COURIER_ENABLED: "true", OWN_COURIER_PRICE_RUB: "0", DADATA_API_KEY: "key" })).toEqual({ enabled: false });
+    expect(parseOwnCourierEnvironment({ ...credentials, OWN_COURIER_ENABLED: "true", OWN_COURIER_PRICE_RUB: "0", DADATA_API_KEY: " " })).toEqual({ enabled: false });
+    expect(parseOwnCourierEnvironment({ ...credentials, OWN_COURIER_ENABLED: "true", OWN_COURIER_PRICE_RUB: "0", DADATA_SECRET_KEY: " " })).toEqual({ enabled: false });
+    expect(parseOwnCourierEnvironment({ ...credentials, OWN_COURIER_ENABLED: "true", OWN_COURIER_PRICE_RUB: "0" })).toEqual({ enabled: true, options: { token: "key", secret: "secret", priceRub: 0 } });
+    expect(parseOwnCourierEnvironment({ ...credentials, OWN_COURIER_ENABLED: "true", OWN_COURIER_PRICE_RUB: "450" })).toEqual({ enabled: true, options: { token: "key", secret: "secret", priceRub: 450 } });
+  });
+
+  it.each(["", " ", "-1", "450.123", "NaN", "Infinity"])("rejects invalid configured tariff %j", (priceRub) => {
+    expect(parseOwnCourierEnvironment({
+      OWN_COURIER_ENABLED: "true", OWN_COURIER_PRICE_RUB: priceRub,
+      DADATA_API_KEY: "key", DADATA_SECRET_KEY: "secret",
+    })).toEqual({ enabled: false });
   });
 
   it("verifies the full cart address with DaData and disregards client assertions", async () => {
@@ -50,6 +69,33 @@ describe("own courier eligibility", () => {
       body: JSON.stringify(["Россия, Внутри МКАД, ул Сухонская, д 11, кв 89"]),
       signal: expect.any(AbortSignal),
     }));
+  });
+
+  it("ends the free promotion exactly at midnight on January 1 in Moscow", async () => {
+    const request = stubClean([inside]);
+    const midnight = Date.parse("2027-01-01T00:00:00+03:00");
+    jest.spyOn(Date, "now").mockReturnValue(midnight - 1);
+    expect(await ownCourierEligibility(address, options)).toEqual({
+      eligible: true, normalizedAddress: inside.result,
+    });
+    request.mockClear();
+    jest.spyOn(Date, "now").mockReturnValue(midnight);
+    expect(await ownCourierEligibility(address, options)).toEqual({ eligible: false });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired free quote at both pricing and fulfillment validation", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(Date.parse("2027-01-01T00:00:00+03:00"));
+    const request = stubClean([inside]);
+    const service = new OwnCourierFulfillmentProviderService({}, options);
+    await expect(service.calculatePrice(option, {}, { shipping_address: address } as never))
+      .rejects.toThrow("Own courier is unavailable");
+    await expect(service.validateFulfillmentData(option, {}, { shipping_address: address } as never))
+      .rejects.toThrow("Own courier is unavailable");
+    expect(request).not.toHaveBeenCalled();
+    expect(await ownCourierEligibility(address, { ...options, priceRub: 450 })).toEqual({
+      eligible: true, normalizedAddress: inside.result,
+    });
   });
 
   it.each([
@@ -102,13 +148,25 @@ describe("own courier provider", () => {
     });
   });
 
+  it("uses the configured tariff instead of hard-coding free delivery", async () => {
+    stubClean([inside]);
+    const service = new OwnCourierFulfillmentProviderService({}, { ...options, priceRub: 450 });
+    expect(await service.calculatePrice(option, {}, { shipping_address: address } as never)).toEqual({
+      calculated_amount: 450,
+      is_calculated_price_tax_inclusive: true,
+    });
+  });
+
   it("rechecks on method validation and persists only verified operational data", async () => {
     const request = stubClean([inside]);
     const service = new OwnCourierFulfillmentProviderService({}, options);
     const data = await service.validateFulfillmentData(option, {
       beltway_hit: "IN_MKAD", verified_address: "fake", delivery_mode: "delivered",
     }, { shipping_address: address } as never);
-    expect(data).toEqual({ delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result });
+    expect(data).toEqual({
+      delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+      verified_address_key: addressKey,
+    });
     expect(request).toHaveBeenCalledTimes(1);
   });
 
@@ -123,13 +181,49 @@ describe("own courier provider", () => {
     const request = jest.fn();
     global.fetch = request;
     const result = await service.createFulfillment(
-      { delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result, courier_status: "delivered" },
-      [], undefined, { shipping_option_id: "so_own_courier_123" },
+      { delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+        verified_address_key: addressKey, courier_status: "delivered" },
+      [], { shipping_address: address }, { shipping_option_id: "so_own_courier_123" },
     );
     expect(result).toEqual({ data: {
       delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result, courier_status: "pending_assignment",
+      verified_address_key: addressKey,
     }, labels: [] });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects an old selection when the order address changed or its binding is missing", async () => {
+    const service = new OwnCourierFulfillmentProviderService({}, options);
+    const request = jest.fn();
+    global.fetch = request;
+    const data = {
+      delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+      verified_address_key: addressKey,
+    };
+    for (const shippingAddress of [
+      undefined,
+      { ...address, address_1: "Адрес за МКАД" },
+      { ...address, address_2: "кв 90" },
+    ]) {
+      await expect(service.createFulfillment(data, [], { shipping_address: shippingAddress }, {}))
+        .rejects.toThrow("Own courier is unavailable");
+    }
+    await expect(service.createFulfillment({ ...data, verified_address_key: undefined },
+      [], { shipping_address: address }, {})).rejects.toThrow("Own courier is unavailable");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("honors an already-paid unchanged delivery after the promotion ends", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(Date.parse("2027-01-01T00:00:00+03:00"));
+    const service = new OwnCourierFulfillmentProviderService({}, options);
+    global.fetch = jest.fn();
+    await expect(service.createFulfillment({
+      delivery_mode: OWN_COURIER_OPTION, verified_address: inside.result,
+      verified_address_key: addressKey,
+    }, [], { shipping_address: address }, {})).resolves.toMatchObject({
+      data: { courier_status: "pending_assignment" },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it.each([

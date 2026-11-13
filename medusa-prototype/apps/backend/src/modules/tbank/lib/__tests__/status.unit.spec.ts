@@ -5,65 +5,8 @@ import {
   parseNotification,
   statusRank,
   toSessionStatus,
-  toWebhookAction,
-  toWebhookActionAndData,
 } from "../status";
 
-describe("toWebhookAction — таблица §4.3", () => {
-  // Таблица продублирована здесь литералами намеренно. Если импортировать её
-  // из модуля, тест проверял бы сам себя: любая правка отображения поехала бы
-  // вместе с ожиданиями и осталась незамеченной.
-  it.each([
-    ["NEW", "not_supported"],
-    ["FORM_SHOWED", "not_supported"],
-    ["AUTHORIZING", "not_supported"],
-    ["3DS_CHECKING", "not_supported"],
-    ["AUTHORIZED", "authorized"],
-    ["CONFIRMED", "captured"],
-    ["REJECTED", "failed"],
-    ["DEADLINE_EXPIRED", "failed"],
-    ["CANCELED", "canceled"],
-    ["REVERSED", "canceled"],
-    ["REFUNDED", "not_supported"],
-    ["PARTIAL_REFUNDED", "not_supported"],
-  ])("%s → %s", (status, expected) => {
-    expect(toWebhookAction(status)).toBe(expected);
-  });
-
-  /**
-   * Главный тест файла. `processPaymentWorkflow` не проверяет action в
-   * последней ветке `when`: любой дошедший до воркфлоу action при связанной
-   * корзине и отсутствующем заказе завершает корзину. `pending` до воркфлоу
-   * доходит, `not_supported` — нет.
-   *
-   * Регрессия здесь проявится не как упавший тест где-то ещё, а как заказ,
-   * созданный в момент, когда покупатель только открыл платёжную форму.
-   */
-  it("нетерминальные статусы никогда не дают pending", () => {
-    for (const status of ["NEW", "FORM_SHOWED", "AUTHORIZING", "3DS_CHECKING"]) {
-      expect(toWebhookAction(status)).toBe("not_supported");
-      expect(toWebhookAction(status)).not.toBe("pending");
-    }
-  });
-
-  it("ни один статус не отображается в pending", () => {
-    for (const status of TBANK_STATUSES) {
-      expect(toWebhookAction(status)).not.toBe("pending");
-    }
-  });
-
-  it("неизвестный статус деградирует в not_supported, а не в успех", () => {
-    for (const unknown of ["", "SOMETHING_NEW", "authorized", "confirmed"]) {
-      expect(toWebhookAction(unknown)).toBe("not_supported");
-    }
-  });
-
-  it("таблица покрывает все объявленные статусы", () => {
-    for (const status of TBANK_STATUSES) {
-      expect(toWebhookAction(status)).toBeDefined();
-    }
-  });
-});
 
 describe("toSessionStatus", () => {
   it.each([
@@ -71,7 +14,7 @@ describe("toSessionStatus", () => {
     ["FORM_SHOWED", "pending_authorization"],
     ["AUTHORIZING", "pending_authorization"],
     ["3DS_CHECKING", "pending_authorization"],
-    ["AUTHORIZED", "authorized"],
+    ["AUTHORIZED", "pending_authorization"],
     ["CONFIRMED", "captured"],
     ["REJECTED", "error"],
     ["DEADLINE_EXPIRED", "error"],
@@ -200,48 +143,6 @@ describe("parseNotification", () => {
   });
 });
 
-describe("toWebhookActionAndData — §4.5", () => {
-  it("конвертирует копейки в рубли, а не отдаёт их как есть", () => {
-    const result = toWebhookActionAndData({
-      orderId: "payses_01JABCDEF",
-      paymentId: "3456789",
-      status: "CONFIRMED",
-      amountKopecks: 1899000,
-      success: true,
-    });
-
-    expect(result.action).toBe("captured");
-    expect(result.data.session_id).toBe("payses_01JABCDEF");
-    // 1 899 000 копеек = 18 990 рублей. Значение уходит в
-    // capturePaymentWorkflow как сумма списания: ошибка масштаба здесь — это
-    // списание в сто раз больше или меньше.
-    expect(result.data.amount).toBe("18990.00");
-  });
-
-  it("копейки не теряются", () => {
-    const result = toWebhookActionAndData({
-      orderId: "payses_x",
-      paymentId: "1",
-      status: "CONFIRMED",
-      amountKopecks: 1899099,
-      success: true,
-    });
-    expect(result.data.amount).toBe("18990.99");
-  });
-
-  it("session_id — это OrderId, а не PaymentId", () => {
-    // §5.3: в OrderId кладётся id платёжной сессии Medusa. Перепутать их
-    // означает искать сессию по идентификатору банка и не находить.
-    const result = toWebhookActionAndData({
-      orderId: "payses_correct",
-      paymentId: "999",
-      status: "AUTHORIZED",
-      amountKopecks: 100,
-      success: true,
-    });
-    expect(result.data.session_id).toBe("payses_correct");
-  });
-});
 
 describe("isTBankStatus", () => {
   it("отличает известные статусы от произвольных строк", () => {

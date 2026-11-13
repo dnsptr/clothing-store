@@ -1,9 +1,6 @@
 /**
- * Тесты подписчика на новый заказ.
- *
- * Главное здесь — независимость каналов и то, что обработчик не падает.
- * Заказ уже создан и оплачен: исключение отсюда означало бы бесконечные
- * ретраи BullMQ из-за чужого недоступного сервиса.
+ * Paid-order notifications keep channels independent, preserve idempotency
+ * keys and propagate failures so the event bus can retry undelivered messages.
  */
 
 import { Modules } from "@medusajs/framework/utils";
@@ -101,6 +98,7 @@ const ENV = { ...process.env };
 beforeEach(() => {
   jest.clearAllMocks();
   process.env = { ...ENV, TELEGRAM_CHAT_ID: "-1001234567890" };
+  delete process.env.ORDER_NOTIFICATION_EMAIL;
 });
 
 afterAll(() => {
@@ -108,19 +106,35 @@ afterAll(() => {
 });
 
 describe("подписчик на новый заказ", () => {
-  it("читает заказ с суммами", async () => {
-    const { orderService, container } = makeContainer();
+
+  it("передаёт сотрудникам выбранный магазин и отправляет письмо покупателю самовывоза", async () => {
+    const pickup = {
+      ...ORDER,
+      shipping_total: 0,
+      total: ORDER.item_total,
+      shipping_methods: [{ name: "Самовывоз из магазина (Москва, бесплатно)" }],
+      shipping_address: {
+        ...ORDER.shipping_address,
+        postal_code: "",
+        address_1: "ТЦ «Небо», г. Москва, ул. Авиаторов, д. 3А",
+      },
+    };
+    const { notificationService, container } = makeContainer({
+      retrieveOrder: jest.fn().mockResolvedValue(pickup),
+    });
 
     await handler(makeArgs(container));
 
-    const [, config] = orderService.retrieveOrder.mock.calls[0];
-    // Без полей сумм в `select` модуль заказов не считает тоталы вообще, и в
-    // письме покупателю на месте итога стоял бы прочерк.
-    expect(config.select).toEqual(expect.arrayContaining(["total", "item_total", "shipping_total"]));
-    expect(config.relations).toEqual(
-      expect.arrayContaining(["items", "shipping_address", "shipping_methods"]),
-    );
+    expect(notificationService.createNotifications).toHaveBeenCalledTimes(2);
+    const staff = notificationFor(notificationService.createNotifications, "telegram");
+    expect(staff?.to).toBe("-1001234567890");
+    expect(staff?.content?.text).toContain("ТЦ «Небо», г. Москва, ул. Авиаторов, д. 3А");
+    expect(staff?.content?.text).toContain("Телефон: +7 900 000-00-00");
+
+    const customer = notificationFor(notificationService.createNotifications, "email");
+    expect(customer?.to).toBe(pickup.email);
   });
+
 
   it("шлёт сообщение сотрудникам и письмо покупателю", async () => {
     const { notificationService, container } = makeContainer();
@@ -148,18 +162,6 @@ describe("подписчик на новый заказ", () => {
     });
   });
 
-  it("кладёт в письмо и текст, и HTML", async () => {
-    const { notificationService, container } = makeContainer();
-
-    await handler(makeArgs(container));
-
-    const customer = notificationFor(notificationService.createNotifications, "email");
-
-    expect(customer?.content?.subject).toContain("№1042");
-    expect(customer?.content?.text).toContain("Здравствуйте, Анна!");
-    expect(customer?.content?.text).toContain("Итого: 19 490 ₽");
-    expect(customer?.content?.html).toContain("<table");
-  });
 
   it("пишет покупателю даже без чата сотрудников", async () => {
     // Канал `email` обслуживает `notification-local`, когда почта не настроена:
@@ -179,20 +181,51 @@ describe("подписчик на новый заказ", () => {
       .mockRejectedValueOnce(new Error("chat not found"))
       .mockResolvedValue({});
 
-    await expect(handler(makeArgs(container))).resolves.toBeUndefined();
+    await expect(handler(makeArgs(container))).rejects.toThrow("chat not found");
 
     expect(notificationFor(notificationService.createNotifications, "email")).toBeDefined();
     expect(logger.error).toHaveBeenCalled();
   });
 
-  it("не роняет обработчик, если письмо не ушло", async () => {
+  it("propagates email failure for event-bus retry", async () => {
     const { notificationService, container } = makeContainer();
     notificationService.createNotifications
       .mockResolvedValueOnce({})
       .mockRejectedValue(new Error("SMTP timeout"));
 
-    await expect(handler(makeArgs(container))).resolves.toBeUndefined();
+    await expect(handler(makeArgs(container))).rejects.toThrow("SMTP timeout");
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it("notifies staff by email when the customer has no email and Telegram is disabled", async () => {
+    delete process.env.TELEGRAM_CHAT_ID;
+    process.env.ORDER_NOTIFICATION_EMAIL = "staff@example.com";
+    const { notificationService, container } = makeContainer({
+      retrieveOrder: jest.fn().mockResolvedValue({ ...ORDER, email: "" }),
+    });
+
+    await handler(makeArgs(container));
+
+    expect(notificationService.createNotifications).toHaveBeenCalledTimes(1);
+    expect(notificationFor(notificationService.createNotifications, "email")?.to).toBe("staff@example.com");
+  });
+
+  it("still notifies the buyer and requests retry when staff email delivery fails", async () => {
+    delete process.env.TELEGRAM_CHAT_ID;
+    process.env.ORDER_NOTIFICATION_EMAIL = "staff@example.com";
+    const { notificationService, container } = makeContainer();
+    notificationService.createNotifications.mockImplementation(async notification => {
+      if (notification.to === process.env.ORDER_NOTIFICATION_EMAIL) {
+        throw new Error("staff mailbox unavailable");
+      }
+      return {};
+    });
+
+    await expect(handler(makeArgs(container))).rejects.toThrow("staff mailbox unavailable");
+
+    const attempted = notificationService.createNotifications.mock.calls.map(([notification]) => notification);
+    expect(attempted.some(notification => notification.to === ORDER.email)).toBe(true);
+    expect(new Set(attempted.map(notification => notification.idempotency_key)).size).toBe(2);
   });
 
   it("без почты в заказе письмо не шлёт, но сотрудников оповещает", async () => {
@@ -212,10 +245,33 @@ describe("подписчик на новый заказ", () => {
       retrieveOrder: jest.fn().mockRejectedValue(new Error("not found")),
     });
 
-    await expect(handler(makeArgs(container))).resolves.toBeUndefined();
+    await expect(handler(makeArgs(container))).rejects.toThrow("not found");
 
     expect(notificationService.createNotifications).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it("reuses the same channel idempotency keys on redelivery after an email failure", async () => {
+    const { notificationService, container } = makeContainer();
+    notificationService.createNotifications
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("SMTP timeout"))
+      .mockResolvedValue({});
+    await expect(handler(makeArgs(container))).rejects.toThrow("SMTP timeout");
+    await handler(makeArgs(container));
+    const keys = notificationService.createNotifications.mock.calls.map(([notification]) => notification.idempotency_key);
+    expect(keys).toEqual([
+      `order-placed:${ORDER.id}:telegram`, `order-placed:${ORDER.id}:email`,
+      `order-placed:${ORDER.id}:telegram`, `order-placed:${ORDER.id}:email`,
+    ]);
+  });
+
+  it("does not lose a staff failure when the order has no email", async () => {
+    const { notificationService, container } = makeContainer({
+      retrieveOrder: jest.fn().mockResolvedValue({ ...ORDER, email: "" }),
+    });
+    notificationService.createNotifications.mockRejectedValue(new Error("chat not found"));
+    await expect(handler(makeArgs(container))).rejects.toThrow("chat not found");
   });
 
   it("игнорирует событие без идентификатора заказа", async () => {

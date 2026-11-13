@@ -9,7 +9,7 @@ const VALID_YANDEX_ENVIRONMENT = {
   YANDEX_DELIVERY_ENABLED: "true",
   YANDEX_DELIVERY_TOKEN: "yandex_oauth_test_token",
   YANDEX_DELIVERY_API_BASE_URL: "https://b2b-authproxy.taxi.yandex.net/api/b2b/platform",
-  YANDEX_DELIVERY_SOURCE_STATION_ID: "station_mario_mikke_test",
+  YANDEX_DELIVERY_PVZ_PRICE_RUB: "450",
 } as const;
 
 describe("parseYandexDeliveryEnvironment", () => {
@@ -31,16 +31,33 @@ describe("parseYandexDeliveryEnvironment", () => {
       options: {
         token: "yandex_oauth_test_token",
         apiBaseUrl: "https://b2b-authproxy.taxi.yandex.net/api/b2b/platform",
-        sourceStationId: "station_mario_mikke_test",
+        pvzPriceRub: 450,
       },
     });
   });
 
-  it.each(["", "  "])("rejects a missing or unconfirmed origin station ID (%s)", (sourceStationId) => {
-    expect(() => parseYandexDeliveryEnvironment({
+  it("parses a buyer price in rubles without losing kopecks", () => {
+    const config = parseYandexDeliveryEnvironment({
       ...VALID_YANDEX_ENVIRONMENT,
-      YANDEX_DELIVERY_SOURCE_STATION_ID: sourceStationId,
-    })).toThrow(YandexDeliveryConfigurationError);
+      YANDEX_DELIVERY_PVZ_PRICE_RUB: "450.25",
+    });
+    expect(config.enabled && config.options.pvzPriceRub).toBe(450.25);
+  });
+
+  it.each([undefined, "", "0", "-1", "free", "Infinity", "450.001"])(
+    "rejects an unapproved or invalid buyer price (%s)",
+    (price) => {
+      expect(() => parseYandexDeliveryEnvironment({
+        ...VALID_YANDEX_ENVIRONMENT,
+        YANDEX_DELIVERY_PVZ_PRICE_RUB: price,
+      })).toThrow(YandexDeliveryConfigurationError);
+    },
+  );
+
+  it("does not require a global source station in provider configuration", () => {
+    const config = parseYandexDeliveryEnvironment(VALID_YANDEX_ENVIRONMENT);
+    expect(config.enabled).toBe(true);
+    expect(config.enabled && config.options).not.toHaveProperty("sourceStationId");
   });
 
   it("uses the official production API by default", () => {

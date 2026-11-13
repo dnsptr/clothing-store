@@ -149,6 +149,16 @@ describe("T-Bank authenticated webhook inbox", () => {
     expect(response.body).toBe("OK");
   });
 
+  it.each(["CANCELED", "REJECTED"])("persists omitted Amount for %s without inventing bank evidence", async (status) => {
+    const notifications = makeNotifications();
+    const response = makeRes();
+    await POST(makeReq(signed({ Status: status, Success: false, Amount: undefined }), notifications, makePayment()), response as never);
+    expect(notifications.createTbankNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      status, amount_kopecks: 0, amount_provided: false,
+    }));
+    expect(response.body).toBe("OK");
+  });
+
   it("retains a signed callback awaiting correlation when its session is missing", async () => {
     const notifications = makeNotifications();
     const payment = makePayment({ retrievePaymentSession: jest.fn().mockRejectedValue(new Error("not found")) });

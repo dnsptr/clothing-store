@@ -2,23 +2,25 @@ import { randomUUID } from "crypto";
 import { Modules } from "@medusajs/framework/utils";
 
 import { TBANK_NOTIFICATION_MODULE } from "../../tbank-notifications";
+import { CHECKOUT_HOLD_MODULE, type PaymentCheckoutHolds } from "../../checkout-holds/contracts";
 import { parseTbankEnvironment } from "../config";
 import { TBankClient } from "../lib/client";
 import {
+  inspectAttemptManualReview,
   inspectManualReview,
   resolveManualReview,
   retryManualReview,
+  transitionAttemptManualReview,
+  type AttemptManualReviewDetails,
   type OperatorAction,
 } from "./manual-review-operations";
-import { reconcilePaymentAttempt } from "./reconcile-payment-attempt";
 import { reconcileNotification } from "./reconcile-notification";
+import { reconcileMissingWebhook, type PollResult } from "./reconciliation-missing-webhook";
 import {
   parseNotificationRow,
   type DurableLinkageChecker,
   type ManualReviewDetails,
   type PaymentReconcilerDependencies,
-  type PollMissingNotificationsResult,
-  type PollPaymentAttemptResult,
   type ProcessBatchResult,
   type ProcessNotificationResult,
   type PaidOrderEvents,
@@ -32,8 +34,6 @@ import { LeaseController, StaleLeaseError } from "./reconciliation-lease";
 export type {
   DurableLinkageChecker,
   ManualReviewDetails,
-  PollMissingNotificationsResult,
-  PollPaymentAttemptResult,
   PaymentReconcilerDependencies,
   ProcessBatchResult,
   ProcessNotificationResult,
@@ -65,6 +65,7 @@ export class PaymentReconcilerService {
     const query = dependencies.query ??
       container?.resolve<QueryService>("query", { allowUnregistered: true });
     const events = dependencies.events ?? container?.resolve<PaidOrderEvents>("event_bus");
+    const holds = dependencies.holds ?? container?.resolve<PaymentCheckoutHolds>(CHECKOUT_HOLD_MODULE);
     if (!logger) throw new PaymentReconcilerConfigurationError("logger");
     if (!notifications) throw new PaymentReconcilerConfigurationError("TbankNotificationModuleService");
     if (!payment) throw new PaymentReconcilerConfigurationError("PaymentModuleService");
@@ -80,6 +81,7 @@ export class PaymentReconcilerService {
       ...(dependencies.durableLinkageChecker ? { linkageChecker: dependencies.durableLinkageChecker } : {}),
       ...(events ? { events } : {}),
       ...(query ? { query } : {}),
+      ...(holds ? { holds } : {}),
       ...(container ? { container } : {}),
     };
   }
@@ -162,52 +164,62 @@ export class PaymentReconcilerService {
     return { claimed: rows.length, results };
   }
 
-  async pollMissingNotifications(limit = 10): Promise<PollMissingNotificationsResult> {
-    const config = parseTbankEnvironment(process.env);
-    if (!config.enabled) return { claimed: 0, expired: 0, results: [], skipped: "tbank_disabled" };
+  async processMissingWebhookBatch(limit = 5): Promise<{ readonly claimed: number; readonly results: readonly PollResult[] }> {
     const services = this.forReconciliation();
+    if (!services.bank) return { claimed: 0, results: [] };
+    // A distributed lock is mandatory: webhook and poll workers may run in
+    // separate processes, and both must enter the same per-payment critical section.
+    if (!this.locking?.execute) throw new PaymentReconcilerConfigurationError("distributed payment locking");
+    if (!services.events || (!services.workflow && !services.container) ||
+        (!services.query && !services.linkageChecker)) {
+      throw new PaymentReconcilerConfigurationError("order/payment workflow, linkage and paid-order events");
+    }
+    const store = services.notifications;
+    if (!store.claimDuePaymentAttempts || !store.renewPaymentAttemptPoll ||
+        !store.observePaymentAttemptPoll || !store.finishPaymentAttemptPoll ||
+        !store.listTbankNotifications) {
+      throw new PaymentReconcilerConfigurationError("durable attempt polling store");
+    }
     const leaseToken = randomUUID();
-    const now = new Date();
-    const expired = await this.services.notifications.expireStalePaymentAttemptPolls({
-      now,
-      terminalKey: config.options.terminalKey,
-    });
-    let expiredCount = 0;
-    for (const attempt of expired) {
-      if (attempt.poll_state === "manual_review") {
-        expiredCount++;
-        this.services.logger.error(`tbank.manual_review: payment attempt ${attempt.id}: polling expired after 24 hours`);
-      }
+    const attempts = await store.claimDuePaymentAttempts({ limit, leaseToken, now: new Date() });
+    const results: PollResult[] = [];
+    for (const attempt of attempts) {
+      // The session's paymentId is not stored in the attempt (pre-Init insert).
+      // Serialize by session until it has passed correlation; the webhook uses
+      // the bank paymentId, so the workflow key also fences any late webhook.
+      const session = await services.payment.retrievePaymentSession(attempt.payment_session_id).catch(() => null);
+      const paymentId = session?.data?.["paymentId"];
+      const key = typeof paymentId === "string" && paymentId.length > 0 ? paymentId : attempt.id;
+      results.push(await this.withPaymentLock(key, () =>
+        reconcileMissingWebhook(services, attempt, leaseToken,
+          typeof paymentId === "string" && paymentId.length > 0 ? paymentId : undefined)));
     }
-    const rows = await this.services.notifications.claimDuePaymentAttempts({
-      limit,
-      leaseToken,
-      now,
-      terminalKey: config.options.terminalKey,
-    });
-    const results: PollPaymentAttemptResult[] = [];
-    for (const row of rows) {
-      results.push(await reconcilePaymentAttempt(
-        services,
-        row,
-        leaseToken,
-        (paymentId, operation) => this.withPaymentLock(paymentId, operation),
-      ));
-    }
-    return { claimed: rows.length, expired: expiredCount, results };
+    return { claimed: attempts.length, results };
   }
 
   inspectManualReview(id: string): Promise<ManualReviewDetails> {
     return inspectManualReview(this.services.notifications, this.services.payment, id);
   }
 
+  inspectAttemptManualReview(id: string): Promise<AttemptManualReviewDetails> {
+    return inspectAttemptManualReview(this.services.notifications, this.services.payment, id);
+  }
+
   async retryManualReview(id: string, action: OperatorAction): Promise<void> {
-    await retryManualReview(this.services.notifications, id, action);
+    if (id.startsWith("tbatt_")) {
+      await transitionAttemptManualReview(this.services.notifications, id, action, "pending");
+    } else {
+      await retryManualReview(this.services.notifications, id, action);
+    }
     this.services.logger.info(`tbank.manual_review.retry: ${id}: ${action.operatorId}: ${action.reason}`);
   }
 
   async resolveManualReview(id: string, action: OperatorAction): Promise<void> {
-    await resolveManualReview(this.services.notifications, id, action);
+    if (id.startsWith("tbatt_")) {
+      await transitionAttemptManualReview(this.services.notifications, id, action, "completed");
+    } else {
+      await resolveManualReview(this.services.notifications, id, action);
+    }
     this.services.logger.info(`tbank.manual_review.resolve: ${id}: ${action.operatorId}: ${action.reason}`);
   }
 }

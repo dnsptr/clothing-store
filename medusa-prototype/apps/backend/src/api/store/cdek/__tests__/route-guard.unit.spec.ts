@@ -48,6 +48,8 @@ describe("CDEK public request guard", () => {
       CDEK_CLIENT_SECRET: "route-guard-secret",
       CDEK_API_BASE_URL: "https://api.edu.cdek.ru/v2",
       CDEK_FROM_CITY_CODE: "44",
+      CDEK_PVZ_PRICE_RUB: "350",
+      CDEK_COURIER_PRICE_RUB: "650",
     };
   });
 

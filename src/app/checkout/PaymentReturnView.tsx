@@ -78,7 +78,7 @@ function contentFor(state: PaymentReturnState): ReactNode {
           <ReturnIcon kind="success" />
           <h2 className={styles.returnTitle}>Оплата прошла успешно! Заказ оформлен.</h2>
           <p className={styles.returnText}>
-            Спасибо за покупку! Детали вашего заказа и электронный чек отправлены на вашу почту.
+            Спасибо за покупку! Мы приступим к сборке заказа.
           </p>
           <ReturnActions>
             <Link href="/catalog" className={styles.submitBtn}>Продолжить покупки</Link>

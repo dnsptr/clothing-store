@@ -7,13 +7,12 @@ import TbankPaymentAttempt from "./models/tbank-payment-attempt";
 import TbankNotification from "./models/tbank-notification";
 import TbankNotificationConflict from "./models/tbank-notification-conflict";
 
-const POLL_LEASE_MS = 5 * 60_000;
-const MAX_POLL_ERRORS = 5;
-const POLL_AGE_HOURS = 24;
-
-type PollClaimInput = ClaimInput & { readonly terminalKey: string };
-type PollExpirationInput = { readonly now: Date; readonly terminalKey: string };
-export type PaymentAttemptPollRow = {
+type ClaimInput = { readonly limit: number; readonly leaseToken: string; readonly now: Date };
+type LeaseInput = { readonly id: string; readonly leaseToken: string; readonly now: Date };
+type ConflictInput = LeaseInput & { readonly reason: string };
+type TransitionInput = { readonly now: Date };
+export type InboxRow = { readonly id: string; readonly lifecycle_state: string; readonly attempt_count: number };
+export type PollAttemptRow = {
   readonly id: string;
   readonly payment_session_id: string;
   readonly provider_id: string;
@@ -21,15 +20,11 @@ export type PaymentAttemptPollRow = {
   readonly order_id: string;
   readonly expected_amount_kopecks: number;
   readonly currency_code: string;
-  readonly poll_state: "pending" | "leased" | "complete" | "manual_review";
-  readonly poll_consecutive_errors: number;
-  readonly poll_next_at: Date | null;
+  readonly poll_count: number;
+  readonly poll_payment_id?: string | null;
 };
-type ClaimInput = { readonly limit: number; readonly leaseToken: string; readonly now: Date };
-type LeaseInput = { readonly id: string; readonly leaseToken: string; readonly now: Date };
-type ConflictInput = LeaseInput & { readonly reason: string };
-type TransitionInput = { readonly now: Date };
-export type InboxRow = { readonly id: string; readonly lifecycle_state: string; readonly attempt_count: number };
+type PollInput = LeaseInput & { readonly reason?: string };
+
 
 type OperatorActionInput = {
   readonly id: string;
@@ -57,175 +52,6 @@ class TbankNotificationModuleService extends MedusaService({
   TbankNotification,
   TbankNotificationConflict,
 }) {
-  @InjectManager()
-  async claimDuePaymentAttempts(
-    input: PollClaimInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
-      throw new InboxClaimLimitError(input.limit);
-    }
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `WITH claimable AS (
-         SELECT attempt.id FROM tbank_payment_attempt AS attempt
-         WHERE attempt.terminal_key = ? AND attempt.deleted_at IS NULL
-           AND attempt.created_at <= CAST(? AS timestamptz) - INTERVAL '2 minutes'
-           AND attempt.created_at > CAST(? AS timestamptz) - INTERVAL '${POLL_AGE_HOURS} hours'
-           AND ((attempt.poll_state = 'pending'
-                AND (attempt.poll_next_at IS NULL OR attempt.poll_next_at <= ?))
-             OR (attempt.poll_state = 'leased' AND attempt.poll_lease_expires_at <= ?))
-           AND EXISTS (
-             SELECT 1 FROM payment_session AS session
-             WHERE session.id = attempt.payment_session_id AND session.deleted_at IS NULL
-               AND NULLIF(btrim(session.data->>'paymentId'), '') IS NOT NULL
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM tbank_notification AS inbox
-             WHERE inbox.order_id = attempt.order_id AND inbox.terminal_key = attempt.terminal_key
-               AND inbox.status = 'CONFIRMED' AND inbox.success = true
-               AND inbox.lifecycle_state = 'processed' AND inbox.deleted_at IS NULL
-           )
-         ORDER BY attempt.created_at, attempt.id LIMIT ?
-         FOR UPDATE OF attempt SKIP LOCKED
-       )
-       UPDATE tbank_payment_attempt AS attempt
-       SET poll_state = 'leased', poll_lease_token = ?, poll_lease_expires_at = ?,
-           updated_at = ?
-       FROM claimable WHERE attempt.id = claimable.id
-       RETURNING attempt.*`,
-      [input.terminalKey, input.now, input.now, input.now, input.now, input.limit,
-        input.leaseToken, new Date(input.now.getTime() + POLL_LEASE_MS), input.now],
-    );
-  }
-
-  @InjectManager()
-  async renewPaymentAttemptPollLease(
-    input: LeaseInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `UPDATE tbank_payment_attempt SET poll_lease_expires_at = ?, updated_at = ?
-       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
-         AND poll_lease_expires_at > ? AND deleted_at IS NULL RETURNING *`,
-      [new Date(input.now.getTime() + POLL_LEASE_MS), input.now,
-        input.id, input.leaseToken, input.now],
-    );
-  }
-
-  @InjectManager()
-  async completePaymentAttemptPoll(
-    input: LeaseInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `UPDATE tbank_payment_attempt SET poll_state = 'complete', poll_next_at = NULL,
-         poll_lease_token = NULL, poll_lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
-         AND poll_lease_expires_at > ? AND deleted_at IS NULL RETURNING *`,
-      [input.now, input.id, input.leaseToken, input.now],
-    );
-  }
-
-  @InjectManager()
-  async deferPaymentAttemptPoll(
-    input: LeaseInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `UPDATE tbank_payment_attempt SET poll_state = 'pending',
-         poll_next_at = CAST(? AS timestamptz) + INTERVAL '5 minutes',
-         poll_consecutive_errors = 0,
-         poll_lease_token = NULL, poll_lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
-         AND poll_lease_expires_at > ? AND deleted_at IS NULL RETURNING *`,
-      [input.now, input.now, input.id, input.leaseToken, input.now],
-    );
-  }
-
-  @InjectManager()
-  async failPaymentAttemptPoll(
-    input: LeaseInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `UPDATE tbank_payment_attempt
-       SET poll_state = CASE WHEN poll_consecutive_errors + 1 >= ${MAX_POLL_ERRORS}
-           THEN 'manual_review' ELSE 'pending' END,
-         poll_next_at = CAST(? AS timestamptz) + CASE poll_consecutive_errors
-           WHEN 0 THEN INTERVAL '1 minute' WHEN 1 THEN INTERVAL '5 minutes'
-           WHEN 2 THEN INTERVAL '30 minutes' WHEN 3 THEN INTERVAL '2 hours'
-           ELSE INTERVAL '12 hours' END,
-         poll_manual_review_at = CASE WHEN poll_consecutive_errors + 1 >= ${MAX_POLL_ERRORS}
-           THEN CAST(? AS timestamptz) ELSE NULL END,
-         poll_consecutive_errors = poll_consecutive_errors + 1,
-         poll_lease_token = NULL, poll_lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
-         AND poll_lease_expires_at > ? AND deleted_at IS NULL RETURNING *`,
-      [input.now, input.now, input.now, input.id, input.leaseToken, input.now],
-    );
-  }
-
-  @InjectManager()
-  async quarantinePaymentAttemptPoll(
-    input: LeaseInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `UPDATE tbank_payment_attempt
-       SET poll_state = 'manual_review', poll_manual_review_at = ?,
-         poll_next_at = NULL, poll_lease_token = NULL, poll_lease_expires_at = NULL,
-         updated_at = ?
-       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
-         AND poll_lease_expires_at > ? AND deleted_at IS NULL RETURNING *`,
-      [input.now, input.now, input.id, input.leaseToken, input.now],
-    );
-  }
-
-  @InjectManager()
-  async expireStalePaymentAttemptPolls(
-    input: PollExpirationInput,
-    @MedusaContext() context: Context<EntityManager> = {},
-  ): Promise<readonly PaymentAttemptPollRow[]> {
-    if (!context.manager) throw new InboxPersistenceError();
-    return context.manager.execute<PaymentAttemptPollRow[]>(
-      `WITH stale AS (
-         SELECT attempt.id,
-           EXISTS (
-             SELECT 1 FROM tbank_notification AS inbox
-             WHERE inbox.order_id = attempt.order_id AND inbox.terminal_key = attempt.terminal_key
-               AND ((inbox.status = 'CONFIRMED' AND inbox.success = true)
-                 OR (inbox.status IN ('REJECTED', 'DEADLINE_EXPIRED', 'CANCELED', 'REVERSED')
-                   AND inbox.success = false AND EXISTS (
-                     SELECT 1 FROM payment_session AS session
-                     WHERE session.id = attempt.payment_session_id AND session.deleted_at IS NULL
-                       AND session.status IN ('error', 'canceled')
-                       AND session.data->>'status' = inbox.status
-                   )))
-               AND inbox.lifecycle_state = 'processed' AND inbox.deleted_at IS NULL
-           ) AS already_finished
-         FROM tbank_payment_attempt AS attempt
-         WHERE attempt.terminal_key = ? AND attempt.deleted_at IS NULL
-           AND attempt.created_at <= CAST(? AS timestamptz) - INTERVAL '${POLL_AGE_HOURS} hours'
-           AND (attempt.poll_state = 'pending'
-             OR (attempt.poll_state = 'leased' AND attempt.poll_lease_expires_at <= ?))
-         ORDER BY attempt.created_at, attempt.id LIMIT 100
-         FOR UPDATE OF attempt SKIP LOCKED
-       )
-       UPDATE tbank_payment_attempt AS attempt
-       SET poll_state = CASE WHEN stale.already_finished THEN 'complete' ELSE 'manual_review' END,
-           poll_manual_review_at = CASE WHEN stale.already_finished THEN NULL ELSE CAST(? AS timestamptz) END,
-           poll_next_at = NULL, poll_lease_token = NULL, poll_lease_expires_at = NULL,
-           updated_at = ?
-       FROM stale WHERE attempt.id = stale.id RETURNING attempt.*`,
-      [input.terminalKey, input.now, input.now, input.now, input.now],
-    );
-  }
 
   @InjectManager()
   async quarantineExpiredExhausted(
@@ -435,6 +261,142 @@ class TbankNotificationModuleService extends MedusaService({
         input.now,
         input.now,
       ],
+    );
+  }
+  @InjectManager()
+  async claimDuePaymentAttempts(
+    input: ClaimInput,
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly PollAttemptRow[]> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new InboxClaimLimitError(input.limit);
+    }
+    if (!context.manager) throw new InboxPersistenceError();
+    await context.manager.execute(
+      `WITH expired AS (
+         SELECT id FROM tbank_payment_attempt
+         WHERE poll_state = 'leased' AND poll_lease_expires_at <= ?
+           AND poll_count >= ${MAX_INBOX_ATTEMPTS} AND deleted_at IS NULL
+         ORDER BY poll_lease_expires_at FOR UPDATE SKIP LOCKED LIMIT 100
+       )
+       UPDATE tbank_payment_attempt AS a
+       SET poll_state = 'manual_review', poll_manual_review_at = ?,
+           poll_error = 'Polling lease expired after maximum attempts',
+           poll_lease_token = NULL, poll_lease_expires_at = NULL, updated_at = ?
+       FROM expired WHERE a.id = expired.id`,
+      [input.now, input.now, input.now],
+    );
+    return context.manager.execute<PollAttemptRow[]>(
+      `WITH due AS (
+         SELECT a.id FROM tbank_payment_attempt a
+         WHERE a.created_at <= ? AND a.deleted_at IS NULL AND a.poll_count < ${MAX_INBOX_ATTEMPTS}
+           AND ((a.poll_state = 'pending' AND (a.poll_next_at IS NULL OR a.poll_next_at <= ?))
+             OR (a.poll_state = 'leased' AND a.poll_lease_expires_at <= ?))
+           AND NOT EXISTS (
+             SELECT 1 FROM tbank_notification n WHERE n.deleted_at IS NULL
+               AND n.terminal_key = a.terminal_key AND n.order_id = a.order_id
+               AND n.status = 'CONFIRMED'
+           )
+         ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT ?
+       ) UPDATE tbank_payment_attempt AS a
+         SET poll_state = 'leased', poll_lease_token = ?, poll_lease_expires_at = ?,
+             poll_count = poll_count + 1, updated_at = ?
+         FROM due WHERE a.id = due.id RETURNING a.*`,
+      [new Date(input.now.getTime() - 15 * 60_000), input.now, input.now, input.limit,
+        input.leaseToken, new Date(input.now.getTime() + INBOX_LEASE_MS), input.now],
+    );
+  }
+
+  @InjectManager()
+  async renewPaymentAttemptPoll(
+    input: LeaseInput,
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly PollAttemptRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<PollAttemptRow[]>(
+      `UPDATE tbank_payment_attempt SET poll_lease_expires_at = ?, updated_at = ?
+       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
+         AND poll_lease_expires_at > ? RETURNING *`,
+      [new Date(input.now.getTime() + INBOX_LEASE_MS), input.now, input.id, input.leaseToken, input.now],
+    );
+  }
+
+  @InjectManager()
+  async observePaymentAttemptPoll(
+    input: LeaseInput & { readonly paymentId: string; readonly status: string },
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly PollAttemptRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<PollAttemptRow[]>(
+      `UPDATE tbank_payment_attempt SET poll_checked_at = ?, poll_bank_status = ?,
+         poll_payment_id = COALESCE(poll_payment_id, ?),
+         poll_confirmed_at = CASE WHEN ? = 'CONFIRMED' THEN COALESCE(poll_confirmed_at, ?) ELSE poll_confirmed_at END,
+         updated_at = ?
+       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
+         AND poll_lease_expires_at > ? AND (poll_payment_id IS NULL OR poll_payment_id = ?) RETURNING *`,
+      [input.now, input.status, input.paymentId, input.status, input.now, input.now,
+        input.id, input.leaseToken, input.now, input.paymentId],
+    );
+  }
+
+  @InjectManager()
+  async finishPaymentAttemptPoll(
+    input: PollInput & { readonly outcome: "completed" | "manual_review" | "retry" },
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly PollAttemptRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<PollAttemptRow[]>(
+      `UPDATE tbank_payment_attempt
+       SET poll_state = CASE WHEN ? = 'retry'
+           THEN CASE WHEN poll_count >= ${MAX_INBOX_ATTEMPTS} THEN 'manual_review' ELSE 'pending' END
+           ELSE ? END,
+         poll_next_at = CASE WHEN ? = 'retry' AND poll_count < ${MAX_INBOX_ATTEMPTS}
+           THEN CAST(? AS timestamptz) + CASE poll_count
+             WHEN 1 THEN INTERVAL '1 minute' WHEN 2 THEN INTERVAL '5 minutes'
+             WHEN 3 THEN INTERVAL '30 minutes' ELSE INTERVAL '2 hours' END
+           ELSE NULL END,
+         poll_manual_review_at = CASE WHEN ? = 'manual_review'
+             OR (? = 'retry' AND poll_count >= ${MAX_INBOX_ATTEMPTS}) THEN CAST(? AS timestamptz) ELSE NULL END,
+         poll_completed_at = CASE WHEN ? = 'completed' THEN ? ELSE poll_completed_at END,
+         poll_error = ?, poll_lease_token = NULL, poll_lease_expires_at = NULL, updated_at = ?
+       WHERE id = ? AND poll_state = 'leased' AND poll_lease_token = ?
+         AND poll_lease_expires_at > ? RETURNING *`,
+      [input.outcome, input.outcome, input.outcome, input.now,
+        input.outcome, input.outcome, input.now, input.outcome, input.now,
+        input.reason ?? null, input.now, input.id, input.leaseToken, input.now],
+    );
+  }
+  @InjectManager()
+  async transitionPollManualReview(
+    input: { readonly id: string; readonly now: Date; readonly operatorId: string; readonly reason: string; readonly outcome: "pending" | "completed" },
+    @MedusaContext() context: Context<EntityManager> = {},
+  ): Promise<readonly PollAttemptRow[]> {
+    if (!context.manager) throw new InboxPersistenceError();
+    return context.manager.execute<PollAttemptRow[]>(
+      `WITH updated AS (
+         UPDATE tbank_payment_attempt
+         SET poll_state = ?, poll_count = CASE WHEN ? = 'pending' THEN 0 ELSE poll_count END,
+             poll_next_at = CASE WHEN ? = 'pending' THEN CAST(? AS timestamptz) ELSE NULL END,
+             poll_completed_at = CASE WHEN ? = 'completed' THEN CAST(? AS timestamptz) ELSE poll_completed_at END,
+             poll_manual_review_at = NULL, poll_lease_token = NULL, poll_lease_expires_at = NULL,
+             updated_at = ?
+         WHERE id = ? AND poll_state = 'manual_review' AND deleted_at IS NULL RETURNING *
+       ), audit AS (
+         INSERT INTO tbank_notification_conflict
+           (id, canonical_notification_id, terminal_key, payment_id, status,
+            canonical_payload_hash, conflicting_payload_hash, conflict_kind,
+            correlation_failures, lifecycle_state, created_at, updated_at)
+         SELECT 'tbconf_' || substr(md5(random()::text), 1, 16),
+           NULL, terminal_key, COALESCE(poll_payment_id, 'attempt:' || id),
+           COALESCE(poll_bank_status, 'UNKNOWN'), NULL, repeat('0', 64),
+           ?, jsonb_build_object('attemptId', id, 'operatorId', CAST(? AS text), 'reason', CAST(? AS text),
+             'previousError', poll_error)::text, 'manual_review', ?, ?
+         FROM updated RETURNING id
+       ) SELECT updated.* FROM updated INNER JOIN audit ON true`,
+      [input.outcome, input.outcome, input.outcome, input.now,
+        input.outcome, input.now, input.now, input.id,
+        input.outcome === "pending" ? "operator_poll_retry" : "operator_poll_resolve",
+        input.operatorId, input.reason, input.now, input.now],
     );
   }
 }
