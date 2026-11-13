@@ -1352,3 +1352,72 @@ isolated browser profile and dedicated BuildKit container/cache were removed.
 The review stack, its private configuration, image, source archive, CA,
 credentials and SSH tunnel remain for review. Review-only carts/account exist
 only in the clone. This is not a fresh stopped-writer production rollback point.
+
+## Working terminal and Mail.ru preparation — 13 November 2026
+
+The received non-DEMO terminal passed the existing signed read-only `CheckOrder`
+diagnostic with expected missing-order code 335. This does not prove that the
+bank has activated the terminal, configured the correct merchant/KKT, or issued
+a fiscal receipt. Never manufacture a signed CONFIRMED event on production
+as a connectivity probe.
+
+The actual running production image is now
+`sha256:09c04583d02371ce16f4fda210ffbd730bdf119b7fe87fcd3a095a5fa8557c50`,
+not the earlier rehearsal's production image. Read-only runtime inspection
+found Node 22.14.0, DEMO credentials and no SMTP/Telegram configuration.
+Health returned 200; an unsigned empty JSON POST to
+`https://api.mariomikke.shop/hooks/payment/tbank` returned 401 `invalid token`.
+No signed production notification, payment, refund or customer email was sent.
+
+Three private files are staged under `/opt/mario-releases/20261113-payment-mail`
+(directory 0700, files 0600), with local copies in the private review directory:
+
+- `tbank-live.env`: private working credentials and public success/fail/webhook
+  URLs, not a runnable runtime profile. Do not source it into a running service.
+- `mailru.env`: `SMTP_HOST=smtp.mail.ru`, `SMTP_PORT=465`, `SMTP_SECURE=true`,
+  mailbox-aligned `SMTP_USER`/`SMTP_FROM`, and `ORDER_NOTIFICATION_EMAIL`.
+  The application password is absent; do not invent or reuse the bank password.
+- `runtime-disabled.env`: all external-provider enable flags false and all eight
+  T-Bank payment variables explicitly empty. This is the valid closed override.
+
+These files are not complete replacement runtime env files. The parser rejects
+non-empty T-Bank payment variables when `TBANK_ENABLED` is false: simply adding
+false to a credential file is invalid, not a safe runnable disabled profile.
+Use the separate empty-valued closed override for builds/review. Only at an
+approved activation merge working credentials into the existing complete bank
+configuration. Do not overwrite production database/JWT/cookie/MFA secrets.
+Keep `TBANK_RECEIPT_SNAPSHOT_SECRET` independent and stable; legacy local env
+files that enable T-Bank without it correctly fail configuration validation.
+Do not weaken the parser or delete customer-owned env files to pass a build.
+
+The SMTP endpoint was reachable from the production host with verified TLS 1.2
+and greeting 220, without AUTH or MAIL FROM. Real SMTP authentication and mailbox
+delivery require an application password with Mail.ru's send-only scope:
+https://help.mail.ru/mail/login/mailer/.
+Mail.ru manages DNS authentication for its own `mail.ru` domain; do not ask the
+owner to publish SPF/DKIM records for a domain they do not control.
+
+The release subscriber now independently notifies `ORDER_NOTIFICATION_EMAIL`
+after `tbank.order.paid`, in addition to optional Telegram and the buyer email.
+The staff message uses `buildNewOrderMessage`, including items, buyer contact,
+total and selected delivery/pickup address. Its key is
+`order-placed:<orderId>:staff-email`; the existing buyer key remains
+`order-placed:<orderId>:email`. Do not reuse one key for both recipients.
+Failure of staff delivery does not prevent attempting the buyer and is propagated
+for the existing event-bus retry. Missing buyer email does not suppress staff mail.
+This is a paid-order message, not a technical-alert or shipping-status system.
+
+Before/after runtime proof used the actual subscriber and SMTP provider, an
+isolated loopback TLS SMTP receiver and an explicitly trusted ephemeral CA.
+It confirmed both SMTP deliveries after the change, including buyer contact in
+the staff message. No global TLS bypass, external email or production mutation
+was used. The temporary script, certificate/key and receiver were removed.
+Four focused suites passed 148 tests covering subscriber, SMTP provider,
+payment webhook and T-Bank service. This is not evidence of live Mail.ru delivery.
+
+Keep checkout closed until the working terminal's KKT/prepayment receipt and the
+real full-payment/refund/marking process are confirmed. Existing automatic bank
+refunds remain blocked; do not promise an automatic refund test as already ready.
+Coordinate the backend/storefront capability contract before production cutover;
+the 1C work belongs to the colleague and was not changed by this preparation.
+

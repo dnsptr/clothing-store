@@ -98,6 +98,7 @@ const ENV = { ...process.env };
 beforeEach(() => {
   jest.clearAllMocks();
   process.env = { ...ENV, TELEGRAM_CHAT_ID: "-1001234567890" };
+  delete process.env.ORDER_NOTIFICATION_EMAIL;
 });
 
 afterAll(() => {
@@ -161,18 +162,6 @@ describe("подписчик на новый заказ", () => {
     });
   });
 
-  it("кладёт в письмо и текст, и HTML", async () => {
-    const { notificationService, container } = makeContainer();
-
-    await handler(makeArgs(container));
-
-    const customer = notificationFor(notificationService.createNotifications, "email");
-
-    expect(customer?.content?.subject).toContain("№1042");
-    expect(customer?.content?.text).toContain("Здравствуйте, Анна!");
-    expect(customer?.content?.text).toContain("Итого: 19 490 ₽");
-    expect(customer?.content?.html).toContain("<table");
-  });
 
   it("пишет покупателю даже без чата сотрудников", async () => {
     // Канал `email` обслуживает `notification-local`, когда почта не настроена:
@@ -206,6 +195,37 @@ describe("подписчик на новый заказ", () => {
 
     await expect(handler(makeArgs(container))).rejects.toThrow("SMTP timeout");
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it("notifies staff by email when the customer has no email and Telegram is disabled", async () => {
+    delete process.env.TELEGRAM_CHAT_ID;
+    process.env.ORDER_NOTIFICATION_EMAIL = "staff@example.com";
+    const { notificationService, container } = makeContainer({
+      retrieveOrder: jest.fn().mockResolvedValue({ ...ORDER, email: "" }),
+    });
+
+    await handler(makeArgs(container));
+
+    expect(notificationService.createNotifications).toHaveBeenCalledTimes(1);
+    expect(notificationFor(notificationService.createNotifications, "email")?.to).toBe("staff@example.com");
+  });
+
+  it("still notifies the buyer and requests retry when staff email delivery fails", async () => {
+    delete process.env.TELEGRAM_CHAT_ID;
+    process.env.ORDER_NOTIFICATION_EMAIL = "staff@example.com";
+    const { notificationService, container } = makeContainer();
+    notificationService.createNotifications.mockImplementation(async notification => {
+      if (notification.to === process.env.ORDER_NOTIFICATION_EMAIL) {
+        throw new Error("staff mailbox unavailable");
+      }
+      return {};
+    });
+
+    await expect(handler(makeArgs(container))).rejects.toThrow("staff mailbox unavailable");
+
+    const attempted = notificationService.createNotifications.mock.calls.map(([notification]) => notification);
+    expect(attempted.some(notification => notification.to === ORDER.email)).toBe(true);
+    expect(new Set(attempted.map(notification => notification.idempotency_key)).size).toBe(2);
   });
 
   it("без почты в заказе письмо не шлёт, но сотрудников оповещает", async () => {

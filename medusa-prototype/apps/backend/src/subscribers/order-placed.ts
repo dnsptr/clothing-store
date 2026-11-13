@@ -3,7 +3,7 @@
  * Т-Банка и связь заказа с корзиной сохранены. Событие `order.placed` Medusa
  * публикует раньше авторизации платежа, поэтому по нему письма отправлять нельзя.
  *
- * Каналы независимы: ошибка Telegram не препятствует попытке отправить письмо.
+ * Каналы независимы: ошибка одного получателя не мешает уведомить остальных.
  */
 
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework";
@@ -98,6 +98,31 @@ export default async function orderPlacedHandler({
       deliveryFailure = error instanceof Error ? error : new Error(String(error));
       logger.error(
         `tbank.order.paid: не отправлено уведомление о заказе ${orderId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  const staffEmail = process.env.ORDER_NOTIFICATION_EMAIL?.trim();
+  if (staffEmail) {
+    try {
+      await notificationService.createNotifications({
+        to: staffEmail,
+        channel: "email",
+        template: "order-placed-staff",
+        content: {
+          subject: `Оплачен заказ ${orderNumber(order)}`,
+          text: buildNewOrderMessage(order),
+        },
+        resource_id: orderId,
+        resource_type: "order",
+        idempotency_key: `order-placed:${orderId}:staff-email`,
+      });
+    } catch (error) {
+      deliveryFailure ??= error instanceof Error ? error : new Error(String(error));
+      logger.error(
+        `tbank.order.paid: не отправлено письмо сотрудникам о заказе ${orderId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
