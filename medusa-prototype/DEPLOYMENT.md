@@ -1421,3 +1421,55 @@ refunds remain blocked; do not promise an automatic refund test as already ready
 Coordinate the backend/storefront capability contract before production cutover;
 the 1C work belongs to the colleague and was not changed by this preparation.
 
+## Mail.ru SMTP activated on the existing production image — 16 November 2026
+
+The application password passed SMTP AUTH over verified TLS. The rejected
+ordinary mailbox password is not used. Only Medusa was recreated; image
+`sha256:09c04583d02371ce16f4fda210ffbd730bdf119b7fe87fcd3a095a5fa8557c50`,
+all non-SMTP environment values, bank credentials, mounts, host network and
+restart policy were preserved. PostgreSQL, Redis, Caddy and storefront were
+not recreated. Health is 200; the running terminal is still DEMO.
+
+Production root `.env.production` and existing compose files were not edited.
+The active, retained override is
+`/opt/mario-releases/20261113-payment-mail/compose.candidate.smtp.yml`.
+It pins the existing image and loads the private `mailru.env` settings plus
+`mailru-app-password.env`. The directory is 0700; secret files are 0600.
+Credentials are not in Git. Restart this exact configuration with:
+
+```bash
+docker compose \
+  --project-directory /opt/clothing-store/medusa-prototype \
+  --env-file /opt/clothing-store/medusa-prototype/.env.production \
+  -f /opt/clothing-store/medusa-prototype/compose.production.yml \
+  -f /opt/mario-releases/20261113-payment-mail/compose.candidate.smtp.yml \
+  up -d --no-deps --no-build --pull never --wait --wait-timeout 150 medusa
+```
+
+For a future image rollout, carry both SMTP `env_file` entries into the new
+override and deliberately update its image. Do not stack this old image-pinning
+override last or silently revert to the original two-file command and lose SMTP.
+To disable SMTP and return to the pre-activation service, use the same command
+with the retained `compose.candidate.before-smtp.yml` instead of the SMTP override.
+The original root env remains valid for that rollback. Runtime-before snapshot
+and activation checks are retained privately; do not publish them.
+
+Pre-activation comparison decodes Compose config's `$$` round-trip escaping
+before comparing secret values. A rendered doubled dollar was not a different
+bank password; no bank credential correction or rotation was needed.
+There were no waiting/active queue jobs or pending notification rows; the two
+delayed jobs were recurring `cleaner`/`schedule`, not old customer letters.
+
+One real control letter was sent to the mailbox owner through the bootstrapped
+Medusa notification service, not just a standalone Nodemailer test:
+notification `noti_01M7JJHSSFA1T1WCFZQ3STKMHS`, provider `email-smtp`, channel
+`email`, status `success`, SMTP message ID present. Its stable test idempotency
+key prevents a duplicate from an accidental rerun. SMTP acceptance does not
+prove inbox placement or reading; the owner should check Inbox and Spam.
+Temporary probe/activation scripts were removed after proof.
+
+This activates the existing email transport only. It does not deploy the
+`f2dd7d2` staff-email subscriber, upgrade Medusa, enable the live terminal,
+perform a 10-RUB payment/refund, or prove fiscalization. The coordinated code
+release and working-terminal KKT/full-payment/refund/marking checks remain.
+
