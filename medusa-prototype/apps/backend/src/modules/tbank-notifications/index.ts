@@ -4,6 +4,7 @@ import TbankNotificationModuleService from "./service";
 import { TBANK_NOTIFICATION_MODULE } from "./module-id";
 
 export { TBANK_NOTIFICATION_MODULE } from "./module-id";
+export type { FiscalReceiptRow, TbankFiscalReceiptStore } from "./fiscal";
 
 export default Module(TBANK_NOTIFICATION_MODULE, {
   service: TbankNotificationModuleService,

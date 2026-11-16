@@ -19,6 +19,8 @@ import {
 } from "./admin/tbank/manual-review/validators";
 import { UpdateHandoffRegistrySchema } from "./admin/dispatch-points/validators";
 import { withFulfillmentHandoffContext } from "./admin/orders/fulfillment-handoff";
+import { TbankRefundSchema, TbankClosingReceiptSchema } from "./admin/payments/[id]/tbank-refunds/validators";
+import { AdminCreatePaymentRefund } from "@medusajs/medusa/api/admin/payments/validators";
 
 import { requirePaidPaymentProvider, requireCheckoutDelivery, requireCapturedCart, requirePaidOrderForFulfillment } from "./store/payment-provider-guard";
 import { requireCheckoutAccess, requireInlineCartAddresses } from "./store/checkout-access-guard";
@@ -42,6 +44,55 @@ import { requireUnchangedPaymentCart } from "./store/payment-cart-guard";
  */
 export default defineMiddlewares({
   routes: [
+    {
+      matcher: "/admin/payments/:id/refund",
+      method: "POST",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([
+          { resource: "payment", operation: PolicyOperation.read },
+          { resource: "payment", operation: PolicyOperation.update },
+          { resource: "refund", operation: PolicyOperation.create },
+          { resource: "order", operation: PolicyOperation.update },
+        ]),
+        validateAndTransformBody(AdminCreatePaymentRefund),
+      ],
+    },
+    {
+      matcher: "/admin/payments/:id/tbank-refunds",
+      method: "GET",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([{ resource: "payment", operation: PolicyOperation.read }]),
+      ],
+    },
+    {
+      matcher: "/admin/payments/:id/tbank-refunds",
+      method: "POST",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([
+          { resource: "payment", operation: PolicyOperation.read },
+          { resource: "payment", operation: PolicyOperation.update },
+          { resource: "refund", operation: PolicyOperation.create },
+          { resource: "order", operation: PolicyOperation.update },
+        ]),
+        validateAndTransformBody(TbankRefundSchema),
+      ],
+    },
+    {
+      matcher: "/admin/payments/:id/tbank-closing-receipt",
+      method: "POST",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([
+          { resource: "payment", operation: PolicyOperation.read },
+          { resource: "payment", operation: PolicyOperation.update },
+          { resource: "order", operation: PolicyOperation.update },
+        ]),
+        validateAndTransformBody(TbankClosingReceiptSchema),
+      ],
+    },
     {
       matcher: "/admin/dispatch-points",
       method: "GET",

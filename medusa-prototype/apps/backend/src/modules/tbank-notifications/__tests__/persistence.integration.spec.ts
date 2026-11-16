@@ -5,7 +5,11 @@ import { Migration20260909120000 } from "../migrations/Migration20260909120000";
 import { Migration20260926150000 } from "../migrations/Migration20260926150000";
 import { Migration20261011100000 } from "../migrations/Migration20261011100000";
 import { Migration20261107120000 } from "../migrations/Migration20261107120000";
+import { Migration20261118140000 } from "../migrations/Migration20261118140000";
 import TbankNotificationModuleService from "../service";
+import { Migration20261118150000 } from "../migrations/Migration20261118150000";
+import { digest } from "../../tbank/lib/refund-ledger";
+import type { TBankReceipt } from "../../tbank/lib/receipt";
 
 const DATABASE_URL = process.env.TBANK_INBOX_TEST_DATABASE_URL;
 const describePostgres = DATABASE_URL ? describe : describe.skip;
@@ -16,17 +20,29 @@ function postgresSql(sql: string): string {
 }
 
 function queryManager(client: Client) {
-  return {
+  const manager = {
     execute: async (sql: string, parameters: readonly unknown[]) => {
       const result = await client.query(postgresSql(sql), Array.from(parameters));
       return result.rows;
     },
+    transactional: async <T>(run: (transaction: typeof manager) => Promise<T>): Promise<T> => {
+      await client.query("begin");
+      try {
+        const result = await run(manager);
+        await client.query("commit");
+        return result;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    },
   };
+  return manager;
 }
 
 async function applyQueries(
   client: Client,
-  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20261011100000 | Migration20261107120000,
+  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20261011100000 | Migration20261107120000 | Migration20261118140000 | Migration20261118150000,
 ): Promise<void> {
   for (const query of migration.getQueries()) {
     if (typeof query !== "string") throw new TypeError("Test migration contains a non-string query");
@@ -35,6 +51,9 @@ async function applyQueries(
 }
 
 async function rebuildSchema(client: Client): Promise<void> {
+  await client.query('drop table if exists "tbank_refund_operation" cascade');
+  await client.query('drop function if exists "tbank_refund_operation_immutable"()');
+  await client.query('drop table if exists "tbank_fiscal_receipt" cascade');
   await client.query('drop table if exists "tbank_notification_conflict" cascade');
   await client.query('drop table if exists "tbank_payment_attempt" cascade');
   await client.query('drop table if exists "tbank_notification" cascade');
@@ -60,6 +79,12 @@ async function rebuildSchema(client: Client): Promise<void> {
   const amountPresence = new Migration20261107120000({} as never, {} as never);
   await amountPresence.up();
   await applyQueries(client, amountPresence);
+  const fiscal = new Migration20261118140000({} as never, {} as never);
+  await fiscal.up();
+  await applyQueries(client, fiscal);
+  const refunds = new Migration20261118150000({} as never, {} as never);
+  await refunds.up();
+  await applyQueries(client, refunds);
 }
 
 async function insertPending(client: Client, id: string): Promise<void> {
@@ -116,6 +141,35 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
 
   afterEach(async () => {
     await Promise.all(clients.splice(0).map((client) => client.end()));
+  });
+
+  it("keeps multiple fiscal documents, deduplicates one identity, and retains deferred failures", async () => {
+    await database.query(`insert into tbank_fiscal_receipt
+      (id, terminal_key, payment_id, order_id, receipt_key, receipt_type, amount_kopecks,
+       success, error_code, fn_number, fiscal_document_number, fiscal_document_attribute, canonical_payload_hash)
+      values
+      ('fiscal-initial', 'terminal', 'bank-1', 'session-1', 'key-1', 'income', 100, true, '0', 'fn-1', '1', '11', 'hash-1'),
+      ('fiscal-return', 'terminal', 'bank-1', 'session-1', 'key-2', 'income_return', 50, true, '0', 'fn-1', '2', '12', 'hash-2'),
+      ('fiscal-failed', 'terminal', 'bank-1', 'session-1', 'key-3', 'income_return', 50, false, '500', null, null, null, 'hash-3')`);
+    const rows = await database.query(`select id, success, lifecycle_state, operation_id
+      from tbank_fiscal_receipt order by id`);
+    expect(rows.rows).toEqual([
+      { id: "fiscal-failed", success: false, lifecycle_state: "awaiting_correlation", operation_id: null },
+      { id: "fiscal-initial", success: true, lifecycle_state: "awaiting_correlation", operation_id: null },
+      { id: "fiscal-return", success: true, lifecycle_state: "awaiting_correlation", operation_id: null },
+    ]);
+    await expect(database.query(`insert into tbank_fiscal_receipt
+      (id, terminal_key, payment_id, order_id, receipt_key, receipt_type, amount_kopecks,
+       success, error_code, canonical_payload_hash)
+      values ('duplicate', 'terminal', 'bank-1', 'session-1', 'key-2', 'income_return', 50, false, '500', 'changed')`))
+      .rejects.toMatchObject({ code: "23505" });
+    const rollback = new Migration20261118140000({} as never, {} as never);
+    await rollback.down();
+    await applyQueries(database, rollback);
+    const reapply = new Migration20261118140000({} as never, {} as never);
+    await reapply.up();
+    await applyQueries(database, reapply);
+    expect((await database.query("select * from tbank_fiscal_receipt")).rows).toEqual([]);
   });
 
   it("retains Amount omission across an inbox lease and safely reapplies its migration", async () => {
@@ -600,5 +654,41 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
     )).rows).toEqual([{
       poll_consecutive_errors: 3, poll_next_at: nextAt, poll_lease_token: "existing-worker", poll_lease_expires_at: expiresAt,
     }]);
+  });
+
+  it("atomically quarantines a conflicting fiscal document and blocks its next refund", async () => {
+    const receipt: TBankReceipt = {
+      Email: "pg-refund@example.test", Taxation: "usn_income",
+      Items: [{ Name: "Изделие", Price: 1000, Quantity: 2, Amount: 2000, Tax: "vat105",
+        PaymentMethod: "full_prepayment", PaymentObject: "commodity", MeasurementUnit: "шт" }],
+    };
+    const input = {
+      kind: "refund" as const, payment_id: "pay_pg", payment_session_id: "payses_pg", bank_payment_id: "bank_pg",
+      terminal_key: "terminal", idempotency_key: "pg-refund", snapshot_hash: digest(receipt), original: receipt,
+      selections: [{ line_index: 0, quantity: 1 }], receipt_mode: "prepayment" as const, operator_id: "usr_pg", credit_amount_kopecks: 1000,
+    };
+    const context = { manager: queryManager(database) } as never;
+    const operation = await TbankNotificationModuleService.prototype.prepare.call({}, input, context);
+    await database.query(`insert into tbank_fiscal_receipt
+      (id,terminal_key,payment_id,order_id,receipt_key,receipt_type,amount_kopecks,success,error_code,
+       canonical_payload_hash,lifecycle_state,operation_id,correlation_kind)
+      values ('fiscal-pg','terminal','bank_pg','payses_pg','fiscal-key','return',1000,true,'0',$1,'processed',$2,'refund')`,
+    ["a".repeat(64), operation.id]);
+    await database.query(`update tbank_refund_operation set state='succeeded',fiscal_state='succeeded',
+      fiscal_receipt_id='fiscal-pg',native_refund_id='ref_pg' where id=$1`, [operation.id]);
+    await TbankNotificationModuleService.prototype.quarantineFiscalReceipt.call({}, {
+      id: "fiscal-pg", terminal_key: "terminal", payment_id: "bank_pg",
+      canonical_payload_hash: "a".repeat(64), conflicting_payload_hash: "b".repeat(64),
+    }, context);
+    const state = (await database.query(`select op.state,op.fiscal_state,op.error_code,fiscal.lifecycle_state,
+      op.amount_kopecks from tbank_refund_operation op join tbank_fiscal_receipt fiscal on fiscal.operation_id=op.id`)).rows;
+    expect(state).toEqual([{ state: "succeeded", fiscal_state: "failed", error_code: "FISCAL_CONFLICT", lifecycle_state: "manual_review", amount_kopecks: 1000 }]);
+    expect((await database.query("select conflict_kind from tbank_notification_conflict where canonical_notification_id='fiscal-pg'")).rows)
+      .toEqual([{ conflict_kind: "fiscal_canonical_payload_changed" }]);
+    expect(await TbankNotificationModuleService.prototype.applyFiscal.call({}, {
+      id: operation.id, receipt_id: "fiscal-pg", canonical_hash: "a".repeat(64),
+      receipt_type: "return", success: true, error_code: "0",
+    }, context)).toBe(false);
+    await expect(TbankNotificationModuleService.prototype.prepare.call({}, { ...input, idempotency_key: "unsafe-second" }, context)).rejects.toMatchObject({ type: "conflict" });
   });
 });

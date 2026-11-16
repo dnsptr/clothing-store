@@ -1,11 +1,15 @@
 import type { Context } from "@medusajs/framework/types";
 import type { EntityManager } from "@medusajs/framework/mikro-orm/knex";
-import { InjectManager, MedusaContext, MedusaService } from "@medusajs/framework/utils";
+import { InjectManager, MedusaContext, MedusaError, MedusaService } from "@medusajs/framework/utils";
 
 import { INBOX_LEASE_MS, MAX_INBOX_ATTEMPTS } from "./lifecycle";
 import TbankPaymentAttempt from "./models/tbank-payment-attempt";
 import TbankNotification from "./models/tbank-notification";
 import TbankNotificationConflict from "./models/tbank-notification-conflict";
+import TbankFiscalReceipt from "./models/tbank-fiscal-receipt";
+import TbankRefundOperation from "./models/tbank-refund-operation";
+import { planOperation, type OperationRow, type PrepareOperation } from "../tbank/lib/refund-ledger";
+import type { FiscalReceiptConflict } from "./fiscal";
 
 type ClaimInput = { readonly limit: number; readonly leaseToken: string; readonly now: Date };
 type LeaseInput = { readonly id: string; readonly leaseToken: string; readonly now: Date };
@@ -47,10 +51,32 @@ export class InboxClaimLimitError extends Error {
   }
 }
 
+function manager(context: Context<EntityManager>): EntityManager {
+  if (!context.manager) throw new Error("tbank: refund ledger database is unavailable");
+  return context.manager;
+}
+const columns = [
+  "id", "kind", "payment_id", "payment_session_id", "bank_payment_id", "terminal_key", "idempotency_key",
+  "request_hash", "snapshot_hash", "external_request_id", "amount_kopecks", "original_amount_kopecks", "balance_before_kopecks",
+  "selections", "receipt_mode", "state", "fiscal_state", "fiscal_receipt_id", "fiscal_receipt_type", "native_refund_id",
+  "credit_amount_kopecks",
+  "error_code", "operator_id", "note", "refund_reason_id", "submitted_at",
+] as const;
+async function insert(transaction: EntityManager, row: Omit<OperationRow, "created_at">): Promise<OperationRow> {
+  const values = columns.map((column) => column === "selections" ? JSON.stringify(row.selections) : row[column]);
+  const placeholders = columns.map((column) => column === "selections" ? "?::jsonb" : "?");
+  const rows = await transaction.execute<OperationRow[]>(
+    `insert into tbank_refund_operation (${columns.join(",")}, created_at, updated_at)
+     values (${placeholders.join(",")}, now(), now()) returning *`, values,
+  );
+  return rows[0];
+}
 class TbankNotificationModuleService extends MedusaService({
   TbankPaymentAttempt,
   TbankNotification,
   TbankNotificationConflict,
+  TbankFiscalReceipt,
+  TbankRefundOperation,
 }) {
 
   @InjectManager()
@@ -397,6 +423,162 @@ class TbankNotificationModuleService extends MedusaService({
         input.outcome, input.now, input.now, input.id,
         input.outcome === "pending" ? "operator_poll_retry" : "operator_poll_resolve",
         input.operatorId, input.reason, input.now, input.now],
+    );
+  }
+  @InjectManager()
+  async operations(paymentId: string, @MedusaContext() context: Context<EntityManager> = {}): Promise<OperationRow[]> {
+    return manager(context).execute<OperationRow[]>(
+      "select * from tbank_refund_operation where payment_id = ? and deleted_at is null order by created_at, id", [paymentId],
+    );
+  }
+
+  @InjectManager()
+  async operation(id: string, @MedusaContext() context: Context<EntityManager> = {}): Promise<OperationRow> {
+    const rows = await manager(context).execute<OperationRow[]>("select * from tbank_refund_operation where id = ? and deleted_at is null", [id]);
+    if (!rows[0]) throw new MedusaError(MedusaError.Types.NOT_FOUND, "Фискальная операция не найдена");
+    return rows[0];
+  }
+
+  @InjectManager()
+  async prepare(input: PrepareOperation, @MedusaContext() context: Context<EntityManager> = {}): Promise<OperationRow> {
+    return manager(context).transactional(async (transaction) => {
+      await transaction.execute("select pg_advisory_xact_lock(hashtextextended(?, 0))", [`tbank-fiscal:${input.payment_id}`]);
+      const rows = await transaction.execute<OperationRow[]>(
+        "select * from tbank_refund_operation where payment_id = ? and deleted_at is null order by created_at, id", [input.payment_id],
+      );
+      const plan = planOperation(input, rows);
+      return rows.find((row) => row.id === plan.id) ?? insert(transaction, plan);
+    });
+  }
+
+  @InjectManager()
+  async recordPrepayment(input: Omit<OperationRow, "created_at">, @MedusaContext() context: Context<EntityManager> = {}): Promise<OperationRow | null> {
+    return manager(context).transactional(async (transaction) => {
+      await transaction.execute("select pg_advisory_xact_lock(hashtextextended(?, 0))", [`tbank-fiscal:${input.payment_id}`]);
+      const receipts = await transaction.execute<Array<{ id: string }>>(
+        `select id from tbank_fiscal_receipt where id = ? and canonical_payload_hash = ?
+         and lifecycle_state <> 'manual_review' and deleted_at is null for update`,
+        [input.fiscal_receipt_id, input.request_hash],
+      );
+      if (!receipts.length) return null;
+      const rows = await transaction.execute<OperationRow[]>(
+        "select * from tbank_refund_operation where payment_id = ? and deleted_at is null", [input.payment_id],
+      );
+      const existing = rows.find((row) => row.kind === "prepayment");
+      if (existing && existing.fiscal_receipt_id !== input.fiscal_receipt_id) return null;
+      // Never learn an undocumented income Type from an ambiguous full refund.
+      if (!existing && rows.some((row) => row.state !== "rejected" && (row.kind === "closing" || row.amount_kopecks === input.amount_kopecks))) return null;
+      const operation = existing ?? await insert(transaction, input);
+      await transaction.execute(
+        `update tbank_fiscal_receipt set operation_id = ?, correlation_kind = 'prepayment',
+         lifecycle_state = 'processed', processed_at = now(), updated_at = now() where id = ?`,
+        [operation.id, input.fiscal_receipt_id],
+      );
+      return operation;
+    });
+  }
+
+  @InjectManager()
+  async claimSubmission(id: string, @MedusaContext() context: Context<EntityManager> = {}): Promise<boolean> {
+    const rows = await manager(context).execute<Array<{ id: string }>>(
+      `update tbank_refund_operation set state = 'submitting', submitted_at = coalesce(submitted_at, now()),
+         error_code = null, updated_at = now()
+       where id = ? and deleted_at is null and
+         (state = 'prepared' or (kind = 'refund' and (state = 'indeterminate' or (state = 'submitting' and updated_at < now() - interval '2 minutes'))))
+       returning id`, [id],
+    );
+    return rows.length === 1;
+  }
+
+  @InjectManager()
+  async finishSubmission(input: { id: string; state: "succeeded" | "rejected" | "indeterminate"; error_code?: string }, @MedusaContext() context: Context<EntityManager> = {}): Promise<OperationRow> {
+    await manager(context).execute(
+      `update tbank_refund_operation set state = ?, error_code = ?, updated_at = now()
+       where id = ? and deleted_at is null and state in ('submitting', 'indeterminate')`,
+      [input.state, input.error_code ?? null, input.id],
+    );
+    return this.operation(input.id, context);
+  }
+
+  @InjectManager()
+  async linkNativeRefund(id: string, refundId: string, @MedusaContext() context: Context<EntityManager> = {}): Promise<void> {
+    const rows = await manager(context).execute<Array<{ id: string }>>(
+      `update tbank_refund_operation set native_refund_id = ?, error_code = null, updated_at = now()
+       where id = ? and kind = 'refund' and state = 'succeeded' and deleted_at is null
+         and (native_refund_id is null or native_refund_id = ?) returning id`, [refundId, id, refundId],
+    );
+    if (rows.length !== 1) throw new MedusaError(MedusaError.Types.CONFLICT, "Возврат Medusa не совпадает с сохранённой банковской операцией");
+  }
+
+  @InjectManager()
+  async applyFiscal(input: { id: string; receipt_id: string; canonical_hash: string; receipt_type: string; success: boolean; error_code: string }, @MedusaContext() context: Context<EntityManager> = {}): Promise<boolean> {
+    return manager(context).transactional(async (transaction) => {
+      const receipts = await transaction.execute<Array<{ id: string }>>(
+        `select id from tbank_fiscal_receipt where id = ? and canonical_payload_hash = ?
+         and lifecycle_state <> 'manual_review' and deleted_at is null for update`, [input.receipt_id, input.canonical_hash],
+      );
+      if (!receipts.length) return false;
+      const operations = await transaction.execute<Array<{ id: string; kind: OperationRow["kind"] }>>(
+        `update tbank_refund_operation set fiscal_state = ?, fiscal_receipt_id = ?, fiscal_receipt_type = ?,
+           state = case when kind = 'closing' and ? then 'succeeded' else state end,
+           error_code = case when ? then null else ? end, updated_at = now()
+         where id = ? and deleted_at is null and (kind = 'closing' or state = 'succeeded')
+           and (fiscal_receipt_id is null or fiscal_receipt_id = ? or fiscal_state = 'failed') returning id, kind`,
+        [input.success ? "succeeded" : "failed", input.receipt_id, input.receipt_type, input.success, input.success,
+          `FISCAL_${input.error_code}`, input.id, input.receipt_id],
+      );
+      if (!operations[0]) return false;
+      await transaction.execute(
+        `update tbank_fiscal_receipt set operation_id = ?, correlation_kind = ?, lifecycle_state = 'processed',
+         processed_at = now(), updated_at = now() where id = ?`, [input.id, operations[0].kind, input.receipt_id],
+      );
+      return true;
+    });
+  }
+
+  @InjectManager()
+  async recoveryBatch(limit: number, @MedusaContext() context: Context<EntityManager> = {}): Promise<OperationRow[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Invalid refund recovery limit");
+    return manager(context).execute<OperationRow[]>(
+      `select * from tbank_refund_operation where kind = 'refund' and deleted_at is null
+       and (state in ('prepared', 'indeterminate') or (state = 'submitting' and updated_at < now() - interval '2 minutes')
+         or (state = 'succeeded' and native_refund_id is null)) order by updated_at, id limit ?`, [limit],
+    );
+  }
+
+  @InjectManager()
+  async quarantineFiscalReceipt(input: FiscalReceiptConflict, @MedusaContext() context: Context<EntityManager> = {}): Promise<void> {
+    const audited = await manager(context).execute<Array<{ id: string }>>(
+      `with receipt as (
+         update tbank_fiscal_receipt set lifecycle_state = 'manual_review', updated_at = now()
+         where id = ? and deleted_at is null returning id
+       ), invalidated as (
+         update tbank_refund_operation set fiscal_state = 'failed', error_code = 'FISCAL_CONFLICT', updated_at = now()
+         where fiscal_receipt_id in (select id from receipt) and deleted_at is null returning id
+       ), audit as (
+         insert into tbank_notification_conflict
+           (id,canonical_notification_id,terminal_key,payment_id,status,canonical_payload_hash,
+            conflicting_payload_hash,conflict_kind,correlation_failures,lifecycle_state,created_at,updated_at)
+         select 'tbconf_' || substr(md5(random()::text),1,26),id,?,?,'RECEIPT',?,?,
+           'fiscal_canonical_payload_changed',null,'manual_review',now(),now() from receipt returning id
+       ) select id from audit`,
+      [input.id, input.terminal_key, input.payment_id, input.canonical_payload_hash, input.conflicting_payload_hash],
+    );
+    if (audited.length !== 1) throw new MedusaError(MedusaError.Types.NOT_FOUND, "Исходный кассовый документ не найден");
+  }
+
+  @InjectManager()
+  async deferFiscalReceipt(id: string, @MedusaContext() context: Context<EntityManager> = {}): Promise<void> {
+    await manager(context).execute(
+      "update tbank_fiscal_receipt set updated_at = now() where id = ? and lifecycle_state = 'awaiting_correlation' and deleted_at is null", [id],
+    );
+  }
+
+  @InjectManager()
+  async deferRefundOperation(id: string, @MedusaContext() context: Context<EntityManager> = {}): Promise<void> {
+    await manager(context).execute(
+      `update tbank_refund_operation set updated_at = now()
+       where id = ? and native_refund_id is null and state <> 'rejected' and deleted_at is null`, [id],
     );
   }
 }

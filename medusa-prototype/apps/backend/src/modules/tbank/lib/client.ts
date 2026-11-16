@@ -13,6 +13,7 @@
 
 import { generateToken } from "./token";
 import type { TBankReceipt } from "./receipt";
+import type { TBankFiscalReceipt } from "./refund-receipt";
 
 export type TBankCredentials = {
   terminalKey: string;
@@ -61,6 +62,22 @@ export type TBankCheckOrderResult = TBankResponse & {
   Payments?: TBankCheckOrderPayment[];
 };
 
+/** Cancel amounts are the balance BEFORE and AFTER this operation, not its refund amount. */
+export type TBankCancelResult = TBankResponse & {
+  Success: true;
+  TerminalKey: string;
+  PaymentId: string;
+  Status: string;
+  OrderId: string;
+  OriginalAmount: number;
+  NewAmount: number;
+  ExternalRequestId?: string;
+};
+
+// SendClosingReceipt documents no response correlation/idempotency fields.
+// Its HTTP acknowledgement is NOT evidence of successful fiscalization.
+export type TBankClosingReceiptResult = TBankResponse;
+
 /**
  * Ошибка вызова Т-Банка. Отдельный класс, потому что `ErrorCode` нужен
  * вызывающему коду: по нему различаются «отказ банка» (обрабатываем как
@@ -103,6 +120,15 @@ export class TBankClient {
     method: string,
     params: Record<string, unknown>,
   ): Promise<T> {
+    let requestUrl = `${this.credentials.apiBaseUrl}/${method}`;
+    if (method === "SendClosingReceipt") {
+      // Only this production cashbox endpoint is documented. Never send test
+      // credentials to production or derive a new origin from caller input.
+      if (this.credentials.apiBaseUrl !== "https://securepay.tinkoff.ru/v2") {
+        throw new TBankApiError(method, "API_BASE_URL", "Closing receipt endpoint is not approved for this API origin");
+      }
+      requestUrl = "https://securepay.tinkoff.ru/cashbox/SendClosingReceipt";
+    }
     const body: Record<string, unknown> = {
       TerminalKey: this.credentials.terminalKey,
       ...params,
@@ -115,11 +141,12 @@ export class TBankClient {
 
     let response: Response;
     try {
-      response = await fetch(`${this.credentials.apiBaseUrl}/${method}`, {
+      response = await fetch(requestUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
+        redirect: "error",
       });
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -216,18 +243,64 @@ export class TBankClient {
   }
 
   /**
-   * Отмена или возврат. У Т-Банка это один метод: до списания он отменяет,
-   * после — возвращает. Сумма опциональна; без неё возврат полный.
+   * Full refunds omit Receipt; partial refunds supply exact fiscal positions.
+   * Persist both identifiers before submission and reuse them verbatim on replay.
+   * ExternalRequestId: <=255; installments <=100; AlfaPay <=30; BNPL UUIDv4.
+   * A deterministic 30-character SHA-256 prefix suits cards/SBP/T-Pay/AlfaPay.
+   * BNPL instead needs a persisted UUIDv4 and explicit payment-method support.
    */
   async cancel(params: {
     paymentId: string;
+    externalRequestId: string;
+    merchRefundId: string;
     amountKopecks?: number;
-    receipt?: Record<string, unknown>;
-  }): Promise<TBankResponse> {
-    return this.call<TBankResponse>("Cancel", {
+    receipt?: TBankFiscalReceipt;
+  }): Promise<TBankCancelResult> {
+    if (typeof params.externalRequestId !== "string" || !params.externalRequestId.trim() ||
+        params.externalRequestId.length > 255 || typeof params.merchRefundId !== "string" ||
+        !params.merchRefundId.trim() || params.merchRefundId.length > 100) {
+      throw new TBankApiError("Cancel", "INVALID_REQUEST", "Stable refund identifiers are required");
+    }
+    if (params.amountKopecks !== undefined &&
+        (!Number.isSafeInteger(params.amountKopecks) || params.amountKopecks <= 0)) {
+      throw new TBankApiError("Cancel", "INVALID_REQUEST", "Refund amount must be positive integer kopecks");
+    }
+    if (params.receipt && (params.amountKopecks === undefined || params.receipt.Items.length === 0 ||
+        params.receipt.Items.length > 100 ||
+        params.receipt.Items.reduce((sum, item) => sum + item.Amount, 0) !== params.amountKopecks)) {
+      throw new TBankApiError("Cancel", "INVALID_REQUEST", "Partial refund receipt must match its amount");
+    }
+    const result = await this.call<TBankCancelResult>("Cancel", {
       PaymentId: params.paymentId,
+      ExternalRequestId: params.externalRequestId,
+      DATA: { MerchRefundId: params.merchRefundId },
       ...(params.amountKopecks !== undefined ? { Amount: params.amountKopecks } : {}),
       ...(params.receipt ? { Receipt: params.receipt } : {}),
+    });
+    if (result.ErrorCode !== "0" || result.PaymentId !== params.paymentId || result.TerminalKey !== this.credentials.terminalKey ||
+        typeof result.Status !== "string" || !result.Status || typeof result.OrderId !== "string" ||
+        !Number.isSafeInteger(result.OriginalAmount) || !Number.isSafeInteger(result.NewAmount) ||
+        result.NewAmount < 0 || result.OriginalAmount < result.NewAmount ||
+        (result.ExternalRequestId !== undefined && result.ExternalRequestId !== params.externalRequestId)) {
+      // Money may already have moved. The coordinator must treat this as unknown,
+      // never issue another operation with a different identifier.
+      throw new TBankApiError("Cancel", "BAD_RESPONSE", "Refund response cannot be correlated");
+    }
+    return result;
+  }
+
+  /**
+   * No ExternalRequestId/MerchRefundId exists in this method's documented schema.
+   * Persist a once-only operation before calling; reconcile unknown results through
+   * authenticated fiscal notifications rather than blindly resubmitting.
+   */
+  async sendClosingReceipt(params: {
+    paymentId: string;
+    receipt: TBankFiscalReceipt;
+  }): Promise<TBankClosingReceiptResult> {
+    return this.call<TBankClosingReceiptResult>("SendClosingReceipt", {
+      PaymentId: params.paymentId,
+      Receipt: params.receipt,
     });
   }
 }

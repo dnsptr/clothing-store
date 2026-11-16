@@ -1139,25 +1139,10 @@ describe("refundPayment", () => {
     const cancel = jest.spyOn(TBankClient.prototype, "cancel");
     await expect(
       makeService().refundPayment({ data: {}, amount: 100 } as never),
-    ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA, message: expect.stringMatching(/PaymentId/) });
+    ).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA });
     expect(cancel).not.toHaveBeenCalled();
   });
 
-  it.each([100, 18990])("блокирует возврат %s без фискального чека до любого обращения в банк", async (amount) => {
-    const cancel = jest.spyOn(TBankClient.prototype, "cancel");
-    const fetchMock = mockFetchOnce({ Success: true, ErrorCode: "0" });
-
-    await expect(makeService().refundPayment({
-      data: { paymentId: "3456789" },
-      amount,
-    } as never)).rejects.toMatchObject({
-      type: MedusaError.Types.NOT_ALLOWED,
-      message: expect.stringMatching(/возвратного чека/),
-    });
-
-    expect(cancel).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 });
 
 describe("capturePayment", () => {

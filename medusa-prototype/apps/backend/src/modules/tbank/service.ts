@@ -44,6 +44,8 @@ import { isStrongReceiptSnapshotSecret } from "./lib/receipt-snapshot";
 import { TBankAttemptPersistenceError } from "./errors";
 import { toSessionStatus } from "./lib/status";
 import { validateBankState } from "./services/reconciliation-trust";
+import type TbankNotificationModuleService from "../tbank-notifications/service";
+import { executeTbankProviderRefund } from "./services/refund-operations";
 import {
   TBANK_PAYMENT_PROVIDER_ID,
   TBANK_PROVIDER_IDENTIFIER,
@@ -169,8 +171,9 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   protected readonly options_: TBankOptions;
   protected readonly client_: TBankClient;
   protected readonly receiptSource_: TBankReceiptSource;
-  protected readonly notificationService_?: TbankNotificationStore;
+  protected readonly notificationService_?: TbankNotificationModuleService;
   protected readonly checkoutHolds_: PaymentCheckoutHolds;
+  protected readonly query_: ReceiptQuery;
   private static readonly inFlightInitiations_ = new Map<string, {
     readonly amountKopecks: number;
     readonly currencyCode: string;
@@ -213,8 +216,9 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     const query = providerDependency<ReceiptQuery>(container, ContainerRegistrationKeys.QUERY);
     if (!query) throw new Error("tbank: application query is not registered");
     this.receiptSource_ = new TBankReceiptSource(query, options.receiptSnapshotSecret);
+    this.query_ = query;
     this.options_ = options;
-    this.notificationService_ = providerDependency<TbankNotificationStore>(
+    this.notificationService_ = providerDependency<TbankNotificationModuleService>(
       container, TBANK_NOTIFICATION_MODULE, true,
     );
     this.checkoutHolds_ = providerDependency<PaymentCheckoutHolds>(container, CHECKOUT_HOLD_MODULE)!;
@@ -615,7 +619,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
 
     const result = await this.verifiedBankState_(data);
     return {
-      status: toSessionStatus(result.Status ?? ""),
+      status: result.Status === "REFUNDED" || result.Status === "PARTIAL_REFUNDED" ? "captured" : toSessionStatus(result.Status ?? ""),
       data: {
         ...data,
         status: result.Status,
@@ -686,9 +690,8 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
   }
 
   /**
-   * Cancel у банка может стать возвратом даже после GetState=NEW: состояние
-   * меняется между запросами. До реализации возвратного чека здесь только
-   * чтение состояния; активный банковский платёж отменяется вручную.
+   * Cancel can race NEW -> CONFIRMED. Native cancellation has no refund ledger:
+   * captured payments use refundPayment; unpaid attempts expire at the bank.
    */
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
     const data = (input.data ?? {}) as TBankSessionData;
@@ -709,31 +712,20 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     }
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
-      "tbank: автоматическая отмена активного банковского платежа недоступна; обратитесь к ответственному за ККТ для ручной отмены или возврата с фискализацией",
+      "tbank: активную попытку нельзя удалить; для оплаченного заказа используйте возврат, для неоплаченного дождитесь истечения банковской попытки",
     );
   }
 
-  /**
-   * Возврат.
-   *
-   * ВНИМАНИЕ. Возврат по 54-ФЗ требует **возвратного чека** — `Cancel` с
-   * `Receipt` (§8). Построение возвратного чека здесь не реализовано: текущий
-   * builder создаёт только чек 100% предоплаты для `Init`. Метод блокирует
-   * возврат до обращения в банк; ручной возврат требует отдельного чека ККТ.
-   */
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
-    const data = (input.data ?? {}) as TBankSessionData;
-    if (!data.paymentId) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        "tbank: возврат невозможен — в сессии нет PaymentId",
-      );
+    if (!input.data?.paymentId) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: в сессии нет PaymentId для возврата");
     }
-
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      "tbank: автоматический возврат недоступен без возвратного чека; обратитесь к ответственному за ККТ для ручного возврата и фискализации",
-    );
+    if (!this.notificationService_) {
+      throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, "tbank: модуль журнала возвратов не зарегистрирован");
+    }
+    return executeTbankProviderRefund({
+      query: this.query_, ledger: this.notificationService_, bank: this.client_, options: this.options_,
+    }, input);
   }
 
   async retrievePayment(input: RetrievePaymentInput): Promise<RetrievePaymentOutput> {
@@ -783,18 +775,30 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     ) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: отсутствует достоверный снимок банковской попытки");
     }
+    let expectedAmount = snapshot.amountKopecks;
     const state = await this.client_.getState(data.paymentId);
+    if (this.notificationService_ && (state.Status === "REFUNDED" || state.Status === "PARTIAL_REFUNDED")) {
+      const payments = await this.query_.graph<{ id: string; captured_at?: Date | string | null }>({
+        entity: "payment", fields: ["id", "captured_at"], filters: { payment_session_id: data.orderId },
+      });
+      if (!payments.data[0]?.captured_at) {
+        throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: возврат не связан с подтверждённым платежом Medusa");
+      }
+      const refunds = (await this.notificationService_.operations(payments.data[0].id))
+        .filter((row) => row.kind === "refund" && row.state === "succeeded");
+      if (!refunds.length) throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: возврат отсутствует в журнале операций");
+      expectedAmount -= refunds.reduce((sum, row) => sum + row.amount_kopecks, 0);
+    }
     const trust = validateBankState(state, {
       payment_id: data.paymentId,
       order_id: data.orderId,
-      amount_kopecks: snapshot.amountKopecks,
+      amount_kopecks: expectedAmount,
     }, this.options_.terminalKey, true);
     if (!trust.valid) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, `tbank: ${trust.reason}`);
     }
-    // Refunds require separate fiscal/accounting recovery, never a fresh capture.
-    if (state.Status === "REFUNDED" || state.Status === "PARTIAL_REFUNDED") {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: возврат банка требует ручной сверки платежа и ККТ");
+    if ((state.Status === "REFUNDED" || state.Status === "PARTIAL_REFUNDED") && expectedAmount === snapshot.amountKopecks) {
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, "tbank: банковский возврат отсутствует в учёте Medusa; требуется сверка");
     }
     return state;
   }

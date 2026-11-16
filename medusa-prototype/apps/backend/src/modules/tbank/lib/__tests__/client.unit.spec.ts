@@ -1,5 +1,6 @@
 import { TBankApiError, TBankClient, type TBankResponse } from "../client";
 import { generateToken } from "../token";
+import type { TBankFiscalReceipt } from "../refund-receipt";
 
 const CREDENTIALS = {
   terminalKey: "TestTerminal123",
@@ -270,30 +271,96 @@ describe("TBankClient", () => {
       expect(body.OrderId).toBe("payses_003");
     });
 
-    it("cancel передаёт PaymentId и Amount", async () => {
-      const fetchMock = mockFetch({
-        json: async () => ({
-          Success: true,
-          ErrorCode: "0",
-          PaymentId: "555",
-          Status: "CANCELED",
-        }),
-      });
+    const refundReceipt: TBankFiscalReceipt = {
+      Email: "buyer@example.com",
+      Taxation: "usn_income",
+      Items: [{
+        Name: "Платье", Price: 333, Quantity: 1, Amount: 333, Tax: "vat105",
+        PaymentMethod: "full_prepayment", PaymentObject: "commodity", MeasurementUnit: "шт",
+      }],
+    };
+    const refundIds = { paymentId: "555", externalRequestId: "4dc3a25818d1f6db13586e31c05eab", merchRefundId: "refund_001" };
+    const cancelSuccess = {
+      Success: true, ErrorCode: "0", TerminalKey: CREDENTIALS.terminalKey, PaymentId: "555",
+      OrderId: "order_001", Status: "PARTIAL_REFUNDED", OriginalAmount: 1000, NewAmount: 667,
+      ExternalRequestId: refundIds.externalRequestId,
+    };
 
+    it("sends partial refund positions and stable signed correlation identifiers", async () => {
+      const fetchMock = mockFetch({ json: async () => cancelSuccess });
       const client = new TBankClient(CREDENTIALS);
-      const result = await client.cancel({
-        paymentId: "555",
-        amountKopecks: 10000,
-        receipt: { Items: [] },
-      });
-
-      expect(result.Success).toBe(true);
+      const params = { ...refundIds, amountKopecks: 333, receipt: refundReceipt };
+      const result = await client.cancel(params);
+      await client.cancel(params);
+      expect(result.OriginalAmount - result.NewAmount).toBe(333);
       const [url, options] = fetchMock.mock.calls[0];
       expect(url).toBe("https://securepay.tinkoff.ru/v2/Cancel");
       const body = JSON.parse(options.body as string);
-      expect(body.PaymentId).toBe("555");
-      expect(body.Amount).toBe(10000);
-      expect(body.Receipt).toEqual({ Items: [] });
+      expect(body).toEqual({
+        TerminalKey: CREDENTIALS.terminalKey, PaymentId: "555", Amount: 333,
+        ExternalRequestId: refundIds.externalRequestId, DATA: { MerchRefundId: refundIds.merchRefundId },
+        Receipt: refundReceipt, Token: expect.any(String),
+      });
+      expect(body.Token).toBe(generateToken(body, CREDENTIALS.password));
+      expect(fetchMock.mock.calls[1][1].body).toBe(options.body);
+    });
+
+    it("omits Receipt and Amount on a complete refund", async () => {
+      const fetchMock = mockFetch({ json: async () => ({ ...cancelSuccess, Status: "REFUNDED", NewAmount: 0 }) });
+      await new TBankClient(CREDENTIALS).cancel(refundIds);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(body).not.toHaveProperty("Receipt");
+      expect(body).not.toHaveProperty("Amount");
+      expect(body.ExternalRequestId).toBe(refundIds.externalRequestId);
+    });
+
+    it.each([
+      { externalRequestId: "" }, { externalRequestId: "X".repeat(256) }, { merchRefundId: "" }, { merchRefundId: "X".repeat(101) },
+      { amountKopecks: 0 }, { amountKopecks: 1.5 },
+      { amountKopecks: 332, receipt: refundReceipt },
+      { receipt: refundReceipt },
+    ])("rejects unsafe refund request without contacting bank %j", async (changes) => {
+      const fetchMock = mockFetch({ json: async () => cancelSuccess });
+      await expect(new TBankClient(CREDENTIALS).cancel({ ...refundIds, ...changes })).rejects.toMatchObject({ errorCode: "INVALID_REQUEST" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { PaymentId: "another" }, { TerminalKey: "another" }, { OriginalAmount: undefined },
+      { NewAmount: -1 }, { NewAmount: 1001 }, { NewAmount: 1.5 },
+      { ExternalRequestId: "another" }, { Status: undefined }, { OrderId: undefined },
+      { ErrorCode: "999" },
+    ])("marks uncorrelatable success as unknown rather than trustworthy refund proof %j", async (changes) => {
+      mockFetch({ json: async () => ({ ...cancelSuccess, ...changes }) });
+      await expect(new TBankClient(CREDENTIALS).cancel(refundIds)).rejects.toMatchObject({ errorCode: "BAD_RESPONSE" });
+    });
+
+    it("posts signed closing receipt to documented cashbox path without invented fields", async () => {
+      const fetchMock = mockFetch({ json: async () => ({ Success: true, ErrorCode: "0" }) });
+      const receipt: TBankFiscalReceipt = {
+        ...refundReceipt,
+        Items: [{ ...refundReceipt.Items[0], PaymentMethod: "full_payment", Tax: "vat5" }],
+        Payments: { Electronic: 0, AdvancePayment: 333 },
+      };
+      await new TBankClient(CREDENTIALS).sendClosingReceipt({ paymentId: "555", receipt });
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe("https://securepay.tinkoff.ru/cashbox/SendClosingReceipt");
+      expect(options.redirect).toBe("error");
+      const body = JSON.parse(options.body as string);
+      expect(Object.keys(body).sort()).toEqual(["PaymentId", "Receipt", "TerminalKey", "Token"]);
+      expect(body.Receipt).toEqual(receipt);
+      expect(body.Token).toBe(generateToken(body, CREDENTIALS.password));
+    });
+
+    it.each([
+      "https://rest-api-test.tinkoff.ru/v2", "https://evil.example/v2",
+      "http://securepay.tinkoff.ru/v2", "https://securepay.tinkoff.ru.evil.example/v2",
+      "https://securepay.tinkoff.ru/v2/../v2",
+    ])("never sends closing requests to an undocumented endpoint or redirects test keys %s", async (apiBaseUrl) => {
+      const fetchMock = mockFetch({ json: async () => ({ Success: true, ErrorCode: "0" }) });
+      await expect(new TBankClient({ ...CREDENTIALS, apiBaseUrl }).sendClosingReceipt({ paymentId: "555", receipt: refundReceipt }))
+        .rejects.toMatchObject({ errorCode: "API_BASE_URL" });
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });
