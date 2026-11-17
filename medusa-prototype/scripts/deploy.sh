@@ -85,6 +85,11 @@ mkdir -p "${STATIC_DIR}"
 chown -R "${MEDUSA_UID}:${MEDUSA_GID}" "${STATIC_DIR}"
 chmod -R u+rwX "${STATIC_DIR}"
 
+# CommerceML files must never be served through the public static directory.
+mkdir -p "${PROJECT_DIR}/onec-data"
+chown "${MEDUSA_UID}:${MEDUSA_GID}" "${PROJECT_DIR}/onec-data"
+chmod 700 "${PROJECT_DIR}/onec-data"
+
 # Конфигурация проверяется до сборки: раньше опечатка или недостающая
 # обязательная переменная обнаруживались после нескольких минут сборки образа
 # на прод-машине с 2 vCPU.

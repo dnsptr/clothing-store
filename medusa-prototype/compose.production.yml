@@ -85,6 +85,10 @@ services:
       MEDUSA_WORKER_MODE: shared
       MEDUSA_DISABLE_TELEMETRY: "true"
       DISABLE_MEDUSA_ADMIN: "false"
+      ONEC_EXCHANGE_ENABLED: ${ONEC_EXCHANGE_ENABLED:-false}
+      ONEC_EXCHANGE_USER: ${ONEC_EXCHANGE_USER:-}
+      ONEC_EXCHANGE_PASSWORD: ${ONEC_EXCHANGE_PASSWORD:-}
+      ONEC_EXCHANGE_STORAGE_DIR: /app/var/onec
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,6 +103,7 @@ services:
       # container. Bound to the host rather than a named volume so the files can
       # be copied off-site alongside ./backups.
       - ./static:/app/static
+      - ./onec-data:/app/var/onec
 
   caddy:
     image: caddy:2-alpine

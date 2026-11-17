@@ -36,6 +36,11 @@ import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
 export default defineMiddlewares({
   routes: [
     {
+      matcher: "/integrations/onec",
+      methods: ["GET", "POST"],
+      bodyParser: false,
+    },
+    {
       matcher: "/store/payment-collections/:id/payment-sessions",
       method: "POST",
       middlewares: [requirePaidPaymentProvider],
