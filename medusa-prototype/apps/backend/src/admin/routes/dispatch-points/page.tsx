@@ -105,5 +105,5 @@ const DispatchPointsPage = () => {
     {error && <div role="alert" className="space-y-2"><p>{error}</p><Button variant="secondary" disabled={busy || loading} onClick={() => { if (mayLeave()) setReload((value) => value + 1); }}>Повторить загрузку</Button></div>}
   </Container>;
 };
-export const config = defineRouteConfig({ label: "Пункты сдачи", icon: MapPin });
+export const config = defineRouteConfig({ label: "Пункты сдачи", icon: MapPin, rank: 18 });
 export default DispatchPointsPage;

@@ -52,6 +52,7 @@ async function exchange(req: MedusaRequest, res: MedusaResponse): Promise<void> 
     if (!["init", "file", "import", "complete"].includes(String(mode))) throw new ExchangeError("Unsupported exchange mode");
     if (req.method !== (mode === "file" ? "POST" : "GET")) throw new ExchangeError("Invalid request method", 405);
     const token = cookieToken(req.headers.cookie);
+    // Reject unauthorized uploads before reading their bodies.
     await store.authenticate(token);
     const name = mode === "file" || mode === "import" ? safeFilename(req.query.filename) : "";
     const chunk = mode === "file" ? await readChunk(req) : undefined;

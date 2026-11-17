@@ -57,3 +57,32 @@ next-env.d.ts
 .playwright-mcp/
 .omo/
 .ignore
+
+# Customer source documents and private operational reports (keep locally).
+/docs/company docs/
+/docs/filled up/
+/docs/info.md
+/docs/new_info.md
+/docs/*.docx
+/docs/*.xlsx
+/docs/DEPLOYMENT_2026-09-05.md
+/docs/PROJECT_STATUS_AND_LAUNCH_PLAN.md
+/docs/FISCALIZATION_ATOL_STATUS.md
+/docs/LEGAL_PAGES_REVIEW.md
+/docs/CATALOG_PHOTO_RELEASE.md
+
+# Private keys, database backups and source archives. Public legal documents
+# under public/legal and public CA certificates (*.crt) remain tracked.
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+backups/
+*.dump
+*.dump.gz
+*.sql.gz
+*.rar
+*.7z
+onec-data/
+var/onec/

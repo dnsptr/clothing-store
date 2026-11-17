@@ -9,6 +9,7 @@ export type CommerceSummary = {
 };
 
 export function inspectCommerceXml(bytes: Buffer): CommerceSummary {
+  // Inspect the ASCII declaration before decoding legacy Windows-1251 files.
   const declaration = bytes.subarray(0, 256).toString("ascii");
   const encoding = /encoding\s*=\s*["']([^"']+)["']/i.exec(declaration)?.[1]?.toLowerCase() || "utf-8";
   if (!["utf-8", "utf8", "windows-1251"].includes(encoding)) throw new Error("Unsupported XML encoding");

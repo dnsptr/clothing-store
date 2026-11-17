@@ -1518,10 +1518,10 @@ those runs as passed. The separate Linux runtime proof is a distinct check.
 The refund result validation was moved out of `transform()` into a native
 workflow step; the focused workflow lint check reported no errors.
 
-The deployed Admin bundle also contains colleague-only UI changes whose
-sources are not in the published refs. Obtain and merge those sources before
-replacing the production Admin; do not patch minified bundles or silently
-discard its screens. The public checkout remains explicitly closed.
+The initially missing colleague sources are now published in `75a6b46`
+(Russian Admin workspace) and `f69f2be` (CommerceML dry-run). Merge these with the
+maintained refund/dispatch controls and native authenticated exchange journal;
+do not patch minified bundles. The public checkout remains explicitly closed.
 
 The observed Caddy proxies to `127.0.0.1:9000` over loopback, but the old runtime
 does not configure `HTTPS_PROXY_CIDRS`. Verify and configure this trust boundary
@@ -1535,3 +1535,12 @@ or customer notification is authorized by these notes themselves. Keep the
 current image, all three Compose inputs, private env profiles and exchange
 spool in the coordinated rollback set. Never restore an old database over a
 newly captured payment.
+
+CI retains the compiled backend and Admin together as
+`backend-<pull-request-head-or-push-sha>` for three days. The archive excludes
+environment files and `node_modules`; it is not a complete runtime image.
+Its `.build-revision` records the actual checkout revision, including GitHub's
+merge revision for pull-request builds. Only use artifacts from a successful
+trusted run, with the matching reviewed dependency lock and runtime.
+The standalone `compose.candidate.yml` remains an isolated rehearsal stack,
+not the colleague's old production image-pinning override.

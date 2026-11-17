@@ -98,6 +98,21 @@ jobs:
         run: npm run build
         working-directory: medusa-prototype
 
+      - name: Archive compiled backend and Admin
+        working-directory: medusa-prototype
+        run: |
+          printf '%s\n' "$GITHUB_SHA" > apps/backend/.medusa/server/.build-revision
+          tar --exclude='.env' --exclude='.env.*' --exclude='node_modules' \
+            -czf backend-release.tar.gz -C apps/backend/.medusa/server .
+
+      - name: Retain reviewed backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ github.event.pull_request.head.sha || github.sha }}
+          path: medusa-prototype/backend-release.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
   backend-tests:
     name: Backend (unit + integration tests)
     runs-on: ubuntu-latest

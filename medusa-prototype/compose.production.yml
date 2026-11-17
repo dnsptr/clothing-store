@@ -88,6 +88,10 @@ services:
       TBANK_SUCCESS_URL: ${TBANK_SUCCESS_URL:-}
       TBANK_FAIL_URL: ${TBANK_FAIL_URL:-}
       TBANK_NOTIFICATION_URL: ${TBANK_NOTIFICATION_URL:-}
+      ONEC_EXCHANGE_ENABLED: ${ONEC_EXCHANGE_ENABLED:-false}
+      ONEC_EXCHANGE_USER: ${ONEC_EXCHANGE_USER:-}
+      ONEC_EXCHANGE_PASSWORD: ${ONEC_EXCHANGE_PASSWORD:-}
+      ONEC_EXCHANGE_STORAGE_DIR: /app/var/onec
       # The notification module needs the bot token; the order subscriber
       # needs the staff chat ID. Keep both unset to disable Telegram.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -118,6 +122,7 @@ services:
       # container. Bound to the host rather than a named volume so the files can
       # be copied off-site alongside ./backups.
       - ./static:/app/apps/backend/static
+      - ./onec-data:/app/var/onec
 
   caddy:
     image: caddy:2-alpine

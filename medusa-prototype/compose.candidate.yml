@@ -64,6 +64,7 @@ services:
       POCHTA_ENABLED: "false"
       OWN_COURIER_ENABLED: "false"
       TBANK_ENABLED: "false"
+      ONEC_EXCHANGE_ENABLED: "false"
       MEDUSA_ADMIN_ONBOARDING_TYPE: default
       MEDUSA_WORKER_MODE: server
       MEDUSA_DISABLE_TELEMETRY: "true"
