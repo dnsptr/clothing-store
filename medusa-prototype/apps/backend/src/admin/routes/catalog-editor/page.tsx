@@ -78,5 +78,5 @@ const CatalogEditorPage = () => {
     </>}
   </Container>
 }
-export const config = defineRouteConfig({ label: "Редактор товаров", icon: DocumentText })
+export const config = defineRouteConfig({ label: "Товары", icon: DocumentText, rank: 40 })
 export default CatalogEditorPage

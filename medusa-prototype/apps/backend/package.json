@@ -19,6 +19,7 @@
     "catalog:import": "medusa exec ./src/scripts/import-mario-mikke.ts",
     "catalog:import:customer": "medusa exec ./src/scripts/import-customer-catalog.ts",
     "content:seed": "medusa exec ./src/scripts/seed-home-content.ts",
+    "admin:setup": "medusa exec ./src/scripts/setup-admin-menu.ts",
     "lint": "medusa lint",
     "test:integration:http": "TEST_TYPE=integration:http NODE_OPTIONS=--experimental-vm-modules jest --silent=false --runInBand --forceExit",
     "test:integration:modules": "TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules jest --silent=false --runInBand --forceExit",

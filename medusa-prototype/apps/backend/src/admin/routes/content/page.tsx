@@ -286,8 +286,9 @@ const ContentPage = () => {
 }
 
 export const config = defineRouteConfig({
-  label: "Контент главной",
+  label: "Контент сайта",
   icon: Photo,
+  rank: 90,
 })
 
 export default ContentPage
