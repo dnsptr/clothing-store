@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "next": "16.4.5",
+    "picomatch": "file:medusa-prototype/vendor/picomatch",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
@@ -37,6 +38,7 @@
     "typescript": "~6.0.3"
   },
   "overrides": {
+    "picomatch": "file:medusa-prototype/vendor/picomatch",
     "@typescript-eslint/typescript-estree": {
       "minimatch": "11.0.5"
     }

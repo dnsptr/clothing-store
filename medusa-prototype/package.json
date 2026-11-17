@@ -16,6 +16,9 @@
     "catalog:import": "npm --workspace @dtc/backend run catalog:import",
     "storefront:dev": "turbo dev --filter=@dtc/storefront"
   },
+  "dependencies": {
+    "picomatch": "file:vendor/picomatch"
+  },
   "devDependencies": {
     "@medusajs/eslint-plugin": "2.22.4",
     "eslint": "^10.14.0",
@@ -28,6 +31,7 @@
     "!apps/backend/.medusa/**"
   ],
   "overrides": {
+    "picomatch": "file:vendor/picomatch",
     "@rushstack/node-core-library": {
       "ajv": "^8.20.0"
     },

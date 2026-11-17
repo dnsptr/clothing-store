@@ -1,0 +1,35 @@
+# Upload only frontend build inputs and the shared local npm security fork.
+# Backend sources, operational docs, local tooling and secrets stay private.
+/*
+!/.vercelignore
+!/.node-version
+!/package.json
+!/package-lock.json
+!/next.config.ts
+!/next-env.d.ts
+!/tsconfig.json
+!/eslint.config.mjs
+!/src/
+!/public/
+!/scripts/
+/scripts/*
+!/scripts/build-pages.mjs
+!/medusa-prototype/
+/medusa-prototype/*
+!/medusa-prototype/vendor/
+/medusa-prototype/vendor/*
+!/medusa-prototype/vendor/picomatch/
+
+# Do not let nested local artifacts bypass the allowlist.
+**/node_modules/
+**/.env
+**/.env.*
+**/.npmrc
+**/.git/
+**/.next/
+**/.turbo/
+**/coverage/
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx

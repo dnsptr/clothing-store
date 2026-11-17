@@ -1544,3 +1544,24 @@ merge revision for pull-request builds. Only use artifacts from a successful
 trusted run, with the matching reviewed dependency lock and runtime.
 The standalone `compose.candidate.yml` remains an isolated rehearsal stack,
 not the colleague's old production image-pinning override.
+
+## picomatch security hotfix — 17 November 2026
+
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+was reviewed on 17 November; the published latest version, 4.0.7, has no
+official patched release. Updating dependencies blindly does not fix it.
+The local private fork `@mario-mikke/picomatch` lives in `vendor/picomatch`
+and retains the upstream API and MIT attribution. Both npm roots use this
+single source through explicit file dependencies and overrides.
+
+The guard follows upstream's conservative policy: unsafe repeated extglobs
+become literal patterns. This intentionally restricts those patterns; it is
+not a general-purpose sandbox for arbitrary regular expressions.
+Keep the vendored directory available during frontend installation and both
+Docker dependency installs, and retain the target of runtime dependency links.
+Do not replace this fix with an advisory ignore or a lower audit threshold.
+
+The bounded consumer regression runs from the repository root:
+`node --test scripts/tests/security-picomatch.test.mjs`, and again with
+`PICOMATCH_TEST_ROOT=medusa-prototype`. A successful trusted CI build and
+the isolated Admin rehearsal remain release requirements.

@@ -5,6 +5,7 @@ WORKDIR /workspace
 
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
+COPY vendor/picomatch ./vendor/picomatch
 # Keep integrity-checked downloads outside image layers. The shared lock
 # serializes full/prod installs on memory-constrained builders.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
@@ -25,6 +26,7 @@ WORKDIR /workspace
 # second standalone lock during the build can produce a tree npm ci rejects.
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
+COPY vendor/picomatch ./vendor/picomatch
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
   npm config set maxsockets 5 \
   && npm ci --ignore-scripts --omit=dev --no-audit --no-fund --prefer-offline
@@ -45,6 +47,8 @@ ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 COPY --chown=node:node --from=production-deps /workspace/apps/backend ./
 COPY --chown=node:node --from=production-deps /workspace/package.json /workspace/package-lock.json /app/
 COPY --chown=node:node --from=production-deps /workspace/node_modules /app/node_modules
+# Local npm overrides are linked relative to /app/node_modules.
+COPY --chown=node:node --from=production-deps /workspace/vendor/picomatch /app/vendor/picomatch
 RUN mkdir -p /app/apps/backend/static \
   && chown node:node /app/apps/backend /app/apps/backend/static
 

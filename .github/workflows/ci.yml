@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Bounded picomatch security regression
+        run: node --test scripts/tests/security-picomatch.test.mjs
+
       - name: Audit all frontend dependencies
         run: npm audit --include=dev --include=optional --include=peer --audit-level=low
 
@@ -82,6 +85,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: medusa-prototype
+
+      - name: Bounded picomatch security regression
+        run: node --test scripts/tests/security-picomatch.test.mjs
+        env:
+          PICOMATCH_TEST_ROOT: medusa-prototype
 
       # Preserve the full report, including Low findings. The registry still
       # reports deepmerge CVE-2026-93753, rejected by its CNA on 2026-11-02:
@@ -159,6 +167,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: medusa-prototype
+
+      - name: Bounded picomatch security regression
+        run: node --test scripts/tests/security-picomatch.test.mjs
+        env:
+          PICOMATCH_TEST_ROOT: medusa-prototype
 
       - name: Run unit tests
         run: npm run test:unit
