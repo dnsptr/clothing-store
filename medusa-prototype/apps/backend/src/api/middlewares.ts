@@ -45,6 +45,15 @@ import { requireUnchangedPaymentCart } from "./store/payment-cart-guard";
 export default defineMiddlewares({
   routes: [
     {
+      matcher: "/integrations/onec",
+      bodyParser: false,
+    },
+    {
+      matcher: "/admin/onec-exchange",
+      method: "GET",
+      middlewares: [authenticate("user", ["session", "bearer"])],
+    },
+    {
       matcher: "/admin/payments/:id/refund",
       method: "POST",
       middlewares: [

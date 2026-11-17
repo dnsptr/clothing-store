@@ -1,7 +1,7 @@
 import { addOrderTransactionStep, createOrderChangeActionsWorkflow, emitEventStep, refundPaymentStep } from "@medusajs/core-flows";
 import { createStep, createWorkflow, StepResponse, transform, WorkflowResponse } from "@medusajs/framework/workflows-sdk";
 import { ChangeActionType, MathBN, MedusaError, Modules, OrderChangeType, PaymentEvents } from "@medusajs/framework/utils";
-import type { BigNumberInput, IOrderModuleService, OrderChangeDTO } from "@medusajs/framework/types";
+import type { BigNumberInput, IOrderModuleService, OrderChangeDTO, PaymentDTO } from "@medusajs/framework/types";
 import type { ReceiptQuery } from "../modules/tbank/lib/receipt-source";
 
 export type TbankRefundWorkflowInput = {
@@ -15,6 +15,12 @@ export type TbankRefundWorkflowInput = {
   note?: string;
   refund_reason_id?: string;
 };
+
+const resolveTbankRefund = createStep("resolve-tbank-refund", (input: { payment: PaymentDTO; idempotency_key: string }) => {
+  const refund = input.payment.refunds?.find((item) => item.idempotency_key === input.idempotency_key);
+  if (!refund) throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, "Medusa не сохранила возврат с ожидаемым ключом");
+  return new StepResponse({ id: refund.id, amount: refund.amount });
+});
 
 const ensureCreditLine = createStep("tbank-ensure-refund-credit", async (input: TbankRefundWorkflowInput, { container }) => {
   if (!input.order_id || MathBN.eq(input.credit_amount, 0)) return new StepResponse(null);
@@ -73,11 +79,7 @@ export const tbankRefundWorkflow = createWorkflow(
   { name: "tbank-fiscal-refund", store: true },
   function (input: TbankRefundWorkflowInput) {
     const payment = refundPaymentStep(input);
-    const target = transform({ payment, input }, ({ payment, input }) => {
-      const refund = payment.refunds?.find((item) => item.idempotency_key === input.idempotency_key);
-      if (!refund) throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, "Medusa не сохранила возврат с ожидаемым ключом");
-      return { id: refund.id, amount: refund.amount };
-    });
+    const target = resolveTbankRefund({ payment, idempotency_key: input.idempotency_key });
     const transactions = transform({ target, input, payment }, ({ target, input, payment }) => input.order_id ? [{
       order_id: input.order_id, amount: MathBN.mult(input.amount, -1), currency_code: payment.currency_code,
       reference: "refund", reference_id: target.id,

@@ -1435,6 +1435,11 @@ The active, retained override is
 `/opt/mario-releases/20261113-payment-mail/compose.candidate.smtp.yml`.
 It pins the existing image and loads the private `mailru.env` settings plus
 `mailru-app-password.env`. The directory is 0700; secret files are 0600.
+As of 17 November, the active stack additionally includes
+`/opt/mario-releases/20261117-onec-dry-run/compose.onec.yml`, which pins
+`mm-backend-onec:20261117-dry-run` and mounts the private exchange spool.
+Keep this third override when restarting the current service; the earlier
+SMTP-only command would revert the colleague's 1C patch.
 Credentials are not in Git. Restart this exact configuration with:
 
 ```bash
@@ -1443,16 +1448,18 @@ docker compose \
   --env-file /opt/clothing-store/medusa-prototype/.env.production \
   -f /opt/clothing-store/medusa-prototype/compose.production.yml \
   -f /opt/mario-releases/20261113-payment-mail/compose.candidate.smtp.yml \
+  -f /opt/mario-releases/20261117-onec-dry-run/compose.onec.yml \
   up -d --no-deps --no-build --pull never --wait --wait-timeout 150 medusa
 ```
 
 For a future image rollout, carry both SMTP `env_file` entries into the new
 override and deliberately update its image. Do not stack this old image-pinning
 override last or silently revert to the original two-file command and lose SMTP.
-To disable SMTP and return to the pre-activation service, use the same command
-with the retained `compose.candidate.before-smtp.yml` instead of the SMTP override.
-The original root env remains valid for that rollback. Runtime-before snapshot
-and activation checks are retained privately; do not publish them.
+The retained `compose.candidate.before-smtp.yml` describes the historical
+pre-SMTP image, not a safe SMTP-only rollback after the 1C rollout. Do not use it
+to disable mail on the current stack: prepare an explicit SMTP-disabled override
+that preserves the active 1C image, credentials and spool mount. Historical
+runtime-before snapshots and activation checks remain private.
 
 Pre-activation comparison decodes Compose config's `$$` round-trip escaping
 before comparing secret values. A rendered doubled dollar was not a different
@@ -1473,3 +1480,58 @@ This activates the existing email transport only. It does not deploy the
 perform a 10-RUB payment/refund, or prove fiscalization. The coordinated code
 release and working-terminal KKT/full-payment/refund/marking checks remain.
 
+
+## Combining the 1C dry-run and fiscal-refund release — 17 November 2026
+
+Read-only inspection found Node 22.14.0 / Medusa 2.17.2 in the live
+`mm-backend-onec:20261117-dry-run`, with SMTP and catalog XML reception enabled,
+but a DEMO bank terminal. The durable refund workflow and fiscal inbox from
+`40bb4e7` are absent. Do not mistake that commit's passing CI for a deployment.
+
+The exchange has no catalog/order mutation or reservation integration.
+Preserve its `mm_onec` cookie, credential-version digest, session JSON and
+existing private storage. The maintained TypeScript port keeps the public
+`/integrations/onec` protocol and authenticated `/admin/onec-exchange` journal;
+its raw-body parser override must remain scoped to the exchange route.
+Do not apply the old compiled middleware patch to the new source build.
+Before copying or switching the spool, pause exchange ingress and drain active
+requests. Verify that its `.lock` is absent before taking the snapshot; do not
+copy a live lock or blindly delete one while a writer may still be running.
+
+An isolated Linux rehearsal used the exact retained Node 24.22.2 / Medusa
+2.22.4 dependency base (lock package entries compared equal to `40bb4e7`),
+the newly compiled application/Admin and the two declared XML-parser packages.
+It used its own PostgreSQL, Redis and spool; bank/carrier/SMTP flags were off.
+Only a dedicated proxy has a loopback ingress port; the backend remains on an
+internal Docker network without external egress.
+
+An actual session created by the original deployed exchange JS continued through
+the new native HTTP handler, including repeated init, partial UTF-8 upload,
+inspection and completion. The final SHA-256 and CommerceML counters matched;
+anonymous journal access returned 401. The rendered journal was checked using
+an actual native user's bearer token, scoped to the private origin. Plain HTTP
+over SSH does not establish production HTTPS/session-cookie readiness.
+
+The local Windows Jest HTTP attempts were not successful evidence: bootstrap
+and Docker loopback connection timeouts prevented completion. Do not report
+those runs as passed. The separate Linux runtime proof is a distinct check.
+The refund result validation was moved out of `transform()` into a native
+workflow step; the focused workflow lint check reported no errors.
+
+The deployed Admin bundle also contains colleague-only UI changes whose
+sources are not in the published refs. Obtain and merge those sources before
+replacing the production Admin; do not patch minified bundles or silently
+discard its screens. The public checkout remains explicitly closed.
+
+The observed Caddy proxies to `127.0.0.1:9000` over loopback, but the old runtime
+does not configure `HTTPS_PROXY_CIDRS`. Verify and configure this trust boundary
+for the new server rather than accepting arbitrary forwarded headers.
+The new Dockerfile's media target is `/app/apps/backend/static`; preserve the
+existing media source while correcting the mount target. The exchange's
+explicit `/app/var/onec` storage path can remain unchanged.
+
+No production recreation, schema migration, key activation, financial operation
+or customer notification is authorized by these notes themselves. Keep the
+current image, all three Compose inputs, private env profiles and exchange
+spool in the coordinated rollback set. Never restore an old database over a
+newly captured payment.
