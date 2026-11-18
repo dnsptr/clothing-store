@@ -199,6 +199,7 @@ describe("initiatePayment", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.Receipt).toEqual({
+      FfdVersion: "1.2",
       Email: "buyer@example.com",
       Phone: "+79990000000",
       Taxation: "usn_income",
