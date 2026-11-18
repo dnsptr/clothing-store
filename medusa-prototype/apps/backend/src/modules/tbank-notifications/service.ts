@@ -466,8 +466,10 @@ class TbankNotificationModuleService extends MedusaService({
       );
       const existing = rows.find((row) => row.kind === "prepayment");
       if (existing && existing.fiscal_receipt_id !== input.fiscal_receipt_id) return null;
-      // Never learn an undocumented income Type from an ambiguous full refund.
-      if (!existing && rows.some((row) => row.state !== "rejected" && (row.kind === "closing" || row.amount_kopecks === input.amount_kopecks))) return null;
+      // A known income Type can identify the original sale after its full
+      // refund. Never learn an unknown Type from an ambiguous full refund.
+      if (!existing && rows.some((row) => row.state !== "rejected" && (row.kind === "closing" ||
+        (row.amount_kopecks === input.amount_kopecks && input.fiscal_receipt_type?.toLowerCase() !== "income")))) return null;
       const operation = existing ?? await insert(transaction, input);
       await transaction.execute(
         `update tbank_fiscal_receipt set operation_id = ?, correlation_kind = 'prepayment',
