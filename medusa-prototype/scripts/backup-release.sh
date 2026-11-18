@@ -31,9 +31,34 @@ backend_dir="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.pro
   echo "Container/project-directory mismatch; snapshot refused" >&2; exit 1;
 }
 
+# Extra deployment profiles and private spools belong to the same rollback set.
+# Require stopped backend writers rather than copying an active exchange lock.
+extra_paths=()
+extra_relative_paths=()
+if [[ -n "${BACKUP_EXTRA_PATHS_FILE:-}" ]]; then
+  [[ -f "${BACKUP_EXTRA_PATHS_FILE}" ]] || { echo "Missing extra-paths file" >&2; exit 1; }
+  [[ "$(docker inspect -f '{{.State.Running}}' "${BACKEND_CONTAINER}")" == "false" ]] || {
+    echo "Stop backend writers before snapshotting extra deployment paths" >&2; exit 1;
+  }
+  while IFS= read -r path || [[ -n "${path}" ]]; do
+    [[ -n "${path}" ]] || continue
+    path="$(realpath -e "${path}")"
+    [[ -f "${path}" || -d "${path}" ]] || { echo "Extra path is not a file or directory" >&2; exit 1; }
+    [[ ! -e "${path}/.lock" ]] || { echo "Exchange lock remains; inspect writer state before snapshotting" >&2; exit 1; }
+    extra_paths+=("${path}")
+    extra_relative_paths+=("${path#/}")
+  done < "${BACKUP_EXTRA_PATHS_FILE}"
+  [[ "${#extra_paths[@]}" -gt 0 ]] || { echo "Extra-paths file is empty" >&2; exit 1; }
+fi
+
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_DIR="$(realpath "${OUTPUT_DIR}")"
 chmod 700 "${OUTPUT_DIR}"
+for path in "${extra_paths[@]}"; do
+  case "${OUTPUT_DIR}/" in
+    "${path%/}/"*) echo "Snapshot output is inside an extra source path" >&2; exit 1 ;;
+  esac
+done
 stage="$(mktemp -d "${OUTPUT_DIR}/.snapshot.XXXXXXXX")"
 cleanup() { rm -rf -- "${stage}"; }
 trap cleanup EXIT
@@ -58,9 +83,16 @@ printf '%s\n' "${image_id}" > "${stage}/snapshot/backend-image.id"
 docker image save "${image_id}" -o "${stage}/snapshot/backend-image.tar"
 cp -- "${SOURCE_DIR}/.env.production" "${SOURCE_DIR}/compose.production.yml" "${SOURCE_DIR}/Caddyfile" "${stage}/snapshot/config/"
 tar -C "${SOURCE_DIR}" -czf "${stage}/snapshot/static.tar.gz" static
+if [[ "${#extra_paths[@]}" -gt 0 ]]; then
+  printf '%s\n' "${extra_paths[@]}" > "${stage}/snapshot/additional.paths"
+  tar -C / -czf "${stage}/snapshot/additional.tar.gz" -- "${extra_relative_paths[@]}"
+fi
 # External Vercel artifacts are not available through a backend snapshot.
 printf '%s\n' 'storefront=external; preserve the current Vercel deployment separately' > "${stage}/snapshot/limitations.txt"
 (cd "${stage}/snapshot" && sha256sum database.dump backend-image.tar backend-container.inspect.json redis-container.inspect.json redis.rdb redis-check-rdb.txt static.tar.gz config/.env.production config/compose.production.yml config/Caddyfile > SHA256SUMS)
+if [[ "${#extra_paths[@]}" -gt 0 ]]; then
+  (cd "${stage}/snapshot" && sha256sum additional.paths additional.tar.gz >> SHA256SUMS)
+fi
 tar -C "${stage}" -czf "${stage}/snapshot.tar.gz" snapshot
 
 name="release-$(date -u +%Y%m%dT%H%M%SZ)"

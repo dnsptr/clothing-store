@@ -1565,3 +1565,33 @@ The bounded consumer regression runs from the repository root:
 `node --test scripts/tests/security-picomatch.test.mjs`, and again with
 `PICOMATCH_TEST_ROOT=medusa-prototype`. A successful trusted CI build and
 the isolated Admin rehearsal remain release requirements.
+
+## Upgrading older databases and complete rollback inputs
+
+Rehearse upgrades on a protected copy of the current database, not only an empty
+database. Keep copied bank, carrier, SMTP and exchange integrations disabled on an
+internal-only network, with separate Redis and no published backend ports.
+Compare the original business columns before and after migration; module startup
+may deliberately change provider enablement when transports are disabled.
+Validate those differences separately rather than ignoring financial data changes.
+
+Medusa 2.22 can prompt for link updates even after schema migrations finish.
+Inspect the native link execution plan before approving changes. The reviewed
+`product_variant_inventory_item.required_quantity` change widens integer to
+numeric without deleting records. For this reviewed plan, use
+`medusa db:migrate --execute-all-links --execute-safe-search` non-interactively.
+Do not approve arbitrary future link plans with the same flag blindly.
+
+For deployments with external Compose profiles or a private exchange spool, set
+`BACKUP_EXTRA_PATHS_FILE` when running `scripts/backup-release.sh`. It contains one
+absolute file/directory path per line: include every external deployment profile
+directory (including its env files) and the exchange storage directory. The script
+requires stopped backend writers and refuses a remaining spool `.lock`; never
+delete an active lock merely to make a backup succeed.
+
+The extra inputs are stored as `additional.tar.gz` with `additional.paths` and
+checksums inside the existing authenticated encrypted snapshot. Keep the recipient
+private key off-host. A database-only migration rehearsal snapshot is not a full
+coordinated PostgreSQL/Redis/media/configuration rollback set. Preserve the
+matching external storefront deployment separately, and never restore an old
+database over a newly captured real payment.
