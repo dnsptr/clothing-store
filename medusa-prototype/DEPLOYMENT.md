@@ -1611,3 +1611,12 @@ proof of a particular receipt problem. Reconcile the original `OrderId` with
 `CheckOrder` before considering another attempt; retain the failed attempt and
 never repeat an ambiguous charge or refund with new identifiers.
 
+`RedirectDueDate` must use whole seconds with an explicit timezone, for example
+`2026-11-18T08:10:00+00:00`; strip ISO milliseconds without extending the reserved
+payment window. The exact HTTPS host `pay.linksecurepayment.com` is accepted
+alongside the existing bank hosts; lookalike suffixes, credentials and nonstandard
+ports remain forbidden. See https://developer.tbank.ru/eacq/api/init.
+A successful `Init` or error `309` establishes neither a captured sale nor
+successful fiscalization. Verify the native order, bank capture and authentic
+income/return fiscal receipts separately.
+

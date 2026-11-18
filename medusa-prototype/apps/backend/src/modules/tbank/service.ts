@@ -99,6 +99,7 @@ export const APPROVED_PAYMENT_URL_HOSTNAMES = new Set([
   "securepay.tinkoff.ru",
   "rest-api-test.tinkoff.ru",
   "pay.tbank-online.com",
+  "pay.linksecurepayment.com",
 ]);
 
 export function validatePaymentUrl(urlStr?: string): void {
@@ -479,7 +480,7 @@ export class TBankPaymentProviderService extends AbstractPaymentProvider<TBankOp
     if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() - Date.now() < 60_000) {
       throw new MedusaError(MedusaError.Types.NOT_ALLOWED, "Срок резерва истекает. Начните оформление заново после завершения банковской попытки");
     }
-    const paymentExpiresAt = expiresAt.toISOString().replace(/Z$/, "+00:00");
+    const paymentExpiresAt = expiresAt.toISOString().replace(/\.\d{3}Z$/, "+00:00");
     existingData.receiptSnapshotEnvelope = snapshotEnvelope;
     if (input.data && typeof input.data === "object") {
       input.data.receiptSnapshotEnvelope = snapshotEnvelope;

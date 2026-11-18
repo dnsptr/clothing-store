@@ -185,6 +185,21 @@ describe("initiatePayment", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("sends the bank deadline in whole UTC seconds without extending the hold", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-18T08:00:00.720Z"));
+    const fetchMock = mockFetchOnce({
+      Success: true,
+      ErrorCode: "0",
+      PaymentId: "3456789",
+      PaymentURL: "https://pay.linksecurepayment.com/control",
+    });
+
+    await makeService().initiatePayment(input as never);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.RedirectDueDate).toBe("2026-11-18T08:10:00+00:00");
+  });
+
   it("builds the Init receipt from authoritative cart items and paid shipping", async () => {
     const cart = authoritativeCart();
     const query = authoritativeQuery(cart);
@@ -740,12 +755,15 @@ describe("initiatePayment", () => {
       );
     });
 
-    it("отвергает PaymentURL со сторонним или фишинговым доменом", async () => {
+    it.each([
+      "https://evil-attacker.com/tinkoff/pay",
+      "https://pay.linksecurepayment.com.evil-attacker.com/pay",
+    ])("отвергает PaymentURL со сторонним или фишинговым доменом %s", async (paymentUrl) => {
       mockFetchOnce({
         Success: true,
         ErrorCode: "0",
         PaymentId: "123",
-        PaymentURL: "https://evil-attacker.com/tinkoff/pay",
+        PaymentURL: paymentUrl,
       });
 
       await expect(makeService().initiatePayment(input as never)).rejects.toThrow(
@@ -754,7 +772,7 @@ describe("initiatePayment", () => {
     });
 
     it("принимает PaymentURL на хостах API и платежной формы Т-Банка", async () => {
-      for (const host of ["securepay.tinkoff.ru", "rest-api-test.tinkoff.ru", "pay.tbank-online.com"]) {
+      for (const host of ["securepay.tinkoff.ru", "rest-api-test.tinkoff.ru", "pay.tbank-online.com", "pay.linksecurepayment.com"]) {
         mockFetchOnce({
           Success: true,
           ErrorCode: "0",
