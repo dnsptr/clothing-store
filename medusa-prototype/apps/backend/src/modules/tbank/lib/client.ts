@@ -133,6 +133,14 @@ export class TBankClient {
       TerminalKey: this.credentials.terminalKey,
       ...params,
     };
+    if (params.Receipt) {
+      // The cashbox uses FFD 1.2. Add its wire metadata without changing the
+      // authenticated receipt snapshot, including historical envelopes.
+      body.Receipt = {
+        ...(params.Receipt as TBankReceipt | TBankFiscalReceipt),
+        FfdVersion: "1.2",
+      };
+    }
     body.Token = generateToken(body, this.credentials.password);
 
     // Таймаут обязателен: без него подвисший банк держит воркер до бесконечности.

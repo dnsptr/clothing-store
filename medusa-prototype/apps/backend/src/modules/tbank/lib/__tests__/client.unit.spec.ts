@@ -214,6 +214,7 @@ describe("TBankClient", () => {
       expect(body.FailURL).toBe("https://mariomikke.ru/fail");
       expect(body.NotificationURL).toBe("https://mariomikke.ru/webhook");
       expect(body.Receipt).toEqual({
+        FfdVersion: "1.2",
         Email: "buyer@example.com",
         Taxation: "usn_income",
         Items: [{
@@ -271,14 +272,14 @@ describe("TBankClient", () => {
       expect(body.OrderId).toBe("payses_003");
     });
 
-    const refundReceipt: TBankFiscalReceipt = {
+    const refundReceipt = Object.freeze<TBankFiscalReceipt>({
       Email: "buyer@example.com",
       Taxation: "usn_income",
       Items: [{
         Name: "Платье", Price: 333, Quantity: 1, Amount: 333, Tax: "vat105",
         PaymentMethod: "full_prepayment", PaymentObject: "commodity", MeasurementUnit: "шт",
       }],
-    };
+    });
     const refundIds = { paymentId: "555", externalRequestId: "4dc3a25818d1f6db13586e31c05eab", merchRefundId: "refund_001" };
     const cancelSuccess = {
       Success: true, ErrorCode: "0", TerminalKey: CREDENTIALS.terminalKey, PaymentId: "555",
@@ -299,7 +300,7 @@ describe("TBankClient", () => {
       expect(body).toEqual({
         TerminalKey: CREDENTIALS.terminalKey, PaymentId: "555", Amount: 333,
         ExternalRequestId: refundIds.externalRequestId, DATA: { MerchRefundId: refundIds.merchRefundId },
-        Receipt: refundReceipt, Token: expect.any(String),
+        Receipt: { ...refundReceipt, FfdVersion: "1.2" }, Token: expect.any(String),
       });
       expect(body.Token).toBe(generateToken(body, CREDENTIALS.password));
       expect(fetchMock.mock.calls[1][1].body).toBe(options.body);
@@ -348,7 +349,7 @@ describe("TBankClient", () => {
       expect(options.redirect).toBe("error");
       const body = JSON.parse(options.body as string);
       expect(Object.keys(body).sort()).toEqual(["PaymentId", "Receipt", "TerminalKey", "Token"]);
-      expect(body.Receipt).toEqual(receipt);
+      expect(body.Receipt).toEqual({ ...receipt, FfdVersion: "1.2" });
       expect(body.Token).toBe(generateToken(body, CREDENTIALS.password));
     });
 

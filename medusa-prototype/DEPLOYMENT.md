@@ -1595,3 +1595,19 @@ private key off-host. A database-only migration rehearsal snapshot is not a full
 coordinated PostgreSQL/Redis/media/configuration rollback set. Preserve the
 matching external storefront deployment separately, and never restore an old
 database over a newly captured real payment.
+
+## FFD 1.2 bank-facing receipts
+
+The registered cashbox uses FFD 1.2. T-Bank requires `Receipt.FfdVersion: "1.2"`
+for that format, not only `Items[].MeasurementUnit`. The bank client adds this
+metadata to every supplied receipt in `Init`, partial `Cancel` and
+`SendClosingReceipt`, without mutating signed receipt snapshots. A full original
+refund still omits `Receipt`, leaving the bank to reverse the original receipt.
+Official setup guidance:
+https://www.tbank.ru/business/help/business-payments/internet-acquiring/kassa/set-up/.
+
+An `Init` error `9999` means an internal bank error, not a successful payment or
+proof of a particular receipt problem. Reconcile the original `OrderId` with
+`CheckOrder` before considering another attempt; retain the failed attempt and
+never repeat an ambiguous charge or refund with new identifiers.
+
