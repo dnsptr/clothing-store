@@ -1620,3 +1620,9 @@ A successful `Init` or error `309` establishes neither a captured sale nor
 successful fiscalization. Verify the native order, bank capture and authentic
 income/return fiscal receipts separately.
 
+Fiscal callbacks can arrive after a full refund. With an authenticated bank state
+`REFUNDED` and zero reconciled balance, a signed `Income` receipt can still prove
+the original prepayment. A return receipt arriving first must stay uncorrelated
+until the income proof exists, rather than being mistaken for the initial sale.
+Unknown receipt types must not gain this post-refund exception.
+

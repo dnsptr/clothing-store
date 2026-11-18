@@ -274,7 +274,9 @@ export async function applyTbankFiscalReceipt(container: MedusaContainer, receip
     const state = await rt.bank.getState(receipt.payment_id);
     const balance = expectedBalance(rows, context.data.cartSnapshot!.amountKopecks);
     const trust = validateBankState(state, { payment_id: receipt.payment_id, order_id: receipt.order_id, amount_kopecks: balance }, rt.options.terminalKey, true);
-    if (trust.valid && ["CONFIRMED", "PARTIAL_REFUNDED"].includes(state.Status ?? "")) {
+    const delayedIncomeAfterFullRefund = state.Status === "REFUNDED" && balance === 0 &&
+      receipt.receipt_type.toLowerCase() === "income";
+    if (trust.valid && (["CONFIRMED", "PARTIAL_REFUNDED"].includes(state.Status ?? "") || delayedIncomeAfterFullRefund)) {
       const proof = await rt.ledger.recordPrepayment({
         id: `tbref_${digest([context.payment.id, "prepayment"]).slice(0, 26)}`, kind: "prepayment", payment_id: context.payment.id,
         payment_session_id: receipt.order_id, bank_payment_id: receipt.payment_id, terminal_key: receipt.terminal_key,

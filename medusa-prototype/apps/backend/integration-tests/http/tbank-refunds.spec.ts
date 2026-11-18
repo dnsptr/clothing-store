@@ -6,6 +6,9 @@ import { createProductsWorkflow, createShippingOptionsWorkflow, createShippingPr
 import seedInitialData from "../../src/migration-scripts/initial-data-seed";
 import { generateToken } from "../../src/modules/tbank/lib/token";
 import type { RefundPreview, RefundResult } from "../../src/modules/tbank/refund-contracts";
+import { TBANK_NOTIFICATION_MODULE } from "../../src/modules/tbank-notifications";
+import type { TbankFiscalReceiptStore } from "../../src/modules/tbank-notifications/fiscal";
+import { recoverTbankFiscalOperations } from "../../src/modules/tbank/services/refund-operations";
 
 jest.setTimeout(300000);
 const describeTbank = process.env.TBANK_ENABLED === "true" ? describe : describe.skip;
@@ -71,7 +74,7 @@ describeTbank("T-Bank native refunds with PostgreSQL and an isolated bank", () =
       else process.env.TBANK_API_BASE_URL = originalBaseUrl;
     });
 
-    async function fixture() {
+    async function fixture(withInitialFiscalProof = true) {
       const container = getContainer();
       const query = container.resolve(ContainerRegistrationKeys.QUERY);
       await seedInitialData({ container });
@@ -145,8 +148,10 @@ describeTbank("T-Bank native refunds with PostgreSQL and an isolated bank", () =
         expect(response.data).toBe("OK");
         return payload;
       };
-      await fiscal("offline-income", total);
-      await waitForPreview((value) => value.closing_available);
+      if (withInitialFiscalProof) {
+        await fiscal("offline-income", total);
+        await waitForPreview((value) => value.closing_available);
+      }
       return { query, inventory, paymentId, orderId, state, total, locationId: location.id, shippingId: shipping.id, headers: adminHeaders, preview, waitForPreview, fiscal };
     }
 
@@ -175,6 +180,30 @@ describeTbank("T-Bank native refunds with PostgreSQL and an isolated bank", () =
       expect(order.transactions.filter((transaction: { reference: string }) => transaction.reference === "refund").map((transaction: { amount: number }) => Number(transaction.amount))).toEqual([-f.total / 100]);
       const reservationsAfter = await f.inventory.listReservationItems({ line_item_id: order.items[0].id });
       expect(reservationsAfter.map((item) => [item.inventory_item_id, item.location_id, Number(item.quantity)])).toEqual(reservationsBefore.map((item) => [item.inventory_item_id, item.location_id, Number(item.quantity)]));
+    });
+
+    it("settles delayed fiscal receipts after full refund even when the return receipt arrives first", async () => {
+      const f = await fixture(false);
+      const initial = await f.preview();
+      const refunded = await api.post(`/admin/payments/${f.paymentId}/tbank-refunds`, {
+        idempotency_key: "delayed-fiscal-full-refund",
+        receipt_mode: "prepayment",
+        items: initial.lines.map((line) => ({ line_index: line.line_index, quantity: line.available_quantity })),
+      }, { headers: f.headers });
+      expect(refunded.data.refund.operation.state).toBe("succeeded");
+      expect(f.state.status).toBe("REFUNDED");
+      expect(f.state.balance).toBe(0);
+      await f.fiscal("IncomeReturn", f.total);
+      await f.fiscal("Income", f.total);
+      await recoverTbankFiscalOperations(getContainer());
+      await recoverTbankFiscalOperations(getContainer());
+      const done = await f.waitForPreview((value) => value.operations[0]?.fiscal_state === "succeeded");
+      expect(done.operations[0].native_refund_id).toBeTruthy();
+      const receipts = await getContainer().resolve<TbankFiscalReceiptStore>(TBANK_NOTIFICATION_MODULE)
+        .listTbankFiscalReceipts({ payment_id: f.state.id });
+      expect(receipts.find((receipt) => receipt.receipt_type === "Income")?.correlation_kind).toBe("prepayment");
+      expect(receipts.find((receipt) => receipt.receipt_type === "IncomeReturn")?.correlation_kind).toBe("refund");
+      expect(calls.filter((call) => call.method === "Cancel")).toHaveLength(1);
     });
 
     it("closes prepaid goods without new electronic money and refunds exact marked rows at the full-payment stage", async () => {
