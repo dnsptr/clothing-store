@@ -16,7 +16,6 @@ const cormorant = Cormorant_Garamond({
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin", "cyrillic"],
-  weight: ["300", "400", "500", "600"],
 });
 
 // Absolute base for canonical links and OG/Twitter image URLs. Required once

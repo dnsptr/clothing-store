@@ -5,7 +5,7 @@ import {
   ManualReviewStateError,
 } from "../../../../../modules/tbank/services/manual-review-operations";
 import { NotificationIdSchema } from "../validators";
-import { manualReviewDetailsDto } from "../dto";
+import { attemptManualReviewDetailsDto, manualReviewDetailsDto } from "../dto";
 
 export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void> {
   const idResult = NotificationIdSchema.safeParse(req.params.id);
@@ -16,8 +16,13 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
   const id = idResult.data;
   try {
     const reconciler = new PaymentReconcilerService({ container: req.scope });
-    const details = await reconciler.inspectManualReview(id);
-    res.json({ details: manualReviewDetailsDto(details) });
+    if (id.startsWith("tbatt_")) {
+      const details = await reconciler.inspectAttemptManualReview(id);
+      res.json({ details: attemptManualReviewDetailsDto(details) });
+    } else {
+      const details = await reconciler.inspectManualReview(id);
+      res.json({ details: manualReviewDetailsDto(details) });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof ManualReviewNotFoundError) {

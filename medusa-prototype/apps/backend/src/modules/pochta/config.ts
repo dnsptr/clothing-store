@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import { POCHTA_PROVIDER_IDENTIFIER } from "./provider-id";
 

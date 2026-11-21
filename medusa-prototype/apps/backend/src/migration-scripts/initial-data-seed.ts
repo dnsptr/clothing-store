@@ -95,11 +95,9 @@ export function currenciesForExistingStore(
 // Mario Mikke sells only within Russia (currency RUB, УСН + НДС 5%). This seed
 // provisions the RU-first commerce skeleton (sales channel, publishable API key,
 // RUB store, Russia region, RU tax region, Moscow warehouse and RU fulfillment
-// set). The real catalog, the store rename to "Mario Mikke" and the single RU
-// shipping option ("MVP доставка по России") are created afterwards by
-// src/scripts/import-mario-mikke.ts. Entity names/detection here are kept in sync
-// with that import script so the sequence migrate -> seed -> import converges on a
-// single set of RU entities without duplicates.
+// set). The demo catalog and configured RU shipping options are created
+// afterwards by src/scripts/import-mario-mikke.ts; the legacy free MVP option
+// is disabled there. Entity detection here stays in sync with that importer.
 export default async function initial_data_seed({
   container,
 }: {
@@ -489,10 +487,9 @@ export default async function initial_data_seed({
     throw new Error("Russia fulfillment set has no service zone.");
   }
 
-  // Shipping options are intentionally NOT seeded here. The single RU shipping
-  // option ("MVP доставка по России", priced in RUB) is created idempotently by
-  // src/scripts/import-mario-mikke.ts on this same service zone, keeping one
-  // source of truth for shipping methods.
+  // Shipping options are intentionally NOT seeded here. The catalog importer
+  // creates configured RU methods on this service zone, keeping one source
+  // of truth for shipping options.
   logger.info("Finished seeding fulfillment data.");
 
   // Привязка канала продаж — по факту её отсутствия у конкретного склада:

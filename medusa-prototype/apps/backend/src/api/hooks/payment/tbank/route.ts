@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import type { PaymentSessionDTO } from "@medusajs/types";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import { TBANK_NOTIFICATION_MODULE } from "../../../../modules/tbank-notifications";
 import {
@@ -9,6 +9,12 @@ import {
   toAuthenticatedNotification,
 } from "../../../../modules/tbank-notifications/lifecycle";
 import type { TbankNotificationStore } from "../../../../modules/tbank-notifications/lifecycle";
+import {
+  canonicalFiscalReceiptHash,
+  parseAuthenticatedFiscalReceipt,
+  persistFiscalReceipt,
+} from "../../../../modules/tbank-notifications/fiscal";
+import type { AuthenticatedFiscalReceipt, PersistedFiscalReceipt, TbankFiscalReceiptStore } from "../../../../modules/tbank-notifications/fiscal";
 import { parseTbankEnvironment, TBankConfigurationError } from "../../../../modules/tbank/config";
 import { verifyNotificationToken } from "../../../../modules/tbank/lib/token";
 
@@ -63,6 +69,61 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
   if (!bodyResult.success || !verifyNotificationToken(bodyResult.data, configuration.options.password)) {
     logger.warn("tbank webhook: invalid signature");
     res.status(401).send("invalid token");
+    return;
+  }
+
+  if (bodyResult.data["Status"] === "RECEIPT") {
+    // A valid token is not enough: terminals can share a merchant password.
+    if (bodyResult.data["TerminalKey"] !== configuration.options.terminalKey) {
+      res.status(401).send("invalid terminal");
+      return;
+    }
+    const notifications = req.scope.resolve<TbankNotificationStore & TbankFiscalReceiptStore>(TBANK_NOTIFICATION_MODULE);
+    let receipt: AuthenticatedFiscalReceipt;
+    try {
+      receipt = parseAuthenticatedFiscalReceipt(bodyResult.data);
+    } catch {
+      try {
+        await recordConflict(notifications, {
+          canonicalNotificationId: null,
+          canonicalHash: null,
+          incomingHash: canonicalFiscalReceiptHash(bodyResult.data),
+          terminalKey: configuration.options.terminalKey,
+          paymentId: typeof bodyResult.data["PaymentId"] === "string" || typeof bodyResult.data["PaymentId"] === "number"
+            ? String(bodyResult.data["PaymentId"]) : "missing",
+          status: "RECEIPT",
+          kind: "malformed_authenticated",
+          failures: ["fiscal_payload"],
+        });
+      } catch {
+        logger.error("tbank webhook: malformed fiscal audit failed");
+        res.status(500).send("failed to record malformed fiscal notification");
+        return;
+      }
+      res.send(ACK_BODY);
+      return;
+    }
+    let persisted: PersistedFiscalReceipt;
+    try {
+      persisted = await persistFiscalReceipt(notifications, receipt);
+    } catch {
+      logger.error("tbank webhook: fiscal inbox persistence failed");
+      res.status(500).send("failed to record fiscal notification");
+      return;
+    }
+    if (!persisted.conflict) {
+      try {
+        await req.scope.resolve<{
+          emit(event: { name: string; data: unknown }): Promise<void>;
+        }>("event_bus").emit({
+          name: "tbank.fiscal.received",
+          data: { id: persisted.id },
+        });
+      } catch {
+        logger.warn("tbank webhook: fiscal acceleration event emission failed");
+      }
+    }
+    res.send(ACK_BODY);
     return;
   }
 
@@ -165,6 +226,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse): Promise<voi
       ...key,
       order_id: notification.orderId,
       amount_kopecks: notification.amountKopecks,
+      amount_provided: notification.amountProvided,
       currency_code: notification.currencyCode,
       success: notification.success,
       error_code: null,

@@ -2,6 +2,7 @@ export const ADMIN_SECTIONS = [
   { path: "/workspace", label: "Обзор", state: "available" },
   { path: "/orders", label: "Заказы", state: "available" },
   { path: "/fulfillment", label: "Оплата и доставка", state: "planned" },
+  { path: "/dispatch-points", label: "Пункты сдачи", state: "available" },
   { path: "/assembly", label: "Сборка заказов", state: "planned" },
   { path: "/returns", label: "Возвраты и претензии", state: "planned" },
   { path: "/catalog-editor", label: "Товары", state: "available" },
@@ -14,7 +15,7 @@ export const ADMIN_SECTIONS = [
   { path: "/communications", label: "Уведомления", state: "planned" },
   { path: "/reports", label: "Отчёты и аналитика", state: "planned" },
   { path: "/team", label: "Сотрудники и доступ", state: "available" },
-  { path: "/integrations", label: "Интеграции и обмен", state: "planned" },
+  { path: "/integrations", label: "Интеграции и обмен", state: "available" },
 ] as const
 
 export function storeSidebarConfiguration() {

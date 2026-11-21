@@ -17,7 +17,7 @@ const env = {
   ...process.env,
   NODE_ENV: "test",
   TEST_TYPE: "integration:http",
-  NODE_OPTIONS: "--experimental-vm-modules",
+  NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --experimental-vm-modules`.trim(),
   DB_HOST: "localhost", // Medusa's test runner uses non-SSL for this hostname.
   DATABASE_URL: databaseUrl.toString(),
   REDIS_URL: "",
@@ -41,11 +41,16 @@ const env = {
   TBANK_NOTIFICATION_URL: "https://api.mariomikke.shop/hooks/payment/tbank",
 };
 delete env.PORT;
+const specs = process.argv.length > 2 ? process.argv.slice(2) : [
+  "integration-tests/http/checkout-tbank.spec.ts",
+  "integration-tests/http/tbank-refunds.spec.ts",
+];
 
 const result = spawnSync(process.execPath, [
   require.resolve("jest/bin/jest"),
-  "--runInBand", "--runTestsByPath", "integration-tests/http/checkout-tbank.spec.ts",
+  "--runInBand", "--runTestsByPath", ...specs,
   "--silent", "--forceExit",
 ], { env, stdio: "inherit" });
 if (result.error) throw result.error;
-process.exitCode = result.status ?? 1;
+console.log("Offline integration subprocess completed:", JSON.stringify({ status: result.status, signal: result.signal }));
+process.exitCode = result.status === 0 ? 0 : 1;

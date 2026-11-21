@@ -1,6 +1,7 @@
 import type { PaymentSessionDTO } from "@medusajs/types";
 
 import type { DurableLinkage, NotificationRow, ProcessNotificationResult, ReconciliationServices } from "./reconciliation-contracts";
+import { rublesToKopecks } from "../lib/money";
 import { LeaseController, StaleLeaseError } from "./reconciliation-lease";
 import { projectConfirmedPayment } from "./reconciliation-projection";
 import { checkDurableLinkage, correlateRow, validateBankState } from "./reconciliation-trust";
@@ -48,7 +49,9 @@ async function publishPaidOrder(
   services: ReconciliationServices,
   linkage: DurableLinkage,
   lease: LeaseController,
+  sessionId: string,
 ): Promise<void> {
+  await services.holds?.consumePaymentHold(sessionId);
   const events = services.events;
   if (!events) return;
   const orderId = linkage.orderId;
@@ -68,13 +71,14 @@ async function handleConfirmed(
 ): Promise<ProcessNotificationResult> {
   const before = await checkDurableLinkage(services, session);
   if (before.paymentCaptured && before.orderLinked) {
-    await publishPaidOrder(services, before, lease);
+    await publishPaidOrder(services, before, lease, session.id);
     await lease.complete();
     return { status: "processed", id: row.id, action: "already_captured" };
   }
   if (before.paymentCaptured) {
     return scheduleRetry(services, row, lease, new Error("Captured payment has no durable created-order linkage"));
   }
+  await lease.around(() => services.holds?.settlePaymentHold(session.id) ?? Promise.resolve());
   const projection = await lease.around(() => projectConfirmedPayment(services, row, session));
   if (!projection.success) return scheduleRetry(services, row, lease, new Error(projection.error));
   const after = await checkDurableLinkage(services, session);
@@ -86,7 +90,7 @@ async function handleConfirmed(
       new Error(after.paymentCaptured ? "Payment captured but order creation is not durably linked" : "Payment capture is not durable"),
     );
   }
-  await publishPaidOrder(services, after, lease);
+  await publishPaidOrder(services, after, lease, session.id);
   await lease.complete();
   return { status: "processed", id: row.id, action };
 }
@@ -137,13 +141,21 @@ async function handleFailure(
     const bank = services.bank;
     if (!bank) throw new BankStateUnavailableError();
     const bankState = await lease.around(() => bank.getState(row.payment_id));
-    const trust = validateBankState(bankState, row, services.expectedTerminalKey);
+    const expectedAmount = rublesToKopecks(session.amount);
+    const trust = validateBankState(
+      bankState,
+      { ...row, amount_kopecks: expectedAmount },
+      services.expectedTerminalKey,
+    );
     if (!trust.valid) return quarantineConflict(services, row, lease, trust.reason);
     status = bankState.Status ?? "";
     if (status === "CONFIRMED") {
-      return handleConfirmed(services, row, session, lease, "contradiction_resolved_confirmed");
+      return handleConfirmed(services, { ...row, amount_kopecks: expectedAmount }, session, lease, "contradiction_resolved_confirmed");
     }
     if (status === "AUTHORIZED") return handleAuthorized(services, row, session, lease);
+    if (!FAILURE_STATUSES.some((failure) => failure === status)) {
+      return scheduleRetry(services, row, lease, new Error(`GetState returned ${status}; cancellation is not final`));
+    }
   }
   if (session.status === "captured") {
     return quarantineConflict(
@@ -161,6 +173,7 @@ async function handleFailure(
     amount: session.amount,
     status: targetStatus,
   }));
+  await lease.around(() => services.holds?.releasePaymentHold(session.id) ?? Promise.resolve());
   await lease.complete();
   return { status: "processed", id: row.id, action: targetStatus };
 }

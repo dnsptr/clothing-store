@@ -40,14 +40,14 @@ export function createAccountService(fetcher: typeof fetch = fetch, env: NodeJS.
   const base = (env.MEDUSA_BACKEND_URL || env.NEXT_PUBLIC_MEDUSA_BACKEND_URL || "").replace(/\/$/, "");
   const key = env.MEDUSA_PUBLISHABLE_KEY || env.NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY;
 
-  async function request(endpoint: string, token?: string, body?: unknown) {
+  async function request(endpoint: string, token?: string, body?: unknown, cartAccessToken?: string) {
     if (!base || !key || (env.DATA_MODE || env.NEXT_PUBLIC_DATA_MODE) !== "medusa") throw new AccountError("Личный кабинет временно недоступен. Попробуйте позже.", 503);
     let response: Response;
     try {
       response = await fetcher(base + endpoint, {
         method: body === undefined ? "GET" : "POST",
         cache: "no-store",
-        headers: { "Content-Type": "application/json", "x-publishable-api-key": key, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { "Content-Type": "application/json", "x-publishable-api-key": key, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(cartAccessToken ? { "x-cart-access-token": cartAccessToken } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(15000),
       });
@@ -121,11 +121,15 @@ export function createAccountService(fetcher: typeof fetch = fetch, env: NodeJS.
     const id = text(input.cart_id);
     if (id && !/^cart_[a-zA-Z0-9]+$/.test(id)) throw new AccountError("Некорректная корзина.");
     if (id && !token) return { linked: false };
+    const capability = id ? text(input.cart_access_token) : "";
+    if (id && !/^[a-f0-9]{64}$/.test(capability)) throw new AccountError("Ключ доступа к корзине отсутствует. Создайте новую корзину.", 403);
     const owner = token ? await customer(token) : null;
     if (id) {
-      const previous = record((await request(`/store/carts/${id}?fields=id,customer_id,customer.has_account`, token)).cart);
-      if (previous.customer_id && previous.customer_id !== owner?.id && record(previous.customer).has_account !== false) throw new AccountError("Эта корзина связана с другим аккаунтом. Выйдите из кабинета и создайте новую корзину.", 409);
-      await request(`/store/carts/${id}/customer`, token, {});
+      const previous = record((await request(`/store/carts/${id}`, token, undefined, capability)).cart);
+      const ownerId = previous.customer_id;
+      if (previous.id !== id || (ownerId !== null && (typeof ownerId !== "string" || !ownerId.trim()))) throw new AccountError("Не удалось проверить владельца корзины.", 502);
+      if (ownerId !== null && ownerId !== owner?.id) throw new AccountError("Эта корзина связана с другим аккаунтом. Выйдите из кабинета и создайте новую корзину.", 409);
+      await request(`/store/carts/${id}/customer`, token, {}, capability);
       return { linked: true };
     }
     const region = env.MEDUSA_REGION_ID || env.NEXT_PUBLIC_MEDUSA_REGION_ID || text(input.region_id);
@@ -133,7 +137,12 @@ export function createAccountService(fetcher: typeof fetch = fetch, env: NodeJS.
     const result = await request("/store/carts", undefined, region ? { region_id: region } : {});
     const cartId = text(record(result.cart).id);
     if (!cartId) throw new AccountError("Не удалось создать корзину.", 502);
-    if (token) return request(`/store/carts/${cartId}/customer`, token, {});
+    const createdCapability = text(result.cart_access_token);
+    if (!/^[a-f0-9]{64}$/.test(createdCapability)) throw new AccountError("Не удалось получить ключ доступа к корзине.", 502);
+    if (token) {
+      const linked = await request(`/store/carts/${cartId}/customer`, token, {}, createdCapability);
+      return { ...linked, cart_access_token: createdCapability };
+    }
     return result;
   }
 

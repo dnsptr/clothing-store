@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2021",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "jest"],
+    "strict": false,
     "esModuleInterop": true,
     "module": "Node16",
     "moduleResolution": "Node16",

@@ -1,9 +1,9 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 
 import type { YandexDetectedLocation } from "../../../../modules/yandex-delivery/lib/yandex-client";
 import {
-  getPublicYandexClient,
+  getPublicYandexProvider,
   PublicYandexGuardError,
   publicYandexGuard,
 } from "../../../../modules/yandex-delivery/public-api";
@@ -25,15 +25,16 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   if (!queryResult.success) {
     return res.status(400).json({ message: "Invalid request", cities: [] });
   }
-  let client;
+  let provider;
   try {
-    client = getPublicYandexClient();
+    provider = getPublicYandexProvider();
   } catch {
     return res.status(503).json({ message: "Delivery service unavailable", cities: [] });
   }
-  if (client === null) {
+  if (provider === null) {
     return res.status(503).json({ message: "Delivery service unavailable", cities: [] });
   }
+  const { client } = provider;
   try {
     const q = queryResult.data.query.replace(/\s+/gu, " ");
     const variants = await publicYandexGuard.run<YandexDetectedLocation[]>({

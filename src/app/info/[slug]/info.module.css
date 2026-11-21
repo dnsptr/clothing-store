@@ -8,6 +8,8 @@
 .shell {
   width: 100%;
   max-width: 980px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0 auto;
   padding: 0 20px 96px;
 }
@@ -26,6 +28,7 @@
 }
 
 .breadcrumbs span:last-child {
+  min-width: 0;
   color: #afaeac;
 }
 
@@ -94,13 +97,15 @@
   gap: 14px;
 }
 
-.documentLink {
+.documentLink,
+.sectionBody a {
   color: var(--text-primary);
   text-decoration: underline;
   text-underline-offset: 4px;
 }
 
-.documentLink:focus-visible {
+.documentLink:focus-visible,
+.sectionBody a:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 4px;
 }
@@ -114,6 +119,7 @@
 
 .list {
   display: grid;
+  min-width: 0;
   gap: 8px;
   padding-left: 20px;
   color: var(--text-secondary);

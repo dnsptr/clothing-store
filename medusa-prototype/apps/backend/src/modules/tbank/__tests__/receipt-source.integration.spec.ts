@@ -22,10 +22,22 @@ if (!DATABASE_URL) {
 
   const testUtils: typeof import("@medusajs/test-utils") = require("@medusajs/test-utils");
 
-  jest.setTimeout(120_000);
+  // Full Medusa schema bootstrap also runs against the isolated PostgreSQL.
+  jest.setTimeout(300_000);
 
   testUtils.medusaIntegrationTestRunner({
-    env: { CDEK_ENABLED: "false", TBANK_ENABLED: "false" },
+    env: {
+      CDEK_ENABLED: "false",
+      TBANK_ENABLED: "false",
+      TBANK_PAYMENT_PROVIDER_ID: "",
+      TBANK_TERMINAL_KEY: "",
+      TBANK_PASSWORD: "",
+      TBANK_RECEIPT_SNAPSHOT_SECRET: "",
+      TBANK_API_BASE_URL: "",
+      TBANK_SUCCESS_URL: "",
+      TBANK_FAIL_URL: "",
+      TBANK_NOTIFICATION_URL: "",
+    },
     testSuite: ({ getContainer }) => {
       describe("TBankReceiptSource Medusa persistence", () => {
         it("resolves a persisted payment session to discounted cart totals", async () => {
@@ -46,6 +58,11 @@ if (!DATABASE_URL) {
                 adjustments: [{ code: "AUTUMN", amount: 200 }],
               },
             ],
+          });
+          await cartService.addShippingMethods({
+            cart_id: cart.id,
+            name: "Самовывоз",
+            amount: 0,
           });
           const { result: paymentCollection } = await createPaymentCollectionForCartWorkflow(
             container,

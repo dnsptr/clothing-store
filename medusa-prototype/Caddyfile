@@ -15,12 +15,28 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
-	@admin path /app* /auth/user/*
-	basic_auth @admin {
-		admin {$ADMIN_BASIC_AUTH_HASH}
+	@untrusted not remote_ip {$HTTPS_PROXY_CIDRS}
+	@insecure {
+		not header X-Forwarded-Proto https
+		not path /health
 	}
+	@admin path /app* /auth/user/*
+	@uploads path /admin/uploads*
+	@media path /static/*
 
-	reverse_proxy 127.0.0.1:9000 {
-		header_up X-Forwarded-Proto https
+	route {
+		# Trust the scheme only from the verified HTTPS load balancer.
+		respond @untrusted "Untrusted ingress" 403
+		redir @insecure https://{$BACKEND_HOST}{uri} 308
+		request_body @uploads {
+			max_size 22MiB
+		}
+		header @media Content-Security-Policy "sandbox; default-src 'none'"
+		basic_auth @admin {
+			admin {$ADMIN_BASIC_AUTH_HASH}
+		}
+		reverse_proxy 127.0.0.1:9000 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 }

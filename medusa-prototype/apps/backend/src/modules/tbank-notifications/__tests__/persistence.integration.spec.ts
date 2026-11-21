@@ -3,7 +3,13 @@ import { Client } from "pg";
 import { Migration20260726153050 } from "../migrations/Migration20260726153050";
 import { Migration20260909120000 } from "../migrations/Migration20260909120000";
 import { Migration20260926150000 } from "../migrations/Migration20260926150000";
+import { Migration20261011100000 } from "../migrations/Migration20261011100000";
+import { Migration20261107120000 } from "../migrations/Migration20261107120000";
+import { Migration20261118140000 } from "../migrations/Migration20261118140000";
 import TbankNotificationModuleService from "../service";
+import { Migration20261118150000 } from "../migrations/Migration20261118150000";
+import { digest } from "../../tbank/lib/refund-ledger";
+import type { TBankReceipt } from "../../tbank/lib/receipt";
 
 const DATABASE_URL = process.env.TBANK_INBOX_TEST_DATABASE_URL;
 const describePostgres = DATABASE_URL ? describe : describe.skip;
@@ -14,17 +20,29 @@ function postgresSql(sql: string): string {
 }
 
 function queryManager(client: Client) {
-  return {
+  const manager = {
     execute: async (sql: string, parameters: readonly unknown[]) => {
       const result = await client.query(postgresSql(sql), Array.from(parameters));
       return result.rows;
     },
+    transactional: async <T>(run: (transaction: typeof manager) => Promise<T>): Promise<T> => {
+      await client.query("begin");
+      try {
+        const result = await run(manager);
+        await client.query("commit");
+        return result;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    },
   };
+  return manager;
 }
 
 async function applyQueries(
   client: Client,
-  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000,
+  migration: Migration20260726153050 | Migration20260909120000 | Migration20260926150000 | Migration20261011100000 | Migration20261107120000 | Migration20261118140000 | Migration20261118150000,
 ): Promise<void> {
   for (const query of migration.getQueries()) {
     if (typeof query !== "string") throw new TypeError("Test migration contains a non-string query");
@@ -33,6 +51,9 @@ async function applyQueries(
 }
 
 async function rebuildSchema(client: Client): Promise<void> {
+  await client.query('drop table if exists "tbank_refund_operation" cascade');
+  await client.query('drop function if exists "tbank_refund_operation_immutable"()');
+  await client.query('drop table if exists "tbank_fiscal_receipt" cascade');
   await client.query('drop table if exists "tbank_notification_conflict" cascade');
   await client.query('drop table if exists "tbank_payment_attempt" cascade');
   await client.query('drop table if exists "tbank_notification" cascade');
@@ -52,6 +73,18 @@ async function rebuildSchema(client: Client): Promise<void> {
   const poll = new Migration20260926150000({} as never, {} as never);
   await poll.up();
   await applyQueries(client, poll);
+  const polling = new Migration20261011100000({} as never, {} as never);
+  await polling.up();
+  await applyQueries(client, polling);
+  const amountPresence = new Migration20261107120000({} as never, {} as never);
+  await amountPresence.up();
+  await applyQueries(client, amountPresence);
+  const fiscal = new Migration20261118140000({} as never, {} as never);
+  await fiscal.up();
+  await applyQueries(client, fiscal);
+  const refunds = new Migration20261118150000({} as never, {} as never);
+  await refunds.up();
+  await applyQueries(client, refunds);
 }
 
 async function insertPending(client: Client, id: string): Promise<void> {
@@ -77,6 +110,7 @@ async function insertPollAttempt(
       [sessionId, JSON.stringify(options.paymentId === null ? {} : {
         paymentId: options.paymentId ?? `bank-${id}`,
         orderId: sessionId,
+        attemptId: id,
       })],
     );
   }
@@ -107,6 +141,56 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
 
   afterEach(async () => {
     await Promise.all(clients.splice(0).map((client) => client.end()));
+  });
+
+  it("keeps multiple fiscal documents, deduplicates one identity, and retains deferred failures", async () => {
+    await database.query(`insert into tbank_fiscal_receipt
+      (id, terminal_key, payment_id, order_id, receipt_key, receipt_type, amount_kopecks,
+       success, error_code, fn_number, fiscal_document_number, fiscal_document_attribute, canonical_payload_hash)
+      values
+      ('fiscal-initial', 'terminal', 'bank-1', 'session-1', 'key-1', 'income', 100, true, '0', 'fn-1', '1', '11', 'hash-1'),
+      ('fiscal-return', 'terminal', 'bank-1', 'session-1', 'key-2', 'income_return', 50, true, '0', 'fn-1', '2', '12', 'hash-2'),
+      ('fiscal-failed', 'terminal', 'bank-1', 'session-1', 'key-3', 'income_return', 50, false, '500', null, null, null, 'hash-3')`);
+    const rows = await database.query(`select id, success, lifecycle_state, operation_id
+      from tbank_fiscal_receipt order by id`);
+    expect(rows.rows).toEqual([
+      { id: "fiscal-failed", success: false, lifecycle_state: "awaiting_correlation", operation_id: null },
+      { id: "fiscal-initial", success: true, lifecycle_state: "awaiting_correlation", operation_id: null },
+      { id: "fiscal-return", success: true, lifecycle_state: "awaiting_correlation", operation_id: null },
+    ]);
+    await expect(database.query(`insert into tbank_fiscal_receipt
+      (id, terminal_key, payment_id, order_id, receipt_key, receipt_type, amount_kopecks,
+       success, error_code, canonical_payload_hash)
+      values ('duplicate', 'terminal', 'bank-1', 'session-1', 'key-2', 'income_return', 50, false, '500', 'changed')`))
+      .rejects.toMatchObject({ code: "23505" });
+    const rollback = new Migration20261118140000({} as never, {} as never);
+    await rollback.down();
+    await applyQueries(database, rollback);
+    const reapply = new Migration20261118140000({} as never, {} as never);
+    await reapply.up();
+    await applyQueries(database, reapply);
+    expect((await database.query("select * from tbank_fiscal_receipt")).rows).toEqual([]);
+  });
+
+  it("retains Amount omission across an inbox lease and safely reapplies its migration", async () => {
+    await insertPending(database, "missing-amount");
+    await database.query(`update tbank_notification
+      set status = 'CANCELED', success = false, amount_kopecks = 0, amount_provided = false
+      where id = 'missing-amount'`);
+    const claimed = await TbankNotificationModuleService.prototype.claimNotificationById.call(
+      {}, { id: "missing-amount", leaseToken: "lease-amount", now: new Date() },
+      { manager: queryManager(database) } as never,
+    );
+    expect(claimed[0]).toEqual(expect.objectContaining({ amount_kopecks: 0, amount_provided: false }));
+
+    const rollback = new Migration20261107120000({} as never, {} as never);
+    await rollback.down();
+    await applyQueries(database, rollback);
+    const reapply = new Migration20261107120000({} as never, {} as never);
+    await reapply.up();
+    await applyQueries(database, reapply);
+    const historical = await database.query("select amount_provided from tbank_notification where id = 'missing-amount'");
+    expect(historical.rows[0].amount_provided).toBe(true);
   });
 
   it("applies, rolls back, and reapplies with snapshot-compatible index names", async () => {
@@ -342,132 +426,146 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
       next_attempt_at: new Date(now.getTime() + 43_200_000),
     })]);
   });
-  it("claims different due attempts concurrently without polling missing sessions or bank identifiers", async () => {
-    const now = new Date("2026-09-26T12:00:00.000Z");
-    const eligible = new Date(now.getTime() - 10 * 60_000);
+  it("claims only aged attempts without signed CONFIRMED inbox rows, fences the lease and preserves CONFIRMED trace through backoff", async () => {
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    for (const [id, ageMinutes] of [["overdue", 20], ["fresh", 2], ["signed", 20]] as const) {
+      await database.query(
+        `INSERT INTO tbank_payment_attempt
+          (id, payment_session_id, provider_id, terminal_key, order_id,
+           expected_amount_kopecks, currency_code, created_at)
+         VALUES ($1,$1,'pp_tbank_tbank','terminal',$1,100,'rub',$2)`,
+        [id, new Date(now.getTime() - ageMinutes * 60_000)],
+      );
+    }
+    await database.query(
+      `INSERT INTO tbank_notification
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
+         success, canonical_payload_hash, lifecycle_state, attempt_count)
+       VALUES ('signed-notification','terminal','payment-signed','CONFIRMED','signed',
+               100,'rub',true,repeat('a',64),'pending',0)`,
+    );
+    const manager = queryManager(database);
+    const claim = (leaseToken: string, at: Date) =>
+      TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
+        {}, { limit: 5, leaseToken, now: at }, { manager } as never,
+      );
+    expect((await claim("owner", now)).map((row) => row.id)).toEqual(["overdue"]);
+    expect(await claim("racer", now)).toEqual([]);
+    expect(await TbankNotificationModuleService.prototype.observePaymentAttemptPoll.call(
+      {}, { id: "overdue", leaseToken: "racer", now, paymentId: "bank-overdue", status: "CONFIRMED" }, { manager } as never,
+    )).toEqual([]);
+    expect(await TbankNotificationModuleService.prototype.observePaymentAttemptPoll.call(
+      {}, { id: "overdue", leaseToken: "owner", now, paymentId: "bank-overdue", status: "CONFIRMED" }, { manager } as never,
+    )).toEqual([expect.objectContaining({
+      poll_payment_id: "bank-overdue", poll_bank_status: "CONFIRMED", poll_confirmed_at: now,
+    })]);
+    const failed = await TbankNotificationModuleService.prototype.finishPaymentAttemptPoll.call(
+      {}, { id: "overdue", leaseToken: "owner", now, outcome: "retry", reason: "linkage delayed" },
+      { manager } as never,
+    );
+    expect(failed).toEqual([expect.objectContaining({
+      poll_state: "pending", poll_count: 1, poll_next_at: new Date(now.getTime() + 60_000),
+      poll_confirmed_at: now, poll_error: "linkage delayed",
+    })]);
+    expect(await claim("early", new Date(now.getTime() + 59_000))).toEqual([]);
+    expect((await claim("retry-owner", new Date(now.getTime() + 60_000))).map((row) => row.id)).toEqual(["overdue"]);
+  });
+
+  it("exhausts fifth poll without re-claiming the attempt or losing its bank-confirmation observation", async () => {
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    await database.query(
+      `INSERT INTO tbank_payment_attempt
+        (id, payment_session_id, provider_id, terminal_key, order_id,
+         expected_amount_kopecks, currency_code, created_at, poll_count, poll_confirmed_at)
+       VALUES ('exhausted','exhausted','pp_tbank_tbank','terminal','exhausted',
+               100,'rub',$1,4,$2)`,
+      [new Date(now.getTime() - 20 * 60_000), new Date(now.getTime() - 60_000)],
+    );
+    const manager = queryManager(database);
+    expect((await TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
+      {}, { limit: 1, leaseToken: "final", now }, { manager } as never,
+    )).map((row) => row.poll_count)).toEqual([5]);
+    const result = await TbankNotificationModuleService.prototype.finishPaymentAttemptPoll.call(
+      {}, { id: "exhausted", leaseToken: "final", now, outcome: "retry", reason: "GetState unavailable" },
+      { manager } as never,
+    );
+    expect(result).toEqual([expect.objectContaining({
+      poll_state: "manual_review", poll_count: 5, poll_confirmed_at: new Date(now.getTime() - 60_000),
+      poll_manual_review_at: now,
+    })]);
+    expect(await TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
+      {}, { limit: 1, leaseToken: "sixth", now: new Date(now.getTime() + 1_000_000) },
+      { manager } as never,
+    )).toEqual([]);
+  });
+  it("records operator retry and resolution atomically without clearing CONFIRMED bank evidence", async () => {
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    await database.query(
+      `INSERT INTO tbank_payment_attempt
+        (id, payment_session_id, provider_id, terminal_key, order_id,
+         expected_amount_kopecks, currency_code, poll_state, poll_count,
+         poll_payment_id, poll_bank_status, poll_confirmed_at, poll_error)
+       VALUES ('tbatt_review','payses_review','pp_tbank_tbank','terminal','payses_review',
+               100,'rub','manual_review',5,'bank_review','CONFIRMED',$1,'Order linkage unavailable')`,
+      [new Date(now.getTime() - 60_000)],
+    );
+    const manager = queryManager(database);
+    const transition = (outcome: "pending" | "completed", operatorId: string) =>
+      TbankNotificationModuleService.prototype.transitionPollManualReview.call(
+        {}, { id: "tbatt_review", now, operatorId, reason: "Checked bank and order", outcome },
+        { manager } as never,
+      );
+
+    expect(await transition("pending", "admin_first")).toEqual([expect.objectContaining({
+      poll_state: "pending", poll_count: 0, poll_bank_status: "CONFIRMED",
+      poll_payment_id: "bank_review", poll_confirmed_at: new Date(now.getTime() - 60_000),
+    })]);
+    expect(await transition("pending", "admin_second")).toEqual([]);
+    await database.query(
+      `UPDATE tbank_payment_attempt SET poll_state = 'manual_review' WHERE id = 'tbatt_review'`,
+    );
+    expect(await transition("completed", "admin_final")).toEqual([expect.objectContaining({
+      poll_state: "completed", poll_completed_at: now, poll_confirmed_at: new Date(now.getTime() - 60_000),
+    })]);
+    const audit = await database.query(
+      `SELECT conflict_kind, correlation_failures::jsonb->>'operatorId' AS operator_id,
+              correlation_failures::jsonb->>'attemptId' AS attempt_id
+       FROM tbank_notification_conflict WHERE payment_id = 'bank_review' ORDER BY created_at, id`,
+    );
+    expect(audit.rows).toEqual(expect.arrayContaining([
+      { conflict_kind: "operator_poll_retry", operator_id: "admin_first", attempt_id: "tbatt_review" },
+      { conflict_kind: "operator_poll_resolve", operator_id: "admin_final", attempt_id: "tbatt_review" },
+    ]));
+    expect(audit.rows).toHaveLength(2);
+  });
+
+  it("claims different aged attempts concurrently with persisted independent leases", async () => {
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    const eligible = new Date(now.getTime() - 20 * 60_000);
     await insertPollAttempt(database, "first", eligible);
     await insertPollAttempt(database, "second", eligible);
     await insertPollAttempt(database, "grace", new Date(now.getTime() - 60_000));
-    await insertPollAttempt(database, "other-terminal", eligible, { terminalKey: "other" });
-    await insertPollAttempt(database, "missing-session", eligible, { session: false });
-    await insertPollAttempt(database, "missing-payment", eligible, { paymentId: null });
     const first = await connect();
     const second = await connect();
     const [firstRows, secondRows] = await Promise.all([
       TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
-        {}, { limit: 1, leaseToken: "worker-a", now, terminalKey: "terminal" },
-        { manager: queryManager(first) } as never,
+        {}, { limit: 1, leaseToken: "worker-a", now }, { manager: queryManager(first) } as never,
       ),
       TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
-        {}, { limit: 1, leaseToken: "worker-b", now, terminalKey: "terminal" },
-        { manager: queryManager(second) } as never,
+        {}, { limit: 1, leaseToken: "worker-b", now }, { manager: queryManager(second) } as never,
       ),
     ]);
     expect(new Set([...firstRows, ...secondRows].map((row) => row.id))).toEqual(new Set(["first", "second"]));
     expect(await TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
-      {}, { limit: 10, leaseToken: "worker-c", now, terminalKey: "terminal" },
-      { manager: queryManager(database) } as never,
+      {}, { limit: 10, leaseToken: "worker-c", now }, { manager: queryManager(database) } as never,
     )).toEqual([]);
   });
 
-  it("fences expired poll leases and defers nonterminal states without consuming retry budget", async () => {
-    const now = new Date("2026-09-26T12:00:00.000Z");
-    await insertPollAttempt(database, "fence", new Date(now.getTime() - 10 * 60_000));
-    const manager = queryManager(database);
-    const poll = TbankNotificationModuleService.prototype;
-    const claim = (leaseToken: string, at: Date) => poll.claimDuePaymentAttempts.call(
-      {}, { limit: 1, leaseToken, now: at, terminalKey: "terminal" }, { manager } as never,
-    );
-    const transition = (method: "renewPaymentAttemptPollLease" | "completePaymentAttemptPoll"
-      | "failPaymentAttemptPoll" | "quarantinePaymentAttemptPoll" | "deferPaymentAttemptPoll",
-    leaseToken: string, at: Date) => poll[method].call(
-      {}, { id: "fence", leaseToken, now: at }, { manager } as never,
-    );
-    expect(await claim("old", now)).toEqual([expect.objectContaining({ id: "fence" })]);
-    const expiredAt = new Date(now.getTime() + 5 * 60_000 + 1);
-    expect(await transition("renewPaymentAttemptPollLease", "old", expiredAt)).toEqual([]);
-    expect(await transition("completePaymentAttemptPoll", "old", expiredAt)).toEqual([]);
-    expect(await claim("new", expiredAt)).toEqual([expect.objectContaining({ id: "fence" })]);
-    expect(await transition("failPaymentAttemptPoll", "old", expiredAt)).toEqual([]);
-    expect(await transition("quarantinePaymentAttemptPoll", "old", expiredAt)).toEqual([]);
-    expect(await transition("renewPaymentAttemptPollLease", "new", expiredAt)).toEqual([
-      expect.objectContaining({ poll_lease_token: "new" }),
-    ]);
-    expect(await transition("failPaymentAttemptPoll", "new", expiredAt)).toEqual([
-      expect.objectContaining({ poll_consecutive_errors: 1, poll_state: "pending" }),
-    ]);
-    const retryAt = new Date(expiredAt.getTime() + 60_000);
-    expect(await claim("healthy", retryAt)).toEqual([expect.objectContaining({ id: "fence" })]);
-    const deferred = await transition("deferPaymentAttemptPoll", "healthy", retryAt);
-    expect(deferred).toEqual([expect.objectContaining({
-      poll_state: "pending", poll_consecutive_errors: 0,
-      poll_next_at: new Date(retryAt.getTime() + 5 * 60_000),
-    })]);
-    expect(await claim("too-soon", new Date(retryAt.getTime() + 5 * 60_000 - 1))).toEqual([]);
-    const due = new Date(retryAt.getTime() + 5 * 60_000);
-    expect(await claim("final", due)).toEqual([expect.objectContaining({ id: "fence" })]);
-    expect(await transition("completePaymentAttemptPoll", "final", due)).toEqual([
-      expect.objectContaining({ poll_state: "complete", poll_lease_token: null }),
-    ]);
-    expect(await claim("replay", due)).toEqual([]);
-  });
-
-  it("backs off consecutive bank failures, then quarantines exactly once at the fifth failure", async () => {
-    let now = new Date("2026-09-26T12:00:00.000Z");
-    await insertPollAttempt(database, "errors", new Date(now.getTime() - 10 * 60_000));
-    const manager = queryManager(database);
-    const poll = TbankNotificationModuleService.prototype;
-    for (const [index, delay] of [60_000, 300_000, 1_800_000, 7_200_000, 43_200_000].entries()) {
-      const token = `retry-${index}`;
-      expect(await poll.claimDuePaymentAttempts.call(
-        {}, { limit: 1, leaseToken: token, now, terminalKey: "terminal" }, { manager } as never,
-      )).toEqual([expect.objectContaining({ id: "errors" })]);
-      const failed = await poll.failPaymentAttemptPoll.call(
-        {}, { id: "errors", leaseToken: token, now }, { manager } as never,
-      );
-      expect(failed).toEqual([expect.objectContaining({
-        poll_consecutive_errors: index + 1,
-        poll_state: index === 4 ? "manual_review" : "pending",
-        poll_next_at: new Date(now.getTime() + delay),
-        poll_manual_review_at: index === 4 ? now : null,
-      })]);
-      now = new Date(now.getTime() + delay);
-    }
-    expect(await poll.claimDuePaymentAttempts.call(
-      {}, { limit: 1, leaseToken: "retry-six", now, terminalKey: "terminal" }, { manager } as never,
-    )).toEqual([]);
-  });
-
-  it("quarantines an identity mismatch without retrying the attempt", async () => {
-    const now = new Date("2026-09-26T12:00:00.000Z");
-    await insertPollAttempt(database, "mismatch", new Date(now.getTime() - 10 * 60_000));
+  it("still polls a historical processed rejection whose session is AUTHORIZED rather than terminal", async () => {
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    await insertPollAttempt(database, "authorized-after-rejection", new Date(now.getTime() - 20 * 60_000));
     await database.query(
-      `update payment_session set data = '{"paymentId":"bank-mismatch","orderId":"different"}'::jsonb
-       where id = 'poll-test-mismatch'`,
-    );
-    const manager = queryManager(database);
-    const poll = TbankNotificationModuleService.prototype;
-    expect(await poll.claimDuePaymentAttempts.call(
-      {}, { limit: 1, leaseToken: "identity-check", now, terminalKey: "terminal" },
-      { manager } as never,
-    )).toEqual([expect.objectContaining({ id: "mismatch" })]);
-    expect(await poll.quarantinePaymentAttemptPoll.call(
-      {}, { id: "mismatch", leaseToken: "identity-check", now }, { manager } as never,
-    )).toEqual([expect.objectContaining({
-      poll_state: "manual_review", poll_manual_review_at: now, poll_lease_token: null,
-    })]);
-    expect(await poll.claimDuePaymentAttempts.call(
-      {}, { limit: 1, leaseToken: "replay", now: new Date(now.getTime() + 60_000), terminalKey: "terminal" },
-      { manager } as never,
-    )).toEqual([]);
-  });
-
-  it("still polls after a processed REJECTED webhook was reconciled to AUTHORIZED", async () => {
-    const now = new Date("2026-09-26T12:00:00.000Z");
-    await insertPollAttempt(database, "authorized-after-rejection", new Date(now.getTime() - 10 * 60_000));
-    await database.query(
-      `update payment_session
-       set data = jsonb_set(data, '{status}', to_jsonb('AUTHORIZED'::text))
+      `update payment_session set data = jsonb_set(data, '{status}', to_jsonb('AUTHORIZED'::text))
        where id = 'poll-test-authorized-after-rejection'`,
     );
     await database.query(
@@ -478,120 +576,119 @@ describePostgres("T-Bank inbox PostgreSQL persistence", () => {
          'REJECTED', 'poll-test-authorized-after-rejection', 100, 'rub', false,
          repeat('d', 64), 'processed', 0)`,
     );
-
-    const claimed = await TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
-      {}, { limit: 1, leaseToken: "confirm-missing", now, terminalKey: "terminal" },
-      { manager: queryManager(database) } as never,
-    );
-    expect(claimed).toEqual([expect.objectContaining({
-      id: "authorized-after-rejection",
-      poll_state: "leased",
-    })]);
+    expect(await TbankNotificationModuleService.prototype.claimDuePaymentAttempts.call(
+      {}, { limit: 1, leaseToken: "confirm-missing", now }, { manager: queryManager(database) } as never,
+    )).toEqual([expect.objectContaining({ id: "authorized-after-rejection", poll_state: "leased" })]);
   });
 
-  it("does not poll or flag attempts with already processed terminal bank outcomes", async () => {
-    const migration = new Migration20260926150000({} as never, {} as never);
-    await migration.down();
-    await applyQueries(database, migration);
-    const now = new Date("2026-09-26T12:00:00.000Z");
-    const old = new Date(now.getTime() - 25 * 60 * 60_000);
-    await insertPollAttempt(database, "paid", old);
-    await insertPollAttempt(database, "failed", old);
+  it("preserves main terminal backfill, leases and retry deadlines through the canonical upgrade and downgrade", async () => {
+    const recoveryDown = new Migration20261011100000({} as never, {} as never);
+    await recoveryDown.down();
+    await applyQueries(database, recoveryDown);
+    const mainDown = new Migration20260926150000({} as never, {} as never);
+    await mainDown.down();
+    await applyQueries(database, mainDown);
+    const now = new Date("2026-10-11T12:00:00.000Z");
+    const createdAt = new Date(now.getTime() - 25 * 60 * 60_000);
+    for (const id of ["paid", "failed", "contradiction", "leased"]) {
+      await insertPollAttempt(database, id, createdAt);
+    }
     await database.query(
       `update payment_session set status = 'error',
-        data = jsonb_set(data, '{status}', to_jsonb('REJECTED'::text))
+         data = jsonb_set(data, '{status}', to_jsonb('REJECTED'::text))
        where id = 'poll-test-failed'`,
     );
-    await insertPollAttempt(database, "unpaid", old);
-    await insertPollAttempt(database, "historical-contradiction", old);
     await database.query(
-      `update payment_session
-       set data = jsonb_set(data, '{status}', to_jsonb('AUTHORIZED'::text))
-       where id = 'poll-test-historical-contradiction'`,
+      `update payment_session set data = jsonb_set(data, '{status}', to_jsonb('AUTHORIZED'::text))
+       where id = 'poll-test-contradiction'`,
     );
     await database.query(
       `insert into tbank_notification
-        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
-         success, canonical_payload_hash, lifecycle_state, attempt_count)
-       values ('historical-paid', 'terminal', 'bank-paid', 'CONFIRMED',
-         'poll-test-paid', 100, 'rub', true, repeat('a', 64), 'processed', 0)`,
+        (id, terminal_key, payment_id, status, order_id, amount_kopecks,
+         currency_code, success, canonical_payload_hash, lifecycle_state, attempt_count)
+       values
+         ('historical-paid', 'terminal', 'bank-paid', 'CONFIRMED', 'poll-test-paid', 100,
+           'rub', true, repeat('a', 64), 'processed', 0),
+         ('historical-failed', 'terminal', 'bank-failed', 'REJECTED', 'poll-test-failed', 100,
+           'rub', false, repeat('b', 64), 'processed', 0),
+         ('historical-contradiction', 'terminal', 'bank-contradiction', 'REJECTED', 'poll-test-contradiction', 100,
+           'rub', false, repeat('c', 64), 'processed', 0)`,
     );
+    const mainUp = new Migration20260926150000({} as never, {} as never);
+    await mainUp.up();
+    await applyQueries(database, mainUp);
+    const nextAt = new Date(now.getTime() + 60_000);
+    const expiresAt = new Date(now.getTime() + 300_000);
     await database.query(
-      `insert into tbank_notification
-        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
-         success, canonical_payload_hash, lifecycle_state, attempt_count)
-       values ('historical-failed', 'terminal', 'bank-failed', 'REJECTED',
-         'poll-test-failed', 100, 'rub', false, repeat('b', 64), 'processed', 0)`,
+      `update tbank_payment_attempt set poll_state = 'leased', poll_consecutive_errors = 3,
+         poll_next_at = $1, poll_lease_token = 'existing-worker', poll_lease_expires_at = $2
+       where id = 'leased'`,
+      [nextAt, expiresAt],
     );
-    await database.query(
-      `insert into tbank_notification
-        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
-         success, canonical_payload_hash, lifecycle_state, attempt_count)
-       values ('historical-contradiction-webhook', 'terminal',
-         'bank-historical-contradiction', 'REJECTED', 'poll-test-historical-contradiction',
-         100, 'rub', false, repeat('e', 64), 'processed', 0)`,
-    );
-    const upgrade = new Migration20260926150000({} as never, {} as never);
+    const upgrade = new Migration20261011100000({} as never, {} as never);
     await upgrade.up();
     await applyQueries(database, upgrade);
-    await insertPollAttempt(database, "orphan", old, { session: false });
-    await insertPollAttempt(database, "abandoned", old);
-    await database.query(
-      `update tbank_payment_attempt
-       set poll_state = 'leased', poll_lease_token = 'crashed',
-           poll_lease_expires_at = $1 where id = 'abandoned'`,
-      [new Date(now.getTime() - 60_000)],
-    );
-    await insertPollAttempt(database, "late-paid", old);
-    await database.query(
-      `insert into tbank_notification
-        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
-         success, canonical_payload_hash, lifecycle_state, attempt_count)
-       values ('late-confirmed', 'terminal', 'bank-late-paid', 'CONFIRMED',
-         'poll-test-late-paid', 100, 'rub', true, repeat('a', 64), 'processed', 0)`,
-    );
-    await insertPollAttempt(database, "late-failed", old);
-    await database.query(
-      `update payment_session set status = 'canceled',
-        data = jsonb_set(data, '{status}', to_jsonb('CANCELED'::text))
-       where id = 'poll-test-late-failed'`,
-    );
-    await database.query(
-      `insert into tbank_notification
-        (id, terminal_key, payment_id, status, order_id, amount_kopecks, currency_code,
-         success, canonical_payload_hash, lifecycle_state, attempt_count)
-       values ('late-failed-webhook', 'terminal', 'bank-late-failed', 'CANCELED',
-         'poll-test-late-failed', 100, 'rub', false, repeat('c', 64), 'processed', 0)`,
-    );
-    const paidBefore = await database.query(
-      `select poll_state from tbank_payment_attempt where id = 'paid'`,
-    );
-    expect(paidBefore.rows[0]).toEqual({ poll_state: "complete" });
-    expect(await database.query(`select poll_state from tbank_payment_attempt where id = 'failed'`))
-      .toEqual(expect.objectContaining({ rows: [{ poll_state: "complete" }] }));
-    expect(await database.query(
-      `select poll_state from tbank_payment_attempt where id = 'historical-contradiction'`,
-    )).toEqual(expect.objectContaining({ rows: [{ poll_state: "pending" }] }));
-    const expired = await TbankNotificationModuleService.prototype.expireStalePaymentAttemptPolls.call(
-      {}, { now, terminalKey: "terminal" }, { manager: queryManager(database) } as never,
-    );
-    expect(Object.fromEntries(expired.map((row) => [row.id, row.poll_state]))).toEqual({
-      abandoned: "manual_review",
-      "historical-contradiction": "manual_review",
-      orphan: "manual_review",
-      unpaid: "manual_review",
-      "late-paid": "complete",
-      "late-failed": "complete",
-    });
-    const reviews = expired.filter((row) => row.poll_state === "manual_review");
-    expect(reviews).toHaveLength(4);
-    for (const row of reviews) {
-      expect(row).toEqual(expect.objectContaining({ poll_manual_review_at: now }));
-    }
-    expect(await TbankNotificationModuleService.prototype.expireStalePaymentAttemptPolls.call(
-      {}, { now, terminalKey: "terminal" }, { manager: queryManager(database) } as never,
-    )).toEqual([]);
-    expect(await database.query(`select poll_state from tbank_payment_attempt where id = 'paid'`))
-      .toEqual(expect.objectContaining({ rows: [{ poll_state: "complete" }] }));
+    expect((await database.query(
+      "select id, poll_state from tbank_payment_attempt where id in ('paid','failed','contradiction') order by id",
+    )).rows).toEqual([
+      { id: "contradiction", poll_state: "pending" },
+      { id: "failed", poll_state: "completed" },
+      { id: "paid", poll_state: "completed" },
+    ]);
+    expect((await database.query(
+      "select poll_count, poll_next_at, poll_lease_token, poll_lease_expires_at from tbank_payment_attempt where id = 'leased'",
+    )).rows).toEqual([{
+      poll_count: 3, poll_next_at: nextAt, poll_lease_token: "existing-worker", poll_lease_expires_at: expiresAt,
+    }]);
+    expect((await database.query(
+      "select poll_completed_at from tbank_payment_attempt where id = 'paid'",
+    )).rows[0].poll_completed_at).not.toBeNull();
+    const downgrade = new Migration20261011100000({} as never, {} as never);
+    await downgrade.down();
+    await applyQueries(database, downgrade);
+    expect((await database.query(
+      "select poll_state from tbank_payment_attempt where id = 'paid'",
+    )).rows).toEqual([{ poll_state: "complete" }]);
+    expect((await database.query(
+      "select poll_consecutive_errors, poll_next_at, poll_lease_token, poll_lease_expires_at from tbank_payment_attempt where id = 'leased'",
+    )).rows).toEqual([{
+      poll_consecutive_errors: 3, poll_next_at: nextAt, poll_lease_token: "existing-worker", poll_lease_expires_at: expiresAt,
+    }]);
+  });
+
+  it("atomically quarantines a conflicting fiscal document and blocks its next refund", async () => {
+    const receipt: TBankReceipt = {
+      Email: "pg-refund@example.test", Taxation: "usn_income",
+      Items: [{ Name: "Изделие", Price: 1000, Quantity: 2, Amount: 2000, Tax: "vat105",
+        PaymentMethod: "full_prepayment", PaymentObject: "commodity", MeasurementUnit: "шт" }],
+    };
+    const input = {
+      kind: "refund" as const, payment_id: "pay_pg", payment_session_id: "payses_pg", bank_payment_id: "bank_pg",
+      terminal_key: "terminal", idempotency_key: "pg-refund", snapshot_hash: digest(receipt), original: receipt,
+      selections: [{ line_index: 0, quantity: 1 }], receipt_mode: "prepayment" as const, operator_id: "usr_pg", credit_amount_kopecks: 1000,
+    };
+    const context = { manager: queryManager(database) } as never;
+    const operation = await TbankNotificationModuleService.prototype.prepare.call({}, input, context);
+    await database.query(`insert into tbank_fiscal_receipt
+      (id,terminal_key,payment_id,order_id,receipt_key,receipt_type,amount_kopecks,success,error_code,
+       canonical_payload_hash,lifecycle_state,operation_id,correlation_kind)
+      values ('fiscal-pg','terminal','bank_pg','payses_pg','fiscal-key','return',1000,true,'0',$1,'processed',$2,'refund')`,
+    ["a".repeat(64), operation.id]);
+    await database.query(`update tbank_refund_operation set state='succeeded',fiscal_state='succeeded',
+      fiscal_receipt_id='fiscal-pg',native_refund_id='ref_pg' where id=$1`, [operation.id]);
+    await TbankNotificationModuleService.prototype.quarantineFiscalReceipt.call({}, {
+      id: "fiscal-pg", terminal_key: "terminal", payment_id: "bank_pg",
+      canonical_payload_hash: "a".repeat(64), conflicting_payload_hash: "b".repeat(64),
+    }, context);
+    const state = (await database.query(`select op.state,op.fiscal_state,op.error_code,fiscal.lifecycle_state,
+      op.amount_kopecks from tbank_refund_operation op join tbank_fiscal_receipt fiscal on fiscal.operation_id=op.id`)).rows;
+    expect(state).toEqual([{ state: "succeeded", fiscal_state: "failed", error_code: "FISCAL_CONFLICT", lifecycle_state: "manual_review", amount_kopecks: 1000 }]);
+    expect((await database.query("select conflict_kind from tbank_notification_conflict where canonical_notification_id='fiscal-pg'")).rows)
+      .toEqual([{ conflict_kind: "fiscal_canonical_payload_changed" }]);
+    expect(await TbankNotificationModuleService.prototype.applyFiscal.call({}, {
+      id: operation.id, receipt_id: "fiscal-pg", canonical_hash: "a".repeat(64),
+      receipt_type: "return", success: true, error_code: "0",
+    }, context)).toBe(false);
+    await expect(TbankNotificationModuleService.prototype.prepare.call({}, { ...input, idempotency_key: "unsafe-second" }, context)).rejects.toMatchObject({ type: "conflict" });
   });
 });

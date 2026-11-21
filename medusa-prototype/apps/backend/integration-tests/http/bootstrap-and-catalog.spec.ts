@@ -112,9 +112,11 @@ const snapshotCatalog = async (
       }
       variantIdBySku[variant.sku] = variant.id;
 
-      const inventoryItems = (variant.inventory_items ?? []).filter(Boolean);
-      if (inventoryItems.length > 0) {
-        inventoryItemIdBySku[variant.sku] = inventoryItems[0].inventory_item_id;
+      const inventoryItem = variant.inventory_items?.find(
+        (item) => item?.inventory_item_id
+      );
+      if (inventoryItem?.inventory_item_id) {
+        inventoryItemIdBySku[variant.sku] = inventoryItem.inventory_item_id;
       }
     }
   }
@@ -182,7 +184,9 @@ medusaIntegrationTestRunner({
             "supported_currencies.is_default",
           ],
         });
-        const currencies = (store.supported_currencies ?? []).filter(Boolean);
+        const currencies = (store.supported_currencies ?? []).filter(
+          (currency): currency is NonNullable<typeof currency> => currency != null
+        );
         expect(currencies.map((currency) => currency.currency_code)).toEqual([
           "rub",
         ]);
@@ -283,7 +287,9 @@ medusaIntegrationTestRunner({
         const publishableKey = apiKeys.find(
           (key) => key.type === "publishable"
         );
-        expect(publishableKey).toBeTruthy();
+        if (!publishableKey) {
+          throw new Error("Bootstrap did not create a publishable API key");
+        }
 
         const response = await api.get("/store/products", {
           headers: { "x-publishable-api-key": publishableKey.token },

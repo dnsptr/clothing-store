@@ -23,7 +23,9 @@ import {
   updateMedusaCartLineItem,
   updateMedusaCart,
 } from "../lib/medusa";
-import { approvedTbankPaymentUrl, decideTbankSession } from "../lib/paymentSessionPolicy";
+import { decideTbankSession } from "../lib/paymentSessionPolicy";
+import { getCartAccessToken } from "../lib/cartAccess";
+import { fetchYandexDeliveryQuote } from "../lib/yandex-delivery";
 
 export interface CartItem {
   product: Product;
@@ -54,11 +56,30 @@ export interface CheckoutDetails {
    */
   shippingOptionId: string;
   comment: string;
+  deliveryType: "cdek-pvz" | "cdek-courier" | "pickup-store" | "own-courier-mkad" | "yandex-pvz";
+  cdekPvzCode?: string;
+  cdekPvzAddress?: string;
+  cdekCityCode?: number;
+  pickupStoreId?: string;
+  pickupStoreName?: string;
+  yandexPvzId?: string;
+  yandexPvzName?: string;
+  yandexPvzAddress?: string;
+  yandexGeoId?: number;
+}
+
+export interface OwnCourierAvailabilityAddress {
+  city: string;
+  address: string;
+  apartment: string;
+  zip: string;
 }
 
 type CheckoutCompletion =
-  | { type: "redirect"; paymentUrl: string }
+  | { type: "redirect"; paymentUrl: string; cartId: string; cartAccessToken: string }
   | { type: "order"; id: string; displayId?: number | null };
+
+type PreparedCheckoutPrice = { shippingTotal: number | null; total: number | null };
 
 interface CartContextType {
   // Cart States
@@ -67,9 +88,11 @@ interface CartContextType {
   addToCart: (item: CartItem) => Promise<void>;
   removeFromCart: (productId: string, size: string, colorHex: string) => Promise<void>;
   updateQuantity: (productId: string, size: string, colorHex: string, quantity: number) => Promise<void>;
-  prepareCheckout: (details: CheckoutDetails) => Promise<void>;
+  prepareCheckout: (details: CheckoutDetails) => Promise<PreparedCheckoutPrice>;
+  checkOwnCourierAvailability: (address: OwnCourierAvailabilityAddress) => Promise<MedusaShippingOption[]>;
   getShippingOptions: () => Promise<MedusaShippingOption[]>;
-  completeCheckout: () => Promise<CheckoutCompletion>;
+  getYandexDeliveryQuote: (stationId: string, geoId: number) => Promise<number>;
+  completeCheckout: (expectedTotal: number) => Promise<CheckoutCompletion>;
   toggleCart: () => void;
   setIsCartOpen: (isOpen: boolean) => void;
   cartCount: number;
@@ -255,8 +278,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let isMounted = true;
     const hydrationGeneration = cartHydrationGeneration.current;
+    let hydrationError: string | null = null;
 
     try {
+      const storedId = getStoredCartId();
+      if (isMedusaConfigured && storedId && !getCartAccessToken(storedId)) {
+        window.localStorage.removeItem(MEDUSA_CART_STORAGE_KEY);
+        window.localStorage.removeItem(CART_STORAGE_KEY);
+        window.localStorage.removeItem("medusa_cart_id");
+        window.localStorage.removeItem("medusa_cart_id_v1");
+        hydrationError = "Старая корзина не имеет ключа доступа. Добавьте товары заново.";
+      }
       const savedCart = window.localStorage.getItem(CART_STORAGE_KEY);
       const parsedCart: unknown = savedCart ? JSON.parse(savedCart) : [];
       const nextCart = Array.isArray(parsedCart)
@@ -265,6 +297,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       window.setTimeout(() => {
         if (!isMounted || cartHydrationGeneration.current !== hydrationGeneration) return;
+        if (hydrationError) setCartError(hydrationError);
         cartItemsRef.current = nextCart;
         setCartItems(nextCart);
         setIsCartHydrated(true);
@@ -338,7 +371,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const getMedusaCartId = async () => {
     const existingCartId = window.localStorage.getItem(MEDUSA_CART_STORAGE_KEY);
-    if (existingCartId) return existingCartId;
+    if (existingCartId && getCartAccessToken(existingCartId)) return existingCartId;
 
     const cart = await createMedusaCart();
     window.localStorage.setItem(MEDUSA_CART_STORAGE_KEY, cart.id);
@@ -516,38 +549,119 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!details.shippingOptionId) {
       throw new Error("Не выбран способ доставки.");
     }
+    if (details.deliveryType === "yandex-pvz" &&
+        (!details.yandexPvzId?.trim() || !details.yandexPvzName?.trim() ||
+         !details.yandexPvzAddress?.trim() || !details.city.trim() ||
+         !Number.isSafeInteger(details.yandexGeoId) || (details.yandexGeoId ?? 0) <= 0)) {
+      throw new Error("Выберите город и пункт выдачи Яндекс Маркет.");
+    }
 
     const cartId = await getMedusaCartId();
+
+    const metadata: Record<string, unknown> = {};
+    if (details.comment.trim()) {
+      metadata.customer_note = details.comment.trim();
+    }
+    if (details.deliveryType) {
+      metadata.delivery_type = details.deliveryType;
+    }
+    if (details.cdekPvzCode) {
+      metadata.cdek_pvz_code = details.cdekPvzCode;
+    }
+    if (details.cdekPvzAddress) {
+      metadata.cdek_pvz_address = details.cdekPvzAddress;
+    }
+    if (details.pickupStoreId) {
+      metadata.pickup_store_id = details.pickupStoreId;
+    }
+    if (details.pickupStoreName) {
+      metadata.pickup_store_name = details.pickupStoreName;
+    }
+    if (details.yandexPvzId) {
+      metadata.yandex_pvz_id = details.yandexPvzId;
+    }
+    if (details.yandexPvzAddress) {
+      metadata.yandex_pvz_address = details.yandexPvzAddress;
+    }
+    if (details.yandexPvzName) {
+      metadata.yandex_pvz_name = details.yandexPvzName;
+    }
+
+    const resolvedAddress1 = details.deliveryType === "cdek-pvz" && details.cdekPvzAddress
+      ? details.cdekPvzAddress
+      : details.deliveryType === "yandex-pvz" && details.yandexPvzAddress
+      ? details.yandexPvzAddress
+      : details.address;
+
     await updateMedusaCart(cartId, {
       email: details.email,
       shipping_address: {
         first_name: details.firstName,
         last_name: details.lastName,
         phone: details.phone,
-        address_1: details.address,
+        address_1: resolvedAddress1,
         address_2: details.apartment || undefined,
         city: details.city,
         country_code: "ru",
         postal_code: details.zip,
       },
-      // Комментарий раньше терялся: он лежал в объекте деталей, но в тело
-      // запроса не попадал, а excess property check его не ловил, потому что
-      // передавалась переменная. Логист узнавал о пожеланиях покупателя ниоткуда.
-      ...(details.comment.trim() ? { metadata: { customer_note: details.comment.trim() } } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     });
 
     // Способ доставки выбирает покупатель. Витрина больше не подставляет
     // единственную известную ей опцию: список приходит из Medusa, и в заказ
     // уходит ровно то, что выбрано в форме.
     const shippingOptions = await listMedusaShippingOptions(cartId);
-    const shippingOption = shippingOptions.find((option) => option.id === details.shippingOptionId);
+    const shippingOption = shippingOptions.find(
+      (option) => option.id === details.shippingOptionId && option.type?.code === details.deliveryType,
+    );
     if (!shippingOption) {
       throw new Error(
         "Выбранный способ доставки больше не доступен для этого адреса. Выберите другой.",
       );
     }
 
-    syncRemoteCart(await addMedusaCartShippingMethod(cartId, shippingOption.id));
+    const deliveryAddress = [details.address, details.apartment].filter(Boolean).join(", ");
+    const fulfillmentData: Record<string, unknown> = {};
+    if (details.deliveryType === "cdek-pvz") {
+      fulfillmentData.city_code = details.cdekCityCode;
+      fulfillmentData.cdek_pvz_code = details.cdekPvzCode;
+      fulfillmentData.cdek_pvz_address = details.cdekPvzAddress;
+    } else if (details.deliveryType === "cdek-courier") {
+      fulfillmentData.city_code = details.cdekCityCode;
+      fulfillmentData.delivery_address = deliveryAddress;
+    } else if (details.deliveryType === "pickup-store") {
+      fulfillmentData.pickup_store_id = details.pickupStoreId;
+    } else if (details.deliveryType === "yandex-pvz") {
+      fulfillmentData.platform_station_id = details.yandexPvzId;
+      fulfillmentData.pvz_name = details.yandexPvzName;
+      fulfillmentData.pvz_address = details.yandexPvzAddress;
+      fulfillmentData.city = details.city;
+      fulfillmentData.geo_id = details.yandexGeoId;
+      fulfillmentData.delivery_mode = "yandex-pvz";
+    }
+
+    const cart = await addMedusaCartShippingMethod(cartId, shippingOption.id, fulfillmentData);
+    syncRemoteCart(cart);
+    return { shippingTotal: cart.shipping_total ?? null, total: cart.total ?? null };
+  });
+
+  const checkOwnCourierAvailability = (address: OwnCourierAvailabilityAddress) => enqueueCartMutation(async () => {
+    if (!isMedusaConfigured) {
+      throw new Error("Checkout requires Medusa mode with a configured Store API.");
+    }
+
+    const cartId = await getMedusaCartId();
+    await updateMedusaCart(cartId, {
+      shipping_address: {
+        address_1: address.address,
+        address_2: address.apartment || undefined,
+        city: address.city,
+        country_code: "ru",
+        postal_code: address.zip,
+      },
+    });
+    return listMedusaShippingOptions(cartId);
   });
 
   /**
@@ -562,27 +676,42 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
     return listMedusaShippingOptions(await getMedusaCartId());
   };
+  const getYandexDeliveryQuote = async (stationId: string, geoId: number) => {
+    await mutationQueue.current;
+    return fetchYandexDeliveryQuote(await getMedusaCartId(), stationId, geoId);
+  };
 
-  const completeCheckout = () => enqueueCartMutation<CheckoutCompletion>(async () => {
+  const completeCheckout = (expectedTotal: number) => enqueueCartMutation<CheckoutCompletion>(async () => {
     if (!isMedusaConfigured) {
       throw new Error("Checkout requires Medusa mode with a configured Store API.");
     }
 
     const cartId = await getMedusaCartId();
+    const currentCart = await retrieveMedusaCart(cartId);
+    const cartAccessToken = getCartAccessToken(cartId);
+    if (!cartAccessToken || currentCart.currency_code !== "rub" ||
+        !Number.isFinite(expectedTotal) || expectedTotal <= 0 ||
+        typeof currentCart.total !== "number" || !Number.isFinite(currentCart.total) ||
+        Math.round(currentCart.total * 100) !== Math.round(expectedTotal * 100)) {
+      syncRemoteCart(currentCart);
+      throw new Error("Итог заказа изменился. Проверьте сумму и подтвердите заказ ещё раз.");
+    }
     const paymentCollection = await createMedusaPaymentCollection(cartId);
     let paymentSession: MedusaPaymentSession;
     if (medusaPaymentProviderId === "pp_system_default") {
-      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id);
+      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id, cartId, expectedTotal);
     } else {
       const decision = decideTbankSession(
         paymentCollection.payment_sessions,
         medusaPaymentProviderId,
+        expectedTotal,
+        currentCart.currency_code,
       );
       if (decision.kind === "redirect") {
-        return { type: "redirect", paymentUrl: decision.paymentUrl };
+        return { type: "redirect", paymentUrl: decision.paymentUrl, cartId, cartAccessToken };
       }
       if (decision.kind === "reject") throw new Error(decision.message);
-      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id);
+      paymentSession = await initializeMedusaPaymentSession(paymentCollection.id, cartId, expectedTotal);
     }
 
     // Встроенный провайдер оставлен только для локального/e2e escape hatch.
@@ -594,9 +723,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           `Платёжный провайдер вернул неожиданное состояние: ${paymentSession.status}.`,
         );
       }
-      const paymentUrl = approvedTbankPaymentUrl(paymentSession.data.paymentUrl);
-      if (!paymentUrl) throw new Error("Платёжный провайдер вернул недействительную ссылку на оплату.");
-      return { type: "redirect", paymentUrl };
+      const decision = decideTbankSession([paymentSession], medusaPaymentProviderId, expectedTotal, currentCart.currency_code);
+      if (decision.kind !== "redirect") throw new Error(decision.kind === "reject" ? decision.message : "Платёжная сессия отсутствует.");
+      return { type: "redirect", paymentUrl: decision.paymentUrl, cartId, cartAccessToken };
     }
 
     const response = await completeMedusaCart(cartId);
@@ -653,7 +782,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         removeFromCart,
         updateQuantity,
         prepareCheckout,
+        checkOwnCourierAvailability,
         getShippingOptions,
+        getYandexDeliveryQuote,
         completeCheckout,
         clearCart,
         toggleCart,

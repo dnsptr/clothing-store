@@ -12,6 +12,8 @@ describe("store admin navigation", () => {
     })
     expect(widgets["core:nav:/orders"].hidden).toBe(false)
     expect(widgets["core:nav:/catalog-editor"].hidden).toBe(false)
+    expect(widgets["core:nav:/dispatch-points"].hidden).toBe(false)
+    expect(widgets["core:nav:/integrations"].hidden).toBe(false)
   })
   it("hides duplicate technical menus and separator but keeps search", () => {
     const { widgets } = storeSidebarConfiguration()

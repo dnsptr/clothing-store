@@ -37,6 +37,7 @@ export type ReceiptCart = {
   readonly email?: string | null;
   readonly shipping_address?: { readonly phone?: string | null } | null;
   readonly items?: readonly ReceiptCartItem[] | null;
+  readonly shipping_methods?: readonly { readonly id: string }[] | null;
   readonly shipping_total: BigNumberInput;
   readonly total: BigNumberInput;
 };

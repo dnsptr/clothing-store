@@ -11,18 +11,40 @@ const container = { resolve: () => ({ graph: async () => ({ data: [{ shipping_ad
 describe("shipping option listing context", () => {
   const originalToken = process.env.DADATA_API_KEY;
   const originalSecret = process.env.DADATA_SECRET_KEY;
+  const originalEnabled = process.env.OWN_COURIER_ENABLED;
+  const originalPrice = process.env.OWN_COURIER_PRICE_RUB;
+
+  beforeEach(() => {
+    process.env.OWN_COURIER_ENABLED = "true";
+    process.env.OWN_COURIER_PRICE_RUB = "0";
+  });
 
   afterEach(() => {
     if (originalToken === undefined) delete process.env.DADATA_API_KEY;
     else process.env.DADATA_API_KEY = originalToken;
     if (originalSecret === undefined) delete process.env.DADATA_SECRET_KEY;
     else process.env.DADATA_SECRET_KEY = originalSecret;
+    if (originalEnabled === undefined) delete process.env.OWN_COURIER_ENABLED;
+    else process.env.OWN_COURIER_ENABLED = originalEnabled;
+    if (originalPrice === undefined) delete process.env.OWN_COURIER_PRICE_RUB;
+    else process.env.OWN_COURIER_PRICE_RUB = originalPrice;
     jest.restoreAllMocks();
   });
 
   it("excludes own courier without both credentials without contacting DaData", async () => {
     delete process.env.DADATA_API_KEY;
     delete process.env.DADATA_SECRET_KEY;
+    const request = jest.fn();
+    global.fetch = request;
+    const result = await shippingContext({ cart: { id: "cart_1" } }, { container } as never);
+    expect(result.output).toEqual({ own_courier_mkad_verified: "false" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each(["OWN_COURIER_ENABLED", "OWN_COURIER_PRICE_RUB"])("excludes own courier without %s", async (variable) => {
+    process.env.DADATA_API_KEY = "test-token";
+    process.env.DADATA_SECRET_KEY = "test-secret";
+    delete process.env[variable];
     const request = jest.fn();
     global.fetch = request;
     const result = await shippingContext({ cart: { id: "cart_1" } }, { container } as never);

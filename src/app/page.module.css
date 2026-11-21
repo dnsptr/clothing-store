@@ -145,6 +145,16 @@ a.secondary {
   isolation: isolate;
 }
 
+.withoutHero {
+  padding-top: calc(var(--site-chrome-height) + 32px);
+}
+
+@media (max-width: 900px) {
+  .withoutHero {
+    padding-top: calc(var(--site-chrome-height-mobile) + 24px);
+  }
+}
+
 .afterPromo {
   position: relative;
   z-index: 1;

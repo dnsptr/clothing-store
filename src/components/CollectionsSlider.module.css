@@ -43,6 +43,11 @@
   color: #ffffff;
 }
 
+.card:focus-visible {
+  outline: 3px solid var(--text-primary);
+  outline-offset: -3px;
+}
+
 .image {
   object-fit: cover;
   transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
@@ -74,6 +79,7 @@
   flex-direction: column;
   align-items: flex-start;
   max-width: 460px;
+  overflow-wrap: anywhere;
   text-align: left;
 }
 
@@ -115,6 +121,12 @@
 
   .slider {
     padding-bottom: 72px;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: var(--wide-gutter);
+  }
+
+  .card {
+    scroll-snap-align: start;
   }
 
   .info {

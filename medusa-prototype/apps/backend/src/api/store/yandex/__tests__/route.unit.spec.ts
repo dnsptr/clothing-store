@@ -1,5 +1,9 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 
+jest.mock("@medusajs/medusa/core-flows", () => ({
+  listShippingOptionsForCartWorkflow: jest.fn(() => ({ run: () => mockListShippingOptions() })),
+}));
+
 import { POST as calculateYandex } from "../calculate/route";
 import { GET as getYandexPvz } from "../pvz/route";
 import { YandexDeliveryClient } from "../../../../modules/yandex-delivery/lib/yandex-client";
@@ -24,17 +28,33 @@ function createResponse(): TestResponse {
 }
 
 const MEASURED_ITEMS = [
-  { id: "item_1", quantity: 1, unit_price: 3500, variant: { weight: 1100, length: 25, width: 20, height: 15 } },
+  { id: "item_1", variant_id: "variant_1", quantity: 1, unit_price: 3500,
+    variant: { weight: 1100, length: 25, width: 20, height: 15 } },
 ];
 
-function request(input: { query?: object; body?: object; ip?: string; items?: unknown[] }): MedusaRequest {
+const ORIGIN = { id: "station_source_1", name: "Отгрузка Центр", address: "Москва, Складская, 1", active: true };
+const ALTERNATE_ORIGIN = { ...ORIGIN, id: "station_source_2", name: "Отгрузка Север" };
+function nativeOption(defaultId = ORIGIN.id, points = [ORIGIN, ALTERNATE_ORIGIN]) {
+  return {
+    id: "so_yandex", provider_id: "yandex-delivery_yandex-delivery", data: { id: "yandex-pvz" },
+    provider: { is_enabled: true }, insufficient_inventory: false,
+    service_zone: { fulfillment_set: { location: { id: "sloc_yandex", address: { metadata: {
+      carrier_handoff: { yandex: { default_id: defaultId, points } },
+    } } } } },
+  };
+}
+let availableOptions: unknown[] = [];
+const mockListShippingOptions = jest.fn<Promise<{ result: unknown[] }>, []>();
+
+function request(input: { query?: object; body?: object; ip?: string; items?: unknown[]; shippingMethods?: unknown[] }): MedusaRequest {
   return {
     query: input.query ?? {},
     body: input.body ?? {},
     ip: input.ip ?? "198.51.100.10",
     scope: {
       resolve: () => ({
-        graph: async () => ({ data: [{ id: "cart_measured", items: input.items ?? MEASURED_ITEMS }] }),
+        graph: async () => ({ data: [{ id: "cart_measured", items: input.items ?? MEASURED_ITEMS,
+          shipping_methods: input.shippingMethods ?? [] }] }),
       }),
     },
   } as unknown as MedusaRequest;
@@ -52,7 +72,7 @@ function mockConfirmedPoint() {
     name: "ПВЗ Маркет",
     type: "pickup_point",
     operatorId: "market_l4g",
-    address: { full_address: "Москва, Мира, 1", city: "Москва", geo_id: 213 },
+    address: { full_address: "Москва, Мира, 1", city: "Москва", geo_id: 213001 },
     position: { latitude: 55.7, longitude: 37.6 },
     isFittingAllowed: false,
     isPartialRefuseAllowed: false,
@@ -68,9 +88,11 @@ describe("Yandex Delivery public routes", () => {
       YANDEX_DELIVERY_ENABLED: "true",
       YANDEX_DELIVERY_TOKEN: "test-token",
       YANDEX_DELIVERY_API_BASE_URL: "https://b2b-authproxy.taxi.yandex.net/api/b2b/platform",
-      YANDEX_DELIVERY_SOURCE_STATION_ID: "station_source_1",
+      YANDEX_DELIVERY_PVZ_PRICE_RUB: "450",
     };
     _resetPublicYandexForTesting();
+    availableOptions = [nativeOption()];
+    mockListShippingOptions.mockImplementation(async () => ({ result: availableOptions }));
   });
 
   afterEach(() => {
@@ -128,8 +150,16 @@ describe("Yandex Delivery public routes", () => {
     expect(response.body).toEqual({ message: "Delivery service unavailable" });
   });
 
+  it("does not offer delivery without an agreed fixed buyer price", async () => {
+    delete process.env.YANDEX_DELIVERY_PVZ_PRICE_RUB;
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION }), response);
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({ message: "Delivery service unavailable" });
+  });
+
   it("rejects a station outside the selected city before pricing", async () => {
-    mockConfirmedPoint();
+    mockConfirmedPoint().mockResolvedValueOnce([]);
     const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing");
     const response = createResponse();
     await calculateYandex(request({ body: { ...VALID_CALCULATION, geo_id: 43 } }), response);
@@ -151,10 +181,10 @@ describe("Yandex Delivery public routes", () => {
     expect(calculate).not.toHaveBeenCalled();
   });
 
-  it("prices measured cart items for a confirmed point while charging the shopper nothing", async () => {
+  it("quotes the buyer's price for a PVZ returned by the selected city despite a different point geo ID", async () => {
     mockConfirmedPoint();
     const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockResolvedValue({
-      priceRub: 310,
+      priceRub: 310.75,
       deliveryDays: 3,
       currency: "RUB",
     });
@@ -162,19 +192,140 @@ describe("Yandex Delivery public routes", () => {
     await calculateYandex(request({ body: VALID_CALCULATION }), response);
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
-      price: 310,
       delivery_days: 3,
       currency: "RUB",
-      customer_cost: 0,
+      customer_cost: 450,
     });
     expect(calculate).toHaveBeenCalledWith({
+      sourceStationId: ORIGIN.id,
       destinationStationId: "station_dest_123",
-      weightGrossGrams: 1100,
-      dxCm: 25,
-      dyCm: 20,
-      dzCm: 15,
+      places: [{ groupId: expect.any(String), unitIndex: 1,
+        weightGrossGrams: 1100, dxCm: 25, dyCm: 20, dzCm: 15 }],
       assessedPriceRub: 3500,
     });
+  });
+
+  it("quotes two plus one measured packages with the fixed customer fee once and canonical cache identity", async () => {
+    mockConfirmedPoint();
+    const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockResolvedValue({
+      priceRub: 990.5, deliveryDays: 4, currency: "RUB",
+    });
+    const items = [{ ...MEASURED_ITEMS[0], quantity: 2 },
+      { ...MEASURED_ITEMS[0], id: "item_2", variant_id: "variant_2", unit_price: 5000,
+        variant: { weight: 501, length: 31, width: 18, height: 9 } }];
+    for (const orderedItems of [items, [...items].reverse()]) {
+      const response = createResponse();
+      await calculateYandex(request({ body: VALID_CALCULATION, items: orderedItems }), response);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({ customer_cost: 450, delivery_days: 4, currency: "RUB" });
+    }
+    expect(calculate).toHaveBeenCalledTimes(1);
+    const params = calculate.mock.calls[0][0];
+    expect(params.assessedPriceRub).toBe(12000);
+    expect(params.places).toHaveLength(3);
+    expect(params.places.filter((place) => place.weightGrossGrams === 1100))
+      .toEqual([1, 2].map((unitIndex) => ({
+        groupId: expect.any(String), unitIndex, weightGrossGrams: 1100, dxCm: 25, dyCm: 20, dzCm: 15,
+      })));
+    expect(params.places.find((place) => place.weightGrossGrams === 501))
+      .toMatchObject({ dxCm: 31, dyCm: 18, dzCm: 9 });
+  });
+
+  it.each([
+    { name: "duplicate IDs", items: [MEASURED_ITEMS[0], MEASURED_ITEMS[0]] },
+    { name: "101 total units", items: [{ ...MEASURED_ITEMS[0], quantity: 100 },
+      { ...MEASURED_ITEMS[0], id: "extra" }] },
+    { name: "unknown physical measurements", items: [{ ...MEASURED_ITEMS[0], variant: null }] },
+    { name: "unknown catalog identity", items: [{ ...MEASURED_ITEMS[0], variant_id: undefined }] },
+    { name: "oversized package", items: [{ ...MEASURED_ITEMS[0],
+      variant: { ...MEASURED_ITEMS[0].variant, length: 151 } }] },
+  ])("rejects $name before any carrier call", async ({ items }) => {
+    const points = jest.spyOn(YandexDeliveryClient.prototype, "getPickupPoints");
+    const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing");
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION, items }), response);
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toEqual({ message: "Invalid cart measurements" });
+    expect(points).not.toHaveBeenCalled();
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
+  it("rejects caller-supplied package metadata instead of trusting physical measurements in the request", async () => {
+    const points = jest.spyOn(YandexDeliveryClient.prototype, "getPickupPoints");
+    const response = createResponse();
+    await calculateYandex(request({ body: { ...VALID_CALCULATION,
+      places: [{ weight_gross: 1, dx: 1, dy: 1, dz: 1 }] } }), response);
+    expect(response.statusCode).toBe(400);
+    expect(points).not.toHaveBeenCalled();
+  });
+
+  it("rejects arbitrary client source selection instead of accepting a station ID", async () => {
+    const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing");
+    const response = createResponse();
+    await calculateYandex(request({ body: { ...VALID_CALCULATION, sourceStationId: "forged" } }), response);
+    expect(response.statusCode).toBe(400);
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a validated alternate cart origin when the native default changes", async () => {
+    mockConfirmedPoint();
+    availableOptions = [nativeOption(ALTERNATE_ORIGIN.id)];
+    const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing")
+      .mockResolvedValue({ priceRub: 900, currency: "RUB" });
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION, shippingMethods: [{
+      shipping_option_id: "so_yandex",
+      data: { handoff_origin: { carrier: "yandex", ...ORIGIN } },
+    }] }), response);
+    expect(response.statusCode).toBe(200);
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({ sourceStationId: ORIGIN.id }));
+  });
+
+  it("uses an allowed alternate native default and keeps the buyer fee independent", async () => {
+    mockConfirmedPoint();
+    availableOptions = [nativeOption(ALTERNATE_ORIGIN.id)];
+    const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing")
+      .mockResolvedValue({ priceRub: 1500, currency: "RUB" });
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION }), response);
+    expect(response.body).toEqual({ currency: "RUB", customer_cost: 450 });
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({ sourceStationId: ALTERNATE_ORIGIN.id }));
+  });
+
+  it.each(["missing", "disabled", "deleted", "ambiguous", "insufficient inventory"])(
+    "fails closed for %s native dispatch configuration before a carrier request", async (state) => {
+      const option = nativeOption(ALTERNATE_ORIGIN.id);
+      if (state === "missing") availableOptions = [];
+      if (state === "disabled") {
+        availableOptions = [nativeOption(ALTERNATE_ORIGIN.id, [{ ...ORIGIN, active: false }, ALTERNATE_ORIGIN])];
+      }
+      if (state === "deleted") availableOptions = [nativeOption(ALTERNATE_ORIGIN.id, [ALTERNATE_ORIGIN])];
+      if (state === "ambiguous") availableOptions = [option, { ...option, id: "so_other" }];
+      if (state === "insufficient inventory") availableOptions = [{ ...option, insufficient_inventory: true }];
+      const points = jest.spyOn(YandexDeliveryClient.prototype, "getPickupPoints");
+      const calculate = jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing");
+      const response = createResponse();
+      await calculateYandex(request({ body: VALID_CALCULATION,
+        shippingMethods: state === "disabled" || state === "deleted" ? [{
+          shipping_option_id: "so_yandex", data: { handoff_origin: { carrier: "yandex", id: ORIGIN.id } },
+        }] : [],
+      }), response);
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toEqual({ message: "Delivery source unavailable" });
+      expect(points).not.toHaveBeenCalled();
+      expect(calculate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns a real failure instead of a buyer quote when carrier pricing fails", async () => {
+    mockConfirmedPoint();
+    jest.spyOn(YandexDeliveryClient.prototype, "calculatePricing").mockRejectedValue(
+      new Error("secret upstream pricing response"),
+    );
+    const response = createResponse();
+    await calculateYandex(request({ body: VALID_CALCULATION }), response);
+    expect(response.statusCode).toBe(502);
+    expect(response.body).toEqual({ message: "Delivery provider unavailable" });
   });
 
   it("rate limits repeated requests before upstream work", async () => {

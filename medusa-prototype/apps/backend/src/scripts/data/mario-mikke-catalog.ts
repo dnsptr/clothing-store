@@ -29,13 +29,7 @@ export type DemoCatalogProduct = {
   colors: { name: string; hex: string }[];
   isNew?: boolean;
   isSoldOut?: boolean;
-  /**
-   * Переопределение упаковки для конкретного товара: категория задаёт типовую
-   * коробку, но отдельные вещи из неё выбиваются (кожаный шопер, пальто-
-   * оверсайз). Заполнять только при реальном основании — иначе цифра тихо
-   * разойдётся со справочником и её забудут пересмотреть, когда придут данные
-   * заказчика.
-   */
+  /** Фактический замер упакованной вещи; отсутствие запрещает тариф перевозчика. */
   packaging?: PackagingDimensions;
 };
 
@@ -45,89 +39,22 @@ export type DemoCatalogCollection = {
   productIds: string[];
 };
 
-// =============================================================================
-// ВЕС И ГАБАРИТЫ УПАКОВКИ — ВРЕМЕННЫЕ ИНЖЕНЕРНЫЕ ОЦЕНКИ, А НЕ ДАННЫЕ ЗАКАЗЧИКА
-//
-// Агрегатор доставки (ApiShip) считает тариф по весу и габаритам отправления,
-// и берёт их с варианта Medusa (weight/length/width/height). Пока варианты
-// создавались без этих полей, расчёт уходил бы на дефолты плагина
-// (10×10×10 см, 20 г) — это не «приблизительно», а заведомо неверный тариф:
-// пальто уехало бы по цене конверта, а разницу перевозчик выставил бы магазину
-// после фактического обмера.
-//
-// Цифры ниже поставлены, чтобы расчёт доставки можно было собрать и прогнать
-// до подтверждения реальных значений владельцем магазина. После подтверждения
-// правим справочник
-// здесь, повторный импорт каталога сам разнесёт новые значения по вариантам
-// (import-mario-mikke.ts обновляет варианты на месте).
-//
-// Контракт значений:
-//   * вес — в ГРАММАХ, габариты — в САНТИМЕТРАХ;
-//   * всё — для УПАКОВАННОГО вида (вещь + пакет или коробка), не для вещи;
-//   * ключ справочника — categorySlug товара.
-// =============================================================================
-export const PACKAGING_BY_CATEGORY: Record<string, PackagingDimensions> = {
-  // Пальто и тренчи: плотная шерсть, самая тяжёлая и объёмная позиция каталога.
-  outerwear: { weightGrams: 1500, lengthCm: 40, widthCm: 30, heightCm: 12 },
-  // Трикотаж (джемперы, платья-кафтаны): сжимается в курьерский пакет.
-  knitwear: { weightGrams: 500, lengthCm: 35, widthCm: 25, heightCm: 8 },
-  // Брюки и юбки: чуть плотнее трикотажа, тот же формат пакета.
-  trousers: { weightGrams: 600, lengthCm: 35, widthCm: 25, heightCm: 8 },
-  // Аксессуары: ориентир — кожаный шопер; он не сминается, отсюда высота.
-  accessories: { weightGrams: 900, lengthCm: 40, widthCm: 30, heightCm: 15 },
-  // Обувь: вес и габариты вместе с обувной коробкой (в каталоге — сапоги).
-  shoes: { weightGrams: 1600, lengthCm: 37, widthCm: 25, heightCm: 15 },
-};
-
-/**
- * Запасной вариант для категории, которой нет в справочнике: верхняя огибающая
- * по каждому измерению. Ошибаться приходится в какую-то сторону, и занижение
- * дороже: недовешенное отправление магазин доплачивает перевозчику по факту
- * обмера, тогда как завышенное — просто дороже посчитанная доставка, которую
- * видно сразу. Пробелов в справочнике при этом быть не должно — их ловит
- * юнит-тест на покрытие всех categorySlug каталога.
- */
-export const FALLBACK_PACKAGING: PackagingDimensions = {
-  weightGrams: 1600,
-  lengthCm: 40,
-  widthCm: 30,
-  heightCm: 15,
-};
-
-/** Приоритет: переопределение товара → справочник категории → огибающая. */
-export function resolveProductPackaging(
-  product: Pick<DemoCatalogProduct, "categorySlug" | "packaging">,
-): PackagingDimensions {
-  return (
-    product.packaging ??
-    PACKAGING_BY_CATEGORY[product.categorySlug] ??
-    FALLBACK_PACKAGING
-  );
-}
-
-/** Поля варианта Medusa, в которые ложится упаковка. */
+/** Поля варианта Medusa для фактически измеренной упаковки. */
 export type VariantPackagingFields = {
-  weight: number;
-  length: number;
-  width: number;
-  height: number;
+  weight: number | null;
+  length: number | null;
+  width: number | null;
+  height: number | null;
 };
 
-/**
- * Единственное место, где именованные граммы и сантиметры превращаются в
- * безразмерные числа Medusa. Держим перевод одной функцией, чтобы обе ветки
- * импорта (создание и обновление вариантов) не разъехались в единицах.
- */
 export function resolveVariantPackaging(
-  product: Pick<DemoCatalogProduct, "categorySlug" | "packaging">,
+  product: Pick<DemoCatalogProduct, "packaging">,
 ): VariantPackagingFields {
-  const packaging = resolveProductPackaging(product);
-
   return {
-    weight: packaging.weightGrams,
-    length: packaging.lengthCm,
-    width: packaging.widthCm,
-    height: packaging.heightCm,
+    weight: product.packaging?.weightGrams ?? null,
+    length: product.packaging?.lengthCm ?? null,
+    width: product.packaging?.widthCm ?? null,
+    height: product.packaging?.heightCm ?? null,
   };
 }
 

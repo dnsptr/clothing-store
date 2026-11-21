@@ -1,8 +1,11 @@
 import {
+  authenticate,
+  authorize,
   defineMiddlewares,
   validateAndTransformBody,
   validateAndTransformQuery,
 } from "@medusajs/framework/http";
+import { PolicyOperation } from "@medusajs/framework/utils";
 
 import {
   CreateSlideSchema,
@@ -14,8 +17,14 @@ import {
   ManualReviewActionSchema,
   ManualReviewListQuerySchema,
 } from "./admin/tbank/manual-review/validators";
+import { UpdateHandoffRegistrySchema } from "./admin/dispatch-points/validators";
+import { withFulfillmentHandoffContext } from "./admin/orders/fulfillment-handoff";
+import { TbankRefundSchema, TbankClosingReceiptSchema } from "./admin/payments/[id]/tbank-refunds/validators";
+import { AdminCreatePaymentRefund } from "@medusajs/medusa/api/admin/payments/validators";
 
-import { requirePaidPaymentProvider } from "./store/payment-provider-guard";
+import { requirePaidPaymentProvider, requireCheckoutDelivery, requireCapturedCart, requirePaidOrderForFulfillment } from "./store/payment-provider-guard";
+import { requireCheckoutAccess, requireInlineCartAddresses } from "./store/checkout-access-guard";
+import { requireUnchangedPaymentCart } from "./store/payment-cart-guard";
 
 /**
  * Штатный роут `/hooks/payment/:provider` объявляет `preserveRawBody`
@@ -37,13 +46,102 @@ export default defineMiddlewares({
   routes: [
     {
       matcher: "/integrations/onec",
-      methods: ["GET", "POST"],
       bodyParser: false,
+    },
+    {
+      matcher: "/admin/onec-exchange",
+      method: "GET",
+      middlewares: [authenticate("user", ["session", "bearer"])],
+    },
+    {
+      matcher: "/admin/payments/:id/refund",
+      method: "POST",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([
+          { resource: "payment", operation: PolicyOperation.read },
+          { resource: "payment", operation: PolicyOperation.update },
+          { resource: "refund", operation: PolicyOperation.create },
+          { resource: "order", operation: PolicyOperation.update },
+        ]),
+        validateAndTransformBody(AdminCreatePaymentRefund),
+      ],
+    },
+    {
+      matcher: "/admin/payments/:id/tbank-refunds",
+      method: "GET",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([{ resource: "payment", operation: PolicyOperation.read }]),
+      ],
+    },
+    {
+      matcher: "/admin/payments/:id/tbank-refunds",
+      method: "POST",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([
+          { resource: "payment", operation: PolicyOperation.read },
+          { resource: "payment", operation: PolicyOperation.update },
+          { resource: "refund", operation: PolicyOperation.create },
+          { resource: "order", operation: PolicyOperation.update },
+        ]),
+        validateAndTransformBody(TbankRefundSchema),
+      ],
+    },
+    {
+      matcher: "/admin/payments/:id/tbank-closing-receipt",
+      method: "POST",
+      middlewares: [
+        authenticate("user", ["session", "bearer"]),
+        authorize([
+          { resource: "payment", operation: PolicyOperation.read },
+          { resource: "payment", operation: PolicyOperation.update },
+          { resource: "order", operation: PolicyOperation.update },
+        ]),
+        validateAndTransformBody(TbankClosingReceiptSchema),
+      ],
+    },
+    {
+      matcher: "/admin/dispatch-points",
+      method: "GET",
+      middlewares: [authorize([{ resource: "stock_location", operation: PolicyOperation.read }])],
+    },
+    {
+      matcher: "/admin/dispatch-points/:id",
+      method: "POST",
+      middlewares: [authorize([{ resource: "stock_location", operation: PolicyOperation.update }]), validateAndTransformBody(UpdateHandoffRegistrySchema)],
+    },
+    { matcher: "/store/carts", method: "POST", middlewares: [requireInlineCartAddresses] },
+    { matcher: "/store/carts/:id", method: "POST", middlewares: [requireInlineCartAddresses] },
+    { matcher: "/store/carts/*", middlewares: [requireCheckoutAccess, requireUnchangedPaymentCart] },
+    { matcher: "/store/payment-status/*", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/carts/:id/complete", method: "POST", middlewares: [requireCapturedCart] },
+    { matcher: "/admin/orders/:id/fulfillments", method: "POST", middlewares: [requirePaidOrderForFulfillment, withFulfillmentHandoffContext] },
+    { matcher: "/store/payment-collections", method: "POST", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/payment-collections/*", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/shipping-options", method: "GET", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/shipping-options/:id/calculate", method: "POST", middlewares: [requireCheckoutAccess] },
+    { matcher: "/store/yandex/calculate", method: "POST", middlewares: [requireCheckoutAccess] },
+    {
+      matcher: "/store/orders/:id",
+      method: "GET",
+      middlewares: [authenticate("customer", ["session", "bearer"], { allowUnauthenticated: true }), requireCheckoutAccess],
+    },
+    {
+      matcher: "/store/orders/:id/transfer/request",
+      method: "POST",
+      middlewares: [authenticate("customer", ["session", "bearer"], { allowUnauthenticated: true }), requireCheckoutAccess],
+    },
+    {
+      matcher: "/store/orders/:id/transfer/cancel",
+      method: "POST",
+      middlewares: [authenticate("customer", ["session", "bearer"], { allowUnauthenticated: true }), requireCheckoutAccess],
     },
     {
       matcher: "/store/payment-collections/:id/payment-sessions",
       method: "POST",
-      middlewares: [requirePaidPaymentProvider],
+      middlewares: [requirePaidPaymentProvider, requireCheckoutDelivery],
     },
     {
       matcher: "/admin/products/:id",

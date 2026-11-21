@@ -2,6 +2,7 @@ const { loadEnv } = require("@medusajs/utils");
 loadEnv("test", process.cwd());
 
 module.exports = {
+  preset: "@medusajs/test-utils",
   transform: {
     "^.+\\.[jt]s$": [
       "@swc/jest",

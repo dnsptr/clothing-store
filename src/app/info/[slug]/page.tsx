@@ -11,6 +11,28 @@ interface InfoPageProps {
   params: Promise<{ slug: string }>;
 }
 
+const sellerContacts = [
+  { text: "rauf.zamanov@mail.ru", href: "mailto:rauf.zamanov@mail.ru" },
+  { text: "+7 (926) 057-72-05", href: "tel:+79260577205" },
+];
+
+function ContactText({ text }: { text: string }) {
+  for (const contact of sellerContacts) {
+    const index = text.indexOf(contact.text);
+    if (index === -1) continue;
+
+    return (
+      <>
+        <ContactText text={text.slice(0, index)} />
+        <a href={contact.href}>{contact.text}</a>
+        <ContactText text={text.slice(index + contact.text.length)} />
+      </>
+    );
+  }
+
+  return text;
+}
+
 export function generateStaticParams() {
   return INFO_PAGES.map((page) => ({ slug: page.slug }));
 }
@@ -102,16 +124,16 @@ export default async function InfoPage({ params }: InfoPageProps) {
                 <h2>{section.title}</h2>
                 <div className={styles.sectionBody}>
                   {section.paragraphs.map((paragraph, index) => (
-                    <p key={index}>{paragraph}</p>
+                    <p key={index}><ContactText text={paragraph} /></p>
                   ))}
                   {section.items && (
                     <ul className={styles.list}>
                       {section.items.map((item, index) => (
-                        <li key={index}>{item}</li>
+                        <li key={index}><ContactText text={item} /></li>
                       ))}
                     </ul>
                   )}
-                  {section.footnote && <p>{section.footnote}</p>}
+                  {section.footnote && <p><ContactText text={section.footnote} /></p>}
                 </div>
               </section>
             ))}

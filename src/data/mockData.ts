@@ -245,22 +245,22 @@ export const MOCK_PRODUCTS: Product[] = [
 export const MOCK_OUTFITS: CollectionOutfit[] = [
   {
     id: "linen-look",
-    title: "Льняной силуэт",
-    subtitle: "Летний образ с тренчем и брюками",
+    title: "Лёгкий силуэт",
+    subtitle: "Свободные формы и растительный принт",
     image: "/products/1/1-1.jpg",
     productIds: ["1", "3", "4"],
   },
   {
     id: "cashmere-cozy",
     title: "Теплый трикотаж",
-    subtitle: "Кашемировый джемпер и шерстяная юбка",
+    subtitle: "Геометрический узор и контрастные сочетания",
     image: "/products/2/2-1.png",
     productIds: ["2", "7", "9"],
   },
   {
     id: "autumn-chic",
     title: "Осенний шик",
-    subtitle: "Шерстяной жакет с шелковым топом",
+    subtitle: "Лаконичный верх и акцентный принт",
     image: "/products/5/5-1.png",
     productIds: ["5", "6", "11"],
   },

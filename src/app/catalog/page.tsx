@@ -62,13 +62,14 @@ function CatalogContent() {
 
   const [sortBy, setSortBy] = useState("default");
   const [openFacet, setOpenFacet] = useState<string | null>(null);
+  const filtersBandRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
   const sortButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (openFacet !== "sort") return;
+    if (!openFacet) return;
     const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && !sortRef.current?.contains(event.target)) {
+      if (event.target instanceof Node && !filtersBandRef.current?.contains(event.target)) {
         setOpenFacet(null);
       }
     };
@@ -348,7 +349,17 @@ function CatalogContent() {
           )}
         </div>
 
-        <div className={styles.filtersBand}>
+        <div
+          ref={filtersBandRef}
+          className={styles.filtersBand}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape" || !openFacet) return;
+            event.preventDefault();
+            const trigger = event.currentTarget.querySelector<HTMLButtonElement>('button[aria-expanded="true"]');
+            setOpenFacet(null);
+            trigger?.focus();
+          }}
+        >
           <div className={styles.shell}>
             <div className={styles.filtersRow}>
               <div className={styles.filters} aria-label="Разделы каталога">

@@ -63,94 +63,57 @@ The fastest way to get started is deploying with [Medusa Cloud](https://cloud.me
 
 ### Local Installation
 
-> **Prerequisites:
->
-> - [Node.js](https://nodejs.org/) v20+
-> - [PostgreSQL](https://www.postgresql.org/) v15+
-> - [pnpm](https://pnpm.io/) v10+
+Requires Node.js **24.22.2** (`../.node-version`), npm **11.19.1**,
+PostgreSQL **15+** and Redis. This workspace contains the backend; the
+Next.js storefront lives at the repository root, not `apps/storefront`.
 
-1. Clone the repository and install dependencies:
+1. From the repository root, install the backend workspace from its lockfile:
 
 ```bash
-git clone https://github.com/medusajs/dtc-starter.git
-cd dtc-starter
-pnpm install
+cd medusa-prototype
+npm ci --ignore-scripts
 ```
 
-2. Set up environment variables for the backend:
+2. Copy `apps/backend/.env.template` to `apps/backend/.env`. Configure the
+database, Redis and application secrets for your environment. Keep bank,
+carrier and notification integrations disabled until their configuration
+is complete. See [deployment configuration](DEPLOYMENT.md).
+
+3. Back up an existing database and verify upgrades on a copy before
+applying migrations. From `medusa-prototype`:
 
 ```bash
-cp apps/backend/.env.template apps/backend/.env
+npm exec --workspace @dtc/backend -- medusa db:migrate --execute-safe-links --execute-safe-search
 ```
 
-3. Set the database URL in `apps/backend.env`:
+4. Create an administrator with your own email and a unique password.
+List the required CLI flags with:
 
 ```bash
-# Replace with actual database URL, make sure the database exists.
-DATABASE_URL=postgres://postgres:@localhost:5432/medusa-dtc-starter
+npm exec --workspace @dtc/backend -- medusa user --help
 ```
 
-4. Run migrations:
+5. Start the backend:
 
 ```bash
-cd apps/backend
-pnpm medusa db:migrate
+npm run backend:dev
 ```
 
-5. Add admin user:
-
-```bash
-cd apps/backend
-pnpm medusa user -e admin@test.com -p supersecret
-```
-
-6. Start Medusa backend:
-
-```bash
-cd apps/backend
-pnpm dev
-```
-
-7. Open the admin dashboard at `localhost:9000/app` and log in. Retrieve your publishable API key at Settings > Publishable API key.
-
-8. Set up environment variables for the storefront:
-
-```bash
-cp apps/storefront/.env.template apps/storefront/.env.local
-```
-
-9. Update `apps/storefront/.env.local` with your Medusa publishable API key:
-
-```bash
-NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_6c3...
-```
-
-10.  Start storefront:
-
-```bash
-cd apps/storefront
-pnpm dev
-```
-
-The storefront runs on `http://localhost:8000`.
-
-You can slo run the following command from the root to start both backend and storefront:
-
-```bash
-pnpm dev
-```
+Open `http://localhost:9000/app`. Start the storefront in a separate terminal
+using the [repository quickstart](../README.md#local-development).
 
 ## Configuration
 
-The storefront is configured via environment variables in `apps/storefront/.env.local`:
+Configure the storefront in the repository-root `.env.local`, using
+[`../.env.template`](../.env.template). Do not copy the former starter's
+Stripe or default-Denmark settings into this RUB/T-Bank storefront.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` | Publishable API key from your Medusa backend | — |
-| `NEXT_PUBLIC_MEDUSA_BACKEND_URL` | URL of your Medusa backend | `http://localhost:9000` |
-| `NEXT_PUBLIC_DEFAULT_REGION` | Default region country code | `dk` |
-| `NEXT_PUBLIC_BASE_URL` | Base URL of the storefront | `https://localhost:8000` |
-| `NEXT_PUBLIC_STRIPE_KEY` | Stripe publishable key (optional) | — |
+| Variable | Meaning |
+| --- | --- |
+| `NEXT_PUBLIC_DATA_MODE` | `medusa` for backend data; `mock` for the static demo |
+| `NEXT_PUBLIC_MEDUSA_BACKEND_URL` | Backend origin reachable from the customer's browser |
+| `NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY` | Publishable Store API key; never an Admin secret |
+| `NEXT_PUBLIC_MEDUSA_REGION_ID` | Optional region ID; otherwise the RUB region is selected |
 
 ## Resources
 

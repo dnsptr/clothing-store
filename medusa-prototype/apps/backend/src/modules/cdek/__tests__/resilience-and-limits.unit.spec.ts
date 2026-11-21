@@ -9,6 +9,8 @@ const TEST_OPTIONS: CdekProviderOptions = {
   clientSecret: "test-secret",
   apiBaseUrl: "https://api.edu.cdek.ru/v2",
   fromCityCode: 44,
+  pvzPriceRub: 350,
+  courierPriceRub: 650,
 };
 
 describe("CDEK Resilience, Limits & Boundary Tests", () => {

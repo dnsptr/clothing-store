@@ -67,7 +67,7 @@ export default function CollectionsSlider() {
               src={withBasePath(outfit.image)}
               alt={outfit.title}
               fill
-              sizes="(max-width: 768px) 86vw, 45vw"
+              sizes="(max-width: 900px) 76vw, (min-width: 1920px) 423px, (min-width: 1272px) 23vw, 280px"
               className={styles.image}
               draggable={false}
             />

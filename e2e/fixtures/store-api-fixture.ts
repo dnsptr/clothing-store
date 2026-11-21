@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 export const BANK_PAYMENT_URL = "https://securepay.tinkoff.ru/payment/payses_baseline";
 export const DEFAULT_FIXTURE_URL = "http://127.0.0.1:4174";
 
+export const FIXTURE_CART_ACCESS_TOKEN = "a".repeat(64);
 export const PAYMENT_SCENARIOS = [
   "valid",
   "malformed",
@@ -12,6 +13,7 @@ export const PAYMENT_SCENARIOS = [
   "wrong_provider",
   "unapproved",
   "credentials",
+  "alternate_port",
 ] as const;
 
 export const FIXTURE_RETURN_CARTS = {
@@ -33,6 +35,8 @@ type FixturePaymentSession = {
   readonly id: string;
   readonly provider_id: string;
   readonly status: string;
+  readonly amount: number;
+  readonly currency_code: string;
   readonly data: Record<string, string>;
 };
 
@@ -47,6 +51,7 @@ export class FixtureServerError extends Error {
 
 const CART = {
   id: "cart_baseline",
+  currency_code: "rub",
   total: 1899,
   subtotal: 1899,
   tax_total: 0,
@@ -88,7 +93,7 @@ const PRODUCT = {
 
 function sendJson(response: ServerResponse, status: number, value: object): void {
   response.writeHead(status, {
-    "access-control-allow-headers": "content-type,x-publishable-api-key",
+    "access-control-allow-headers": "content-type,x-publishable-api-key,x-cart-access-token",
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-origin": "*",
     "content-type": "application/json; charset=utf-8",
@@ -110,6 +115,7 @@ function parseScenario(value: unknown): PaymentScenario | null {
     case "wrong_provider":
     case "unapproved":
     case "credentials":
+    case "alternate_port":
       return value;
     default:
       return null;
@@ -120,7 +126,7 @@ function sessionFor(
   scenario: PaymentScenario,
   id: string,
   statusOverride?: string,
-): FixturePaymentSession {
+): Omit<FixturePaymentSession, "amount" | "currency_code"> {
   const status = statusOverride ?? (scenario === "wrong_status" ? "authorized" : "pending_authorization");
   const paymentUrl = id === "payses_baseline"
     ? BANK_PAYMENT_URL
@@ -142,6 +148,8 @@ function sessionFor(
       return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: `https://bank.test/payment/${id}` } };
     case "credentials":
       return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: `https://user:password@securepay.tinkoff.ru/payment/${id}` } };
+    case "alternate_port":
+      return { id, provider_id: "pp_tbank_tbank", status, data: { paymentUrl: `https://securepay.tinkoff.ru:8443/payment/${id}` } };
   }
 }
 
@@ -170,6 +178,10 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://fixture.local");
     const method = request.method ?? "GET";
+    // Control requests can be separated by browser work longer than Node's idle socket timeout.
+    if (requestUrl.pathname.startsWith("/__control/")) {
+      response.setHeader("connection", "close");
+    }
     if (method === "OPTIONS") {
       sendJson(response, 204, {});
       return;
@@ -235,7 +247,7 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       customSessionControl = true;
       if (typeof dropNextResponse === "boolean") dropNextPaymentSessionResponse = dropNextResponse;
       if (typeof status === "string") {
-        paymentSessions = [sessionFor(scenario, "payses_terminal", status)];
+        paymentSessions = [{ ...sessionFor(scenario, "payses_terminal", status), amount: CART.total, currency_code: CART.currency_code }];
       }
       sendJson(response, 200, { updated: true });
       return;
@@ -251,8 +263,16 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       return;
     }
 
+    if (requestUrl.pathname === "/store/carts" && method === "POST") {
+      sendJson(response, 200, { cart: CART, cart_access_token: FIXTURE_CART_ACCESS_TOKEN });
+      return;
+    }
     const paymentStatusPrefix = "/store/payment-status/";
     if (requestUrl.pathname.startsWith(paymentStatusPrefix)) {
+      if (request.headers["x-cart-access-token"] !== FIXTURE_CART_ACCESS_TOKEN) {
+        sendJson(response, 404, { error: "cart_not_found" });
+        return;
+      }
       const cartId = decodeURIComponent(requestUrl.pathname.slice(paymentStatusPrefix.length));
       response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
 
@@ -297,7 +317,7 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       return;
     }
     if (requestUrl.pathname === "/store/shipping-options") {
-      sendJson(response, 200, { shipping_options: [{ id: "shipping_baseline", name: "Fixture delivery", amount: 0 }] });
+      sendJson(response, 200, { shipping_options: [{ id: "shipping_baseline", name: "Самовывоз", type: { code: "pickup-store" }, amount: 0 }] });
       return;
     }
     if (requestUrl.pathname.startsWith("/store/carts/") && requestUrl.pathname.endsWith("/shipping-methods")) {
@@ -306,7 +326,7 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       return;
     }
     if (requestUrl.pathname === "/store/payment-collections") {
-      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", payment_sessions: paymentSessions } });
+      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", amount: CART.total, currency_code: CART.currency_code, payment_sessions: paymentSessions } });
       return;
     }
     if (requestUrl.pathname === "/store/payment-collections/paycol_baseline/payment-sessions") {
@@ -314,13 +334,13 @@ export async function startStoreApiFixture(port: number): Promise<StoreApiFixtur
       const sessionId = customSessionControl
         ? `payses_fixture_${paymentSessionInitializations}`
         : "payses_baseline";
-      paymentSessions = [sessionFor(scenario, sessionId)];
+      paymentSessions = [{ ...sessionFor(scenario, sessionId), amount: CART.total, currency_code: CART.currency_code }];
       if (dropNextPaymentSessionResponse) {
         dropNextPaymentSessionResponse = false;
         sendJson(response, 502, { error: "provider_network_error", message: "Response from provider was lost" });
         return;
       }
-      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", payment_sessions: paymentSessions } });
+      sendJson(response, 200, { payment_collection: { id: "paycol_baseline", amount: CART.total, currency_code: CART.currency_code, payment_sessions: paymentSessions } });
       return;
     }
     if (requestUrl.pathname.startsWith("/store/carts/") && requestUrl.pathname.endsWith("/complete")) {

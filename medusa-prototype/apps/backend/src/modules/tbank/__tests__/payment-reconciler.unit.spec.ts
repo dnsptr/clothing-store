@@ -162,6 +162,44 @@ describe("PaymentReconcilerService unit tests", () => {
     });
   });
 
+  it.each(["CANCELED", "REJECTED"])("processes persisted %s with omitted Amount without a false mismatch", async (status) => {
+    const row = { ...sampleRow, status, success: false, amount_kopecks: 0, amount_provided: false };
+    mockNotificationService.claimNotificationById.mockResolvedValueOnce([row]);
+    mockNotificationService.listTbankNotifications.mockResolvedValue([]);
+    const result = await createReconciler().processNotification(row.id);
+    expect(result.status).toBe("processed");
+    expect(mockPaymentService.updatePaymentSession).toHaveBeenCalledWith(expect.objectContaining({
+      status: status === "CANCELED" ? "canceled" : "error",
+    }));
+    expect(mockWorkflowRunner).not.toHaveBeenCalled();
+  });
+
+  it("uses correlated bank amount when a missing-amount cancellation is contradicted by CONFIRMED", async () => {
+    const row = { ...sampleRow, status: "CANCELED", success: false, amount_kopecks: 0, amount_provided: false };
+    mockNotificationService.claimNotificationById.mockResolvedValueOnce([row]);
+    mockNotificationService.listTbankNotifications.mockResolvedValue([{ ...sampleRow, id: "tbnotif_confirmed" }]);
+    mockTbankClient.getState.mockResolvedValue({
+      Success: true, ErrorCode: "0", Status: "CONFIRMED",
+      TerminalKey: sampleRow.terminal_key, OrderId: sampleRow.order_id,
+      PaymentId: sampleRow.payment_id, Amount: sampleRow.amount_kopecks,
+    });
+    const result = await createReconciler().processNotification(row.id);
+    expect(result.status).toBe("processed");
+    expect(mockWorkflowRunner).toHaveBeenCalledWith(expect.objectContaining({
+      data: { session_id: sampleRow.order_id, amount: "500.00" },
+    }), expect.anything());
+    expect(mockPaymentService.updatePaymentSession).not.toHaveBeenCalled();
+  });
+
+  it("still quarantines an explicitly provided zero cancellation amount", async () => {
+    mockNotificationService.claimNotificationById.mockResolvedValueOnce([{
+      ...sampleRow, status: "CANCELED", success: false, amount_kopecks: 0, amount_provided: true,
+    }]);
+    expect((await createReconciler().processNotification(sampleRow.id)).status).toBe("manual_review");
+    expect(mockPaymentService.updatePaymentSession).not.toHaveBeenCalled();
+    expect(mockWorkflowRunner).not.toHaveBeenCalled();
+  });
+
   describe("Finding 3: Deferred awaiting_correlation re-correlation", () => {
     it("quarantines notification to manual_review when amount does not match session", async () => {
       mockNotificationService.claimNotificationById.mockResolvedValueOnce([

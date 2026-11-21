@@ -5,6 +5,7 @@ import Link from "next/link";
 import { accountRequest, AccountError, type AccountCustomer, type AccountOrder } from "../../lib/account";
 import { getStoredCartId, useCart } from "../../context/CartContext";
 import { storefrontDataMode } from "../../lib/medusa";
+import { getCartAccessToken } from "../../lib/cartAccess";
 import styles from "./account.module.css";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "Не удалось выполнить запрос. Попробуйте ещё раз.";
@@ -140,7 +141,7 @@ function AccountPanel({ customer, onChange, onLogout }: { customer: AccountCusto
     const cartId = getStoredCartId();
     if (!cartId) return;
     const controller = new AbortController();
-    accountRequest("cart", { cart_id: cartId }, controller.signal).catch(error => {
+    accountRequest("cart", { cart_id: cartId, cart_access_token: getCartAccessToken(cartId) }, controller.signal).catch(error => {
       if (!controller.signal.aborted) setNotice(error instanceof AccountError && error.status === 401 ? "Сессия истекла. Войдите ещё раз." : "Не удалось связать текущую корзину с аккаунтом. Попробуйте войти ещё раз.");
     });
     return () => controller.abort();

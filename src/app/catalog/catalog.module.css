@@ -70,12 +70,16 @@
   align-items: center;
   min-width: 0;
   gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
 }
 
 .facetControls {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   min-width: 0;
 }
 
@@ -92,6 +96,7 @@
 
 .filterButton {
   gap: 10px;
+  flex: 0 0 auto;
   padding: 0 12px;
   border-bottom: 1px solid transparent;
   white-space: nowrap;
@@ -185,7 +190,15 @@
   width: 100%;
 }
 
-.sortControl button:focus-visible {
+
+.filterButton:focus-visible,
+.facetButton:focus-visible,
+.facetOption:focus-visible,
+.filterChip:focus-visible,
+.clearFilters:focus-visible,
+.emptyLink:focus-visible,
+.retryButton:focus-visible,
+.loadMoreButton:focus-visible {
   outline: 2px solid var(--text-primary);
   outline-offset: -2px;
 }
@@ -379,6 +392,35 @@
   }
 }
 
+@media (min-width: 901px) and (max-width: 1180px) {
+  .filtersBand {
+    height: auto;
+    padding: 10px 0;
+  }
+
+  .filtersRow {
+    flex-wrap: wrap;
+    gap: 12px 24px;
+  }
+
+  .filters {
+    flex-basis: 100%;
+  }
+
+  .facetControls {
+    flex-grow: 1;
+  }
+
+  .facet {
+    flex: 1;
+  }
+
+  .facetButton {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 900px) {
   .page {
     margin-top: var(--site-chrome-height-mobile);
@@ -403,24 +445,61 @@
   .filters {
     width: 100%;
     overflow-x: auto;
-    padding-bottom: 4px;
-    scrollbar-width: none;
-  }
-
-  .filters::-webkit-scrollbar {
-    display: none;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
   }
 
   .facetControls {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     width: 100%;
-    overflow-x: auto;
-    overflow-y: visible;
-    padding-bottom: 4px;
-    scrollbar-width: none;
+    overflow: visible;
   }
 
-  .facetControls::-webkit-scrollbar {
-    display: none;
+  .facetButton {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    padding: 10px;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .facetPanel {
+    min-width: 100%;
+    width: max-content;
+    max-width: min(280px, calc(100vw - 24px));
+    max-height: min(320px, 45dvh);
+  }
+
+  .facetOption {
+    min-height: 44px;
+    padding: 10px 14px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .sortControl {
+    width: 100%;
+  }
+
+  .sortPanel {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .facetControls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .facet:nth-child(even) .facetPanel {
+    left: auto;
+    right: 0;
   }
 }
 

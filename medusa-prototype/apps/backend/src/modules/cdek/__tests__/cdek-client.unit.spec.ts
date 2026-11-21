@@ -6,6 +6,16 @@ const TEST_OPTIONS: CdekProviderOptions = {
   clientSecret: "mock-client-secret",
   apiBaseUrl: "https://api.edu.cdek.ru/v2",
   fromCityCode: 44,
+  pvzPriceRub: 350,
+  courierPriceRub: 650,
+};
+
+const ORDER_ITEM = {
+  name: "Рубашка хлопковая, размер M",
+  ware_key: "variant_shirt",
+  cost: 2500,
+  amount: 1 as const,
+  payment: { value: 0 as const },
 };
 
 describe("CdekClient", () => {
@@ -23,15 +33,18 @@ describe("CdekClient", () => {
 
   it("obtains and caches OAuth token", async () => {
     let tokenRequests = 0;
-    global.fetch = jest.fn(async (url: RequestInfo | URL) => {
+    const userAgents: string[] = [];
+    const token = "x".repeat(1_426);
+    global.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const urlStr = String(url);
+      userAgents.push(new Headers(init?.headers).get("User-Agent") ?? "");
       if (urlStr.includes("/oauth/token")) {
         tokenRequests++;
         return {
           ok: true,
           status: 200,
-          json: async () => ({ access_token: "mock-token-123", expires_in: 3600 }),
-          text: async () => JSON.stringify({ access_token: "mock-token-123", expires_in: 3600 }),
+          json: async () => ({ access_token: token, expires_in: 3600 }),
+          text: async () => JSON.stringify({ access_token: token, expires_in: 3600 }),
         } as unknown as Response;
       }
       if (urlStr.includes("/location/cities")) {
@@ -57,6 +70,7 @@ describe("CdekClient", () => {
     const cities2 = await client.searchCities("Моск");
     expect(cities2).toHaveLength(1);
     expect(tokenRequests).toBe(1);
+    expect(userAgents).toEqual(Array(3).fill("MarioMikkeStore/1.0"));
   });
 
   it("retries request when token expires with 401", async () => {
@@ -163,6 +177,47 @@ describe("CdekClient", () => {
     expect(result.tariff_code).toBe(136);
   });
 
+  it("queries reception-enabled PVZ separately from buyer handout points", async () => {
+    const urls: string[] = [];
+    global.fetch = jest.fn(async (url: RequestInfo | URL) => {
+      urls.push(String(url));
+      if (String(url).includes("/oauth/token")) {
+        return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }));
+      }
+      return new Response(JSON.stringify([{
+        code: "SPB10", name: "Пункт отправки", type: "PVZ", is_reception: true,
+        location: { city_code: 137, city: "Санкт-Петербург", address: "Невский, 10" },
+        work_time: "10:00-20:00",
+      }]));
+    });
+    const points = await new CdekClient(TEST_OPTIONS).getReceptionPoints(137, "SPB10");
+    const request = new URL(urls[1]);
+    expect(request.pathname).toBe("/v2/deliverypoints");
+    expect(Object.fromEntries(request.searchParams)).toEqual({
+      city_code: "137", code: "SPB10", type: "PVZ", is_reception: "true", lang: "rus",
+    });
+    expect(points[0].is_reception).toBe(true);
+  });
+
+  it("uses an explicit source city for checkout but keeps the configured city for diagnostics", async () => {
+    const bodies: unknown[] = [];
+    global.fetch = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes("/oauth/token")) {
+        return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }));
+      }
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ delivery_sum: 550, period_min: 1, period_max: 3 }));
+    });
+    const client = new CdekClient(TEST_OPTIONS);
+    const input = { toCityCode: 44, tariffCode: 136, packages: [{ weight: 700, length: 30, width: 25, height: 10 }] };
+    await client.calculateTariff({ ...input, fromCityCode: 137 });
+    await client.calculateTariff(input);
+    expect(bodies).toEqual([
+      expect.objectContaining({ from_location: { code: 137 } }),
+      expect.objectContaining({ from_location: { code: 44 } }),
+    ]);
+  });
+
   it("uses Moscow UTC+03 time and the supported parsed tariff in its request", async () => {
     jest.useFakeTimers().setSystemTime(new Date("2026-01-02T22:04:05.000Z"));
     const requestBodies: unknown[] = [];
@@ -217,16 +272,26 @@ describe("CdekClient", () => {
 
     const client = new CdekClient(TEST_OPTIONS);
     await client.createOrder({
+      shipmentPoint: "MSK65",
       orderNumber: "ORD-1",
       tariffCode: 137,
       recipient: { name: "Иван", phones: [{ number: "+79991234567" }] },
       toAddress: { cityCode: 137, address: "Невский проспект, 1" },
-      packages: [{ number: "1", weight: 700, length: 30, width: 25, height: 10 }],
+      packages: [
+        { number: "shirt-1", weight: 700, length: 30, width: 25, height: 10, items: [{ ...ORDER_ITEM, weight: 700 }] },
+        { number: "shirt-2", weight: 700, length: 30, width: 25, height: 10, items: [{ ...ORDER_ITEM, weight: 700 }] },
+      ],
     });
 
     expect(requestBodies[0]).toMatchObject({
       tariff_code: 137,
       to_location: { code: 137, address: "Невский проспект, 1" },
+      shipment_point: "MSK65",
+      delivery_recipient_cost: { value: 0 },
+      packages: [
+        { number: "shirt-1", weight: 700, length: 30, width: 25, height: 10, items: [{ ...ORDER_ITEM, weight: 700 }] },
+        { number: "shirt-2", weight: 700, length: 30, width: 25, height: 10, items: [{ ...ORDER_ITEM, weight: 700 }] },
+      ],
     });
   });
 
@@ -256,13 +321,11 @@ describe("CdekClient", () => {
     });
 
     const client = new CdekClient(TEST_OPTIONS);
-    await expect(client.createOrder({
-      orderNumber: "ORD-invalid",
-      tariffCode: 137,
-      recipient: { name: "Иван", phones: [{ number: "+79991234567" }] },
-      toAddress: { cityCode: 137, address: "Невский проспект, 1" },
-      packages: [{ number: "1", weight: 700, length: 30, width: 25, height: 10 }],
-    })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-invalid",
+    tariffCode: 137,
+    recipient: { name: "Иван", phones: [{ number: "+79991234567" }] },
+    toAddress: { cityCode: 137, address: "Невский проспект, 1" },
+    packages: [{ number: "1", weight: 700, length: 30, width: 25, height: 10, items: [{ ...ORDER_ITEM, weight: 700 }] }], })).rejects.toThrow(CdekApiError);
   });
 
   it("throws CdekApiError on non-2xx response from CDEK API", async () => {
@@ -312,7 +375,7 @@ describe("CdekClient", () => {
 
     await expect(client.getDeliveryPoints(44)).rejects.toThrow(CdekApiError);
     await expect(client.calculateTariff({ toCityCode: 44, tariffCode: 136, packages: [{ weight: 1_000, length: 25, width: 20, height: 10 }] })).rejects.toThrow(CdekApiError);
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "Иван", phones: [{ number: "+79991234567" }] }, packages: [{ number: "1", weight: 1_000, length: 25, width: 20, height: 10 }], deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "Иван", phones: [{ number: "+79991234567" }] }, packages: [{ number: "1", weight: 1_000, length: 25, width: 20, height: 10, items: [{ ...ORDER_ITEM, weight: 1_000 }] }], deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
     await expect(client.getOrder("order-uuid")).rejects.toThrow(CdekApiError);
   });
 
@@ -342,15 +405,52 @@ describe("CdekClient", () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock;
     const client = new CdekClient(TEST_OPTIONS);
-    const packages = [{ number: "1", weight: 1_000, length: 25, width: 20, height: 10 }];
+    const packages = [{ number: "1", weight: 1_000, length: 25, width: 20, height: 10, items: [{ ...ORDER_ITEM, weight: 1_000 }] }];
     const recipient = { name: "Иван", phones: [{ number: "+79991234567" }] };
 
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 999, recipient, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "", phones: [{ number: "+79991234567" }] }, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "Иван", phones: [{ number: "not-a-phone" }] }, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "Иван", phones: [{ number: "+79991234567" }], email: "invalid-email" }, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 136, recipient, packages })).rejects.toThrow(CdekApiError);
-    await expect(client.createOrder({ orderNumber: "ORD-1", tariffCode: 136, recipient, packages, deliveryPoint: "MSK1", toAddress: { cityCode: 44, address: "Тверская, 1" } })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 999, recipient, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "", phones: [{ number: "+79991234567" }] }, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "Иван", phones: [{ number: "not-a-phone" }] }, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136, recipient: { name: "Иван", phones: [{ number: "+79991234567" }], email: "invalid-email" }, packages, deliveryPoint: "MSK1" })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136, recipient, packages })).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136, recipient, packages, deliveryPoint: "MSK1", toAddress: { cityCode: 44, address: "Тверская, 1" } })).rejects.toThrow(CdekApiError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { items: [] },
+    { items: [{ ...ORDER_ITEM, weight: 700, cost: Number.NaN }] },
+    { items: [{ ...ORDER_ITEM, weight: 700, name: "" }] },
+    { items: [{ ...ORDER_ITEM, weight: 700, payment: { value: 10 } }] },
+    { items: [{ ...ORDER_ITEM, weight: 700, payment: { value: 0, vat_rate: 22 } }] },
+    { items: [{ ...ORDER_ITEM, weight: 700, amount: 2 }] },
+  ])("rejects unsupported internet-shop contents before network access: %j", async ({ items }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    const valid = {
+      shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136,
+      recipient: { name: "Иван", phones: [{ number: "+79991234567" }] },
+      packages: [{ number: "1", weight: 700, length: 30, width: 25, height: 10, items }],
+      deliveryPoint: "MSK1",
+    };
+    // These deliberately invalid contents exercise the runtime client boundary.
+    const input = valid as unknown as Parameters<CdekClient["createOrder"]>[0];
+    await expect(new CdekClient(TEST_OPTIONS).createOrder(input)).rejects.toThrow(CdekApiError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate package numbers and absent handoff before network access", async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    const client = new CdekClient(TEST_OPTIONS);
+    const place = { number: "1", weight: 700, length: 30, width: 25, height: 10, items: [{ ...ORDER_ITEM, weight: 700 }] };
+    const input = {
+      shipmentPoint: "MSK65", orderNumber: "ORD-1", tariffCode: 136,
+      recipient: { name: "Иван", phones: [{ number: "+79991234567" }] },
+      packages: [place, place], deliveryPoint: "MSK1",
+    };
+    await expect(client.createOrder(input)).rejects.toThrow(CdekApiError);
+    await expect(client.createOrder({ ...input, shipmentPoint: "", packages: [place] })).rejects.toThrow(CdekApiError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

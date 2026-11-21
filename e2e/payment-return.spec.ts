@@ -8,6 +8,7 @@ import {
   setPaymentStatusOverride,
   resetFixture,
 } from "./fixtures/payment-return";
+import { FIXTURE_CART_ACCESS_TOKEN } from "./fixtures/store-api-fixture";
 
 const APP_URL = process.env.PAYMENT_APP_URL ?? DEFAULT_APP_URL;
 const FIXTURE_URL = process.env.PAYMENT_FIXTURE_URL ?? DEFAULT_FIXTURE_URL;
@@ -281,6 +282,76 @@ test.describe("Payment Return UI", () => {
     await expect(
       page.getByRole("link", { name: "Перейти в каталог" }),
     ).toBeVisible();
+  });
+
+  test("a confirmed payment remains non-retryable after reload when status verification is unavailable", async ({
+    page,
+    request,
+  }) => {
+    await seedCart(page, RETURN_CARTS.pending);
+    await setPaymentStatusOverride(request, FIXTURE_URL, RETURN_CARTS.pending, {
+      payment: "confirmed",
+      order: "pending",
+    });
+    await page.goto(`${APP_URL}/checkout/success`);
+    await expect(page.getByRole("heading", { name: "Оплата принята, заказ формируется" })).toBeVisible();
+    const confirmedContext = await page.evaluate(() =>
+      JSON.parse(window.sessionStorage.getItem("clothing-store-payment-return") || "null"),
+    );
+    expect(confirmedContext).toMatchObject({
+      cartId: RETURN_CARTS.pending,
+      paymentConfirmed: true,
+    });
+
+    // A different shopping cart must not replace this tab's confirmed bank-return authority.
+    await page.evaluate(({ cartId, items, accessToken }) => {
+      window.localStorage.setItem("clothing-store-medusa-cart", cartId);
+      window.localStorage.setItem("clothing-store-cart-medusa", JSON.stringify(items));
+      const capabilities = JSON.parse(window.localStorage.getItem("clothing-store-cart-access") || "{}");
+      window.localStorage.setItem("clothing-store-cart-access", JSON.stringify({
+        ...capabilities,
+        [cartId]: accessToken,
+      }));
+    }, { cartId: RETURN_CARTS.failed, items: [SAMPLE_CART_ITEM], accessToken: FIXTURE_CART_ACCESS_TOKEN });
+    await page.route(`**/store/payment-status/${RETURN_CARTS.pending}`, (route) => route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Checkout resource not found" }),
+    }));
+    const unavailableStatus = page.waitForResponse((response) =>
+      response.url().endsWith(`/store/payment-status/${RETURN_CARTS.pending}`) &&
+      response.status() === 404,
+    );
+    await page.reload();
+    await (await unavailableStatus).finished();
+    await expect(page.getByRole("heading", { name: "Оплата принята, заказ формируется" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Вернуться к оформлению" })).not.toBeVisible();
+    expect(await page.evaluate(() =>
+      JSON.parse(window.sessionStorage.getItem("clothing-store-payment-return") || "null"),
+    )).toEqual(confirmedContext);
+    expect(await page.evaluate(() =>
+      window.localStorage.getItem("clothing-store-medusa-cart"),
+    )).toBe(RETURN_CARTS.failed);
+  });
+
+  test("bank return verifies its tab-bound cart even when a different cart was stored before mounting", async ({
+    page,
+    request,
+  }) => {
+    const paidCart = RETURN_CARTS.ready;
+    const newCart = RETURN_CARTS.pending;
+    await seedCart(page, paidCart, [SAMPLE_CART_ITEM]);
+    await setPaymentStatusOverride(request, FIXTURE_URL, paidCart, { payment: "confirmed", order: "ready" });
+    await page.addInitScript(({ cartId, items }) => {
+      window.localStorage.setItem("clothing-store-medusa-cart", cartId);
+      window.localStorage.setItem("clothing-store-cart-medusa", JSON.stringify(items));
+      const access = JSON.parse(window.localStorage.getItem("clothing-store-cart-access") || "{}");
+      access[cartId] = "a".repeat(64);
+      window.localStorage.setItem("clothing-store-cart-access", JSON.stringify(access));
+    }, { cartId: newCart, items: [SAMPLE_CART_ITEM] });
+    await page.goto(`${APP_URL}/checkout/success`);
+    await expect(page.getByRole("heading", { name: "Оплата прошла успешно! Заказ оформлен." })).toBeVisible();
+    expect(await page.evaluate(() => window.localStorage.getItem("clothing-store-medusa-cart"))).toBe(newCart);
   });
 
   test("cart switching protection: concurrent new cart in localStorage is preserved when old cart payment completes", async ({

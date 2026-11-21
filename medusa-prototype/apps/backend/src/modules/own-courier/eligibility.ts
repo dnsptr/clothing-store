@@ -1,5 +1,8 @@
-import { z } from "zod";
+import { z } from "@medusajs/framework/zod";
 import type { OwnCourierOptions } from "./config";
+
+// The agreed free-delivery promotion ends at midnight Moscow time.
+const FREE_DELIVERY_ENDS_AT = Date.UTC(2026, 11, 31, 21);
 
 const cleanedAddressSchema = z.tuple([z.object({
   result: z.string().trim().min(1),
@@ -12,7 +15,7 @@ const cleanedAddressSchema = z.tuple([z.object({
   unparsed_parts: z.union([z.null(), z.literal("")]),
 })]);
 
-type CartAddress = {
+export type OwnCourierAddress = {
   readonly address_1?: string | null;
   readonly address_2?: string | null;
   readonly city?: string | null;
@@ -25,10 +28,25 @@ export type OwnCourierEligibility =
   | { readonly eligible: false }
   | { readonly eligible: true; readonly normalizedAddress: string };
 
+export function ownCourierAddressKey(address: OwnCourierAddress | null | undefined) {
+  if (!address || typeof address.address_1 !== "string" || !address.address_1.trim() ||
+    typeof address.country_code !== "string" || address.country_code.toLowerCase() !== "ru") {
+    return undefined;
+  }
+  return JSON.stringify([
+    address.country_code.toLowerCase(), address.province, address.city,
+    address.postal_code, address.address_1, address.address_2,
+  ].map((part) => typeof part === "string" ? part.trim() : ""));
+}
+
 export async function ownCourierEligibility(
-  address: CartAddress | null | undefined,
+  address: OwnCourierAddress | null | undefined,
   options: OwnCourierOptions,
 ): Promise<OwnCourierEligibility> {
+  if (options.priceRub === 0 && Date.now() >= FREE_DELIVERY_ENDS_AT) {
+    return { eligible: false };
+  }
+
   if (!address?.address_1?.trim() || address.country_code?.toLowerCase() !== "ru") {
     return { eligible: false };
   }

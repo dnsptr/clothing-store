@@ -26,10 +26,19 @@ type FixtureData = {
 
 const SECRET_PASSWORD = "DeterministicOfflineSecret_DO_NOT_LEAK";
 const RECEIPT_SNAPSHOT_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
-const TERMINAL_KEY = "TinkoffBankOffline";
+const TERMINAL_KEY = "TinkoffBankTest";
 const CART_ID = "cart_01JABCDEFGHJKMNPQRSTVWXYZ";
 const PAYMENT_CONTEXT = {
   idempotency_key: "payses_01JABCDEFGHJKMNPQRSTVWXYZ",
+};
+const PAYMENT_DATA = {
+  paymentId: "3456789012",
+  orderId: PAYMENT_CONTEXT.idempotency_key,
+  cartSnapshot: {
+    orderId: PAYMENT_CONTEXT.idempotency_key,
+    amountKopecks: 1899000,
+    currencyCode: "rub",
+  },
 };
 
 const OPTIONS = {
@@ -65,6 +74,7 @@ function createService(): TBankPaymentProviderService {
         shipping_address: { phone: "+79990000000" },
         total: 18990,
         shipping_total: 0,
+        shipping_methods: [{ id: "casm_offline" }],
         items: [{
           id: "item_offline",
           product_title: "Офлайн-проверка",
@@ -74,7 +84,15 @@ function createService(): TBankPaymentProviderService {
       }] };
     },
   };
-  return new TBankPaymentProviderService({ logger, query } as never, OPTIONS as never);
+  const checkoutHold = {
+    acquirePaymentHold: async (sessionId: string, cartId: string) => ({
+      id: `chold_${sessionId}`, payment_session_id: sessionId, cart_id: cartId,
+      state: "active", allocations: [], expires_at: new Date(Date.now() + 600_000),
+    }),
+    settlePaymentHold: async () => {},
+    releasePaymentHold: async () => {},
+  };
+  return new TBankPaymentProviderService({ logger, query, checkoutHold } as never, OPTIONS as never);
 }
 
 function parseCliArgs(): { fixturePath?: string; scenario?: string; assertFailure?: string } {
@@ -289,7 +307,7 @@ async function runScenarioGetStateConfirmed(fixtures: FixtureData): Promise<void
 
   const service = createService();
   const result = await service.getPaymentStatus({
-    data: { paymentId: "3456789012" },
+    data: PAYMENT_DATA,
   } as never);
 
   if (result.status !== "captured") {
@@ -309,14 +327,14 @@ async function runScenarioGetStateAuthorized(fixtures: FixtureData): Promise<voi
 
   const service = createService();
   const result = await service.getPaymentStatus({
-    data: { paymentId: "3456789012" },
+    data: PAYMENT_DATA,
   } as never);
 
-  if (result.status !== "authorized") {
-    throw new Error(`Expected status authorized, got: ${result.status}`);
+  if (result.status !== "pending_authorization") {
+    throw new Error(`Expected status pending_authorization, got: ${result.status}`);
   }
 
-  safeLog("[PASS] valid_get_state_authorized: GetState correctly mapped to authorized");
+  safeLog("[PASS] valid_get_state_authorized: a bank hold remains pending");
 }
 
 async function runScenarioGetStateRejected(fixtures: FixtureData): Promise<void> {
@@ -329,7 +347,7 @@ async function runScenarioGetStateRejected(fixtures: FixtureData): Promise<void>
 
   const service = createService();
   const result = await service.getPaymentStatus({
-    data: { paymentId: "3456789012" },
+    data: PAYMENT_DATA,
   } as never);
 
   if (result.status !== "error") {

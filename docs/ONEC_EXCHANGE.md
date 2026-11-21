@@ -25,6 +25,13 @@ well-formedness/basic envelope validation, not full CommerceML XSD or business
 validation. UTF-8 and Windows-1251 are supported; DTDs and external entities are
 not. Summary warehouse counts count XML elements, not distinct warehouse IDs.
 
+The receiver runs as native Medusa routes. Its middleware must disable body parsing
+only for `/integrations/onec`; XML chunks must reach the route as raw bytes, including
+chunks split inside a UTF-8 character. Repeated `init` calls preserve received data.
+The `mm_onec` cookie, SHA-256 credential version and private `session.json`/XML spool
+format remain compatible with existing sessions across deployment. No session
+migration or separate exchange process is required.
+
 ## Configuration
 
 Only backend secrets are needed; never create NEXT_PUBLIC or VITE variables for
