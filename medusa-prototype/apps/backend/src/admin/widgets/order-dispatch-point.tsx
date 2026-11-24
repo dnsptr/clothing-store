@@ -32,7 +32,7 @@ const OrderDispatchPoint = ({ data: order }: DetailWidgetProps<AdminOrder>) => {
   const point = options?.points.find((entry) => entry.id === selected);
   const shipments = options?.shipments ?? [];
   const items = order.items ?? [];
-  const hasFulfilled = items.some((item) => Number(item.fulfilled_quantity ?? 0) > 0);
+  const hasFulfilled = items.some((item) => Number(item.detail?.fulfilled_quantity ?? 0) > 0);
   const canCreate = Boolean(point && options?.location_id && options.shipping_option_id && items.length && !shipments.length && !hasFulfilled && order.payment_status === "captured" && order.status !== "canceled");
   async function create() {
     if (!canCreate || !point || !options) return;

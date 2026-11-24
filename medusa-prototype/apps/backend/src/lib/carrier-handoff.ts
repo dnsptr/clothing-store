@@ -78,6 +78,6 @@ export function selectFulfillmentHandoff(fulfillment: unknown, carrier: HandoffC
   if (typeof locationId !== "string" || location.id !== locationId) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, "Не получен подтверждённый контекст склада отправления. Оформите отправление через административный API с серверной проверкой пунктов.");
   }
-  const id = Object.hasOwn(additionalData, "dispatch_point_id") ? additionalData.dispatch_point_id : savedOriginId(data, carrier);
+  const id = Object.prototype.hasOwnProperty.call(additionalData, "dispatch_point_id") ? additionalData.dispatch_point_id : savedOriginId(data, carrier);
   return selectHandoffPoint(location, carrier, id);
 }
