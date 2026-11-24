@@ -3,10 +3,20 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+test('CMS frontend imports stay inside Vercel frontend inputs', () => {
+  const frontend = new URL('../../src/', import.meta.url);
+  for (const file of ['lib/siteContent.ts', 'lib/siteContentDefaults.ts', 'lib/site-content-contract.ts']) {
+    const url = new URL(file, frontend);
+    const imports = ts.preProcessFile(readFileSync(url, 'utf8')).importedFiles;
+    for (const entry of imports) {
+      if (entry.fileName.startsWith('.')) assert.ok(new URL(entry.fileName, url).href.startsWith(frontend.href), `Excluded dependency: ${entry.fileName}`);
+    }
+  }
+});
 const defaults = JSON.parse(readFileSync(new URL('../../medusa-prototype/apps/backend/src/data/site-content-defaults.json', import.meta.url), 'utf8'));
 const compile = url => ts.transpileModule(readFileSync(url, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const contract = {};
-vm.runInNewContext(compile(new URL('../../medusa-prototype/apps/backend/src/lib/site-content-contract.ts', import.meta.url)), { exports: contract, URL });
+vm.runInNewContext(compile(new URL('../../src/lib/site-content-contract.ts', import.meta.url)), { exports: contract, URL });
 const compiled = compile(new URL('../../src/lib/siteContent.ts', import.meta.url));
 function client(configured = true) {
   const state = { payload: { content: null }, error: null };

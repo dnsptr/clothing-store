@@ -1,5 +1,5 @@
 import { INFO_PAGES } from "./infoPages";
-import type { SiteContent } from "../../medusa-prototype/apps/backend/src/lib/site-content-contract";
+import type { SiteContent } from "./site-content-contract";
 
 export const DEFAULT_SITE_CONTENT: SiteContent = {
   footer: {

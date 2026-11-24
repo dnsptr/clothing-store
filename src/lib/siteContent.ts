@@ -1,7 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { isMedusaConfigured, medusaRequest, MedusaRequestError } from "./medusa";
 import { DEFAULT_SITE_CONTENT } from "./siteContentDefaults";
-import { parseSiteContent, type SiteContent } from "../../medusa-prototype/apps/backend/src/lib/site-content-contract";
+import { parseSiteContent, type SiteContent } from "./site-content-contract";
 
 export async function getSiteContent(signal?: AbortSignal): Promise<SiteContent> {
   if (!isMedusaConfigured) return DEFAULT_SITE_CONTENT;

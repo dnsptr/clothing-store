@@ -54,4 +54,9 @@ workflow Medusa под блокировкой. Миграции базы не т
 `node scripts/export-site-content-defaults.mjs`. Проверка актуальности входит
 в `npm run test:content`. Уже сохранённые редакции этим не заменяются.
 
+Общий контракт находится в `src/lib/site-content-contract.ts`. Этот же скрипт
+копирует его в бэкенд, чтобы обе сборки оставались независимыми.
+Копию `medusa-prototype/apps/backend/src/lib/site-content-contract.ts`
+вручную не редактируйте. Исходники бэкенда остаются исключены из загрузки Vercel.
+
 Отложенная проверка резервов 1С: [контрольная точка](ONEC_STOCK_CHECKPOINT.md).
