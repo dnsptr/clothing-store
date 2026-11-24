@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import ProductCard from "../../components/ProductCard";
+import Breadcrumbs from "../../components/Breadcrumbs";
+import { catalogBreadcrumbs } from "../../lib/catalog-navigation";
 import type { Product } from "../../data/mockData";
 import { useCatalog } from "../../context/CatalogContext";
 import { fetchMedusaCategories, fetchMedusaCollections, fetchMedusaProducts } from "../../lib/medusa";
@@ -332,17 +334,14 @@ function CatalogContent() {
 
       <main className={styles.page}>
         <div className={styles.shell}>
-          <nav className={styles.breadcrumbs} aria-label="Хлебные крошки">
-            <Link href="/">Главная</Link>
-            <span>/</span>
-            <span>{title}</span>
-          </nav>
+          <Breadcrumbs items={catalogBreadcrumbs(title)} />
 
           <section className={styles.titleBlock}>
             <h1 className={styles.title}>{title}</h1>
           </section>
           {isMedusa && (catalogCategories.length > 0 || collections.length > 0) && (
             <nav className={styles.taxonomy} aria-label="Категории и коллекции">
+              <Link href="/catalog" aria-current={isCatalogLinkActive("/catalog") ? "page" : undefined}>Все товары</Link>
               {catalogCategories.map((category) => <Link key={category.id} href={`/catalog?category=${encodeURIComponent(category.handle)}`} aria-current={categoryParam === category.handle ? "page" : undefined}>{category.name}</Link>)}
               {collections.filter(collection => !catalogCategories.some(category => category.name === collection.title)).map((collection) => <Link key={collection.id} href={`/catalog?collection=${encodeURIComponent(collection.id)}`} aria-current={collectionParam === collection.id ? "page" : undefined}>{collection.title}</Link>)}
             </nav>

@@ -96,21 +96,6 @@
 
 .breadcrumbs {
   margin-bottom: 32px;
-  font-family: var(--font-sans);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-secondary);
-  display: flex;
-  gap: 8px;
-}
-
-.breadcrumbs a:hover {
-  color: var(--text-primary);
-}
-
-.breadcrumbCurrent {
-  color: var(--text-primary);
 }
 
 .sectionHeader {

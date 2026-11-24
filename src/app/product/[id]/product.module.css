@@ -12,29 +12,6 @@
   padding: 0 20px;
 }
 
-.breadcrumbs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 48px;
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  line-height: 20px;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
-.breadcrumbs a:hover {
-  color: var(--text-primary);
-}
-
-.breadcrumbs span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-primary);
-  text-overflow: ellipsis;
-}
-
 .productGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 460px;
@@ -516,11 +493,6 @@
 
   .shell {
     padding: 0 12px;
-  }
-
-  .breadcrumbs {
-    min-height: 44px;
-    font-size: 11.5px;
   }
 
   .productGrid {

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import Breadcrumbs from "../../../components/Breadcrumbs";
+import { productBreadcrumbs } from "../../../lib/catalog-navigation";
 import type { Product } from "../../../data/mockData";
 import { useCatalog } from "../../../context/CatalogContext";
 import { useCart } from "../../../context/CartContext";
@@ -17,18 +19,6 @@ function BookmarkIcon({ active }: { active: boolean }) {
     <svg fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" d="M6.5 4.75h11v15l-5.5-3.4-5.5 3.4v-15Z" />
     </svg>
-  );
-}
-
-function Breadcrumbs({ productName }: { productName?: string }) {
-  return (
-    <div className={styles.breadcrumbs}>
-      <Link href="/">Главная</Link>
-      <span>/</span>
-      <span>Каталог</span>
-      <span>/</span>
-      <span>{productName ?? "Товар"}</span>
-    </div>
   );
 }
 
@@ -133,12 +123,12 @@ export default function ProductDetailClient({
   if (source === "mock") {
     return initialProduct ? (
       <>
-        <Breadcrumbs productName={initialProduct.name} />
+        <Breadcrumbs items={productBreadcrumbs(initialProduct)} />
         <ProductView product={initialProduct} />
       </>
     ) : (
       <>
-        <Breadcrumbs />
+        <Breadcrumbs items={productBreadcrumbs()} />
         <ProductUnavailable />
       </>
     );
@@ -155,7 +145,7 @@ export default function ProductDetailClient({
   if (product) {
     return (
       <>
-        <Breadcrumbs productName={product.name} />
+        <Breadcrumbs items={productBreadcrumbs(product)} />
         <ProductView product={product} />
       </>
     );
@@ -163,7 +153,7 @@ export default function ProductDetailClient({
 
   return (
     <>
-      <Breadcrumbs />
+      <Breadcrumbs items={productBreadcrumbs()} />
       {!serverError && (status === "loading" || isSelfLoading) ? (
         <ProductSkeleton />
       ) : (

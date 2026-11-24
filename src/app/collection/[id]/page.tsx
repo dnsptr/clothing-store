@@ -13,6 +13,8 @@ import {
 import CollectionOutfitClient from "./CollectionOutfitClient";
 import Header from "../../../components/Header";
 import Footer from "../../../components/Footer";
+import Breadcrumbs from "../../../components/Breadcrumbs";
+import { catalogBreadcrumbs } from "../../../lib/catalog-navigation";
 import styles from "./collection.module.css";
 
 interface CollectionPageProps {
@@ -107,13 +109,7 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
       <div className={styles.contentSection}>
         <div className={styles.shell}>
           {/* Breadcrumbs */}
-          <div className={styles.breadcrumbs}>
-            <Link href="/">Главная</Link>
-            <span>/</span>
-            <span>Коллекции</span>
-            <span>/</span>
-            <span className={styles.breadcrumbCurrent}>{outfit.title}</span>
-          </div>
+          <Breadcrumbs items={catalogBreadcrumbs(outfit.title)} className={styles.breadcrumbs} />
 
           <div className={styles.sectionHeader}>
             <h2 className={styles.sectionTitle}>Товары коллекции</h2>
