@@ -45,6 +45,8 @@
 }
 
 .column {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 22px;
@@ -116,6 +118,7 @@
 }
 
 .copy {
+  overflow-wrap: anywhere;
   color: var(--text-primary);
   font-size: 15px;
   line-height: 24px;

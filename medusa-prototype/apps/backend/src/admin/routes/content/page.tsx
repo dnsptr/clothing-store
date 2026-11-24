@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { defineRouteConfig } from "@medusajs/admin-sdk"
 import { Photo, PencilSquare, Trash, ArrowUpMini, ArrowDownMini } from "@medusajs/icons"
 import {
@@ -151,7 +152,7 @@ const ContentPage = () => {
             Изображения, тексты и порядок блоков на главной странице сайта
           </Text>
         </div>
-        <Button onClick={() => setDraft(emptyDraft(section))}>Добавить</Button>
+        <div className="flex flex-wrap items-center gap-3"><Link className="text-sm text-ui-fg-interactive underline" to="/site-documents">Футер и документы</Link><Button onClick={() => setDraft(emptyDraft(section))}>Добавить</Button></div>
       </div>
 
       <div className="flex flex-wrap gap-2 px-6 py-3">

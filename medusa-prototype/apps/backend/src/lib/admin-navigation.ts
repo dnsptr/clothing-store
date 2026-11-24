@@ -12,6 +12,7 @@ export const ADMIN_SECTIONS = [
   { path: "/buyers", label: "Покупатели", state: "available" },
   { path: "/discounts", label: "Акции и промокоды", state: "available" },
   { path: "/content", label: "Контент сайта", state: "available" },
+  { path: "/site-documents", label: "Футер и документы", state: "available" },
   { path: "/communications", label: "Уведомления", state: "planned" },
   { path: "/reports", label: "Отчёты и аналитика", state: "planned" },
   { path: "/team", label: "Сотрудники и доступ", state: "available" },

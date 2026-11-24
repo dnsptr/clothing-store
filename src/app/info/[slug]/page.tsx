@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import Header from "../../../components/Header";
 import Footer from "../../../components/Footer";
-import { getInfoPage, INFO_PAGES } from "../../../lib/infoPages";
+import { INFO_PAGES } from "../../../lib/infoPages";
+import { getSiteContent } from "../../../lib/siteContent";
 import { withBasePath } from "../../../lib/assets";
 import styles from "./info.module.css";
 
@@ -11,21 +12,16 @@ interface InfoPageProps {
   params: Promise<{ slug: string }>;
 }
 
-const sellerContacts = [
-  { text: "rauf.zamanov@mail.ru", href: "mailto:rauf.zamanov@mail.ru" },
-  { text: "+7 (926) 057-72-05", href: "tel:+79260577205" },
-];
-
-function ContactText({ text }: { text: string }) {
-  for (const contact of sellerContacts) {
+function ContactText({ text, contacts }: { text: string; contacts: { text: string; href: string }[] }) {
+  for (const contact of contacts) {
     const index = text.indexOf(contact.text);
     if (index === -1) continue;
 
     return (
       <>
-        <ContactText text={text.slice(0, index)} />
+        <ContactText text={text.slice(0, index)} contacts={contacts} />
         <a href={contact.href}>{contact.text}</a>
-        <ContactText text={text.slice(index + contact.text.length)} />
+        <ContactText text={text.slice(index + contact.text.length)} contacts={contacts} />
       </>
     );
   }
@@ -53,7 +49,7 @@ export function generateStaticParams() {
  */
 export async function generateMetadata({ params }: InfoPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const page = getInfoPage(slug);
+  const page = (await getSiteContent()).pages.find(page => page.slug === slug);
 
   // Неизвестный slug — это 404 (см. notFound() ниже). Метаданные остаются
   // унаследованными от корневого layout: сочинять заголовок несуществующему
@@ -81,7 +77,9 @@ export async function generateMetadata({ params }: InfoPageProps): Promise<Metad
 
 export default async function InfoPage({ params }: InfoPageProps) {
   const { slug } = await params;
-  const page = getInfoPage(slug);
+  const content = await getSiteContent();
+  const page = content.pages.find(page => page.slug === slug);
+  const contacts = [{ text: content.footer.email, href: `mailto:${content.footer.email}` }, { text: content.footer.phone, href: `tel:${content.footer.phoneHref}` }];
 
   if (!page) {
     notFound();
@@ -119,21 +117,21 @@ export default async function InfoPage({ params }: InfoPageProps) {
           </section>
 
           <div className={styles.sections}>
-            {page.sections.map((section) => (
-              <section key={section.title} className={styles.section}>
+            {page.sections.map((section, index) => (
+              <section key={index} className={styles.section}>
                 <h2>{section.title}</h2>
                 <div className={styles.sectionBody}>
                   {section.paragraphs.map((paragraph, index) => (
-                    <p key={index}><ContactText text={paragraph} /></p>
+                    <p key={index}><ContactText text={paragraph} contacts={contacts} /></p>
                   ))}
                   {section.items && (
                     <ul className={styles.list}>
                       {section.items.map((item, index) => (
-                        <li key={index}><ContactText text={item} /></li>
+                        <li key={index}><ContactText text={item} contacts={contacts} /></li>
                       ))}
                     </ul>
                   )}
-                  {section.footnote && <p><ContactText text={section.footnote} /></p>}
+                  {section.footnote && <p><ContactText text={section.footnote} contacts={contacts} /></p>}
                 </div>
               </section>
             ))}

@@ -6,6 +6,7 @@ import {
   validateAndTransformQuery,
 } from "@medusajs/framework/http";
 import { PolicyOperation } from "@medusajs/framework/utils";
+import { SiteEditorCommandSchema } from "./admin/content/site/validators";
 
 import {
   CreateSlideSchema,
@@ -44,6 +45,8 @@ import { requireUnchangedPaymentCart } from "./store/payment-cart-guard";
  */
 export default defineMiddlewares({
   routes: [
+    { matcher: "/admin/content/site", method: "GET", middlewares: [authenticate("user", ["session", "bearer"]), authorize([{ resource: "store", operation: PolicyOperation.read }])] },
+    { matcher: "/admin/content/site", method: "POST", bodyParser: { sizeLimit: "2mb" }, middlewares: [authenticate("user", ["session", "bearer"]), authorize([{ resource: "store", operation: PolicyOperation.update }]), validateAndTransformBody(SiteEditorCommandSchema)] },
     {
       matcher: "/integrations/onec",
       bodyParser: false,
