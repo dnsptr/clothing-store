@@ -8,12 +8,16 @@ export type CommerceSummary = {
   priceTypes: number;
 };
 
-export function inspectCommerceXml(bytes: Buffer): CommerceSummary {
+export function decodeCommerceXml(bytes: Buffer): string {
   // Inspect the ASCII declaration before decoding legacy Windows-1251 files.
   const declaration = bytes.subarray(0, 256).toString("ascii");
   const encoding = /encoding\s*=\s*["']([^"']+)["']/i.exec(declaration)?.[1]?.toLowerCase() || "utf-8";
   if (!["utf-8", "utf8", "windows-1251"].includes(encoding)) throw new Error("Unsupported XML encoding");
-  const xml = new TextDecoder(encoding, { fatal: true }).decode(bytes);
+  return new TextDecoder(encoding, { fatal: true }).decode(bytes);
+}
+
+export function inspectCommerceXml(bytes: Buffer): CommerceSummary {
+  const xml = decodeCommerceXml(bytes);
   const summary: CommerceSummary = { version: "", products: 0, offers: 0, warehouseElements: 0, priceTypes: 0 };
   const parser = new SaxesParser({ xmlns: true });
   let depth = 0;

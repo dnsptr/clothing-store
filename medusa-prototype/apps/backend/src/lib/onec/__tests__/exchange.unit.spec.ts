@@ -10,6 +10,24 @@ const expectedSummary = { version: "2.10", products: 2, offers: 1, warehouseElem
 const password = "isolated-onec-test-password-at-least-32-characters";
 const now = Date.parse("2026-11-17T00:00:00Z");
 let root: string;
+
+it("allows admin readers to briefly wait for the existing lock without removing it", async () => {
+  const store = new ExchangeStore({ enabled: true, username: "test", password, root });
+  let release!: () => void;
+  let acquired!: () => void;
+  const ready = new Promise<void>(resolve => { acquired = resolve; });
+  const held = store.locked(async () => {
+    acquired();
+    await new Promise<void>(resolve => { release = resolve; });
+  });
+  await ready;
+  try {
+    await expect(store.locked(async () => true)).rejects.toThrow("Exchange busy");
+    const waiting = store.locked(async () => "read", 1500);
+    release();
+    await expect(waiting).resolves.toBe("read");
+  } finally { release(); await held; }
+});
 let store: ExchangeStore;
 
 beforeEach(async () => {

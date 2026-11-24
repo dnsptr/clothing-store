@@ -1,5 +1,28 @@
 # 1C CommerceML Receiver: Dry Run
 
+## Read-only Reconciliation Preview
+
+The Integrations page can compare two validated files using
+`GET /admin/onec-exchange/preview?catalog_session=...&catalog_file=...&offers_session=...&offers_file=...`.
+Both files must have matching catalog/classifier IDs and the same export timestamp.
+The endpoint checks stored byte counts and SHA-256 hashes before parsing and only
+uses Medusa's read-only query service. XML, credentials and owner details are not
+returned. It performs no catalog, price, inventory or metadata writes.
+
+Product candidates use an existing 1C ID binding or an exact model/article match.
+Variant candidates use explicit color/size properties, not parsed product titles.
+Normalization of letter case, spacing, hyphens, yo/e and OS labels is only a
+comparison aid: similar source characteristics with distinct IDs remain ambiguous.
+Parent offers without a characteristic are separated. Candidate bindings are not
+saved, missing variants are not created, and stored ID/dimension disagreements are
+flagged. Variant prices are never inherited from a parent offer.
+
+Only one unambiguous price type, RUB, a unit coefficient of one and piece units are
+compared against a unique untiered base RUB price. The report preserves individual
+warehouse quantities, including negative values. No warehouse is approved by
+default and the proposed sellable quantity remains null until warehouse and reserve
+rules are agreed. Selecting source files or rebuilding a report never applies it.
+
 This is a catalog receiver, not a working catalog synchronization. It never calls
 product, price, inventory, order, payment or fulfillment services.
 

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { inspectCommerceXml, type CommerceSummary } from "./xml";
 
 export const ONEC_COOKIE = "mm_onec";
@@ -77,14 +78,18 @@ export class ExchangeStore {
   private async read(id: string): Promise<ExchangeSession> {
     return JSON.parse(await fs.readFile(path.join(this.directory(id), "session.json"), "utf8"));
   }
-  async locked<T>(action: () => Promise<T>): Promise<T> {
+  async locked<T>(action: () => Promise<T>, waitMs = 0): Promise<T> {
     await fs.mkdir(this.config.root, { recursive: true, mode: 0o700 });
     const lockPath = path.join(this.config.root, ".lock");
     let lock: fs.FileHandle;
-    try { lock = await fs.open(lockPath, "wx", 0o600); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new ExchangeError("Exchange busy; retry request", 503);
-      throw error;
+    const deadline = Date.now() + Math.max(0, Math.min(waitMs, 2000));
+    for (;;) {
+      try { lock = await fs.open(lockPath, "wx", 0o600); break; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (Date.now() >= deadline) throw new ExchangeError("Exchange busy; retry request", 503);
+        await delay(25);
+      }
     }
     try { return await action(); }
     finally { await lock.close(); await fs.unlink(lockPath); }
@@ -164,6 +169,18 @@ export class ExchangeStore {
     if (!session.files.length || session.files.some((file) => file.status !== "validated")) throw new ExchangeError("Validate every received file first");
     session.complete = true;
     await this.save(session);
+  }
+  async validatedFile(id: string, name: string) {
+    this.directory(id)
+    safeFilename(name)
+    let session: ExchangeSession
+    try { session = await this.read(id) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ExchangeError("Exchange file not found", 404); throw error }
+    const file = session.files.find(file => file.name === name && file.status === "validated")
+    if (!file || file.bytes > FILE_LIMIT || !file.sha256) throw new ExchangeError("A validated file is required", 409)
+    const bytes = await fs.readFile(path.join(this.directory(id), name))
+    if (bytes.length !== file.bytes || createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new ExchangeError("Exchange file integrity check failed", 409)
+    return { bytes, source: { sessionId: id, filename: name, sha256: file.sha256, receivedAt: session.updatedAt } }
   }
   async journal() {
     return (await this.sessions()).map(({ id, createdAt, updatedAt, files, complete }) => ({ id, createdAt, updatedAt, complete, expired: this.now() - Date.parse(createdAt) > SESSION_TTL, mode: "dry_run" as const, files }));

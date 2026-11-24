@@ -3,10 +3,13 @@ import { defineRouteConfig } from "@medusajs/admin-sdk";
 import { SquaresPlus } from "@medusajs/icons";
 import { Badge, Button, Container, Heading, Text } from "@medusajs/ui";
 import { sdk } from "../../lib/sdk";
+import { OnecPreview } from "../../components/onec-preview";
 
 type ExchangeJournal = {
   enabled: boolean;
   mode: "dry_run";
+  authority?: "1c";
+  articles?: string[];
   sessions: {
     id: string; createdAt: string; updatedAt: string; complete: boolean; expired: boolean; mode: "dry_run";
     files: { name: string; bytes: number; status: "received" | "validated" | "invalid"; sha256?: string;
@@ -43,7 +46,9 @@ const IntegrationsPage = () => {
     </div>
     <Text>Товары, цены и остатки не изменяются. Успешная проверка XML не означает загрузку данных в каталог.</Text>
     <Text className="text-ui-fg-subtle">Заказы, резервирование, ZIP и изображения в этом обмене не поддерживаются.</Text>
+    {data?.articles && <div className="space-y-2 text-sm"><p>Основной источник цен, характеристик и остатков: 1С.</p><p className="break-words">Ассортимент ({data.articles.length}): {data.articles.join(", ")}</p></div>}
     </section>
+    {data && <OnecPreview sessions={data.sessions} />}
     {error && <p role="alert" className="px-6 py-4 text-ui-fg-error">{error}</p>}
     {loading && <p role="status" className="px-6 py-4">Загрузка журнала…</p>}
     {!loading && !error && data && !data.sessions.length && <p className="px-6 py-12 text-center text-ui-fg-subtle">Сеансов обмена пока нет.</p>}
